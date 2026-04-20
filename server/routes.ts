@@ -1162,7 +1162,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Email is required" });
       }
 
+      console.log(`🔑 Login attempt: email="${email}", isGoogle=${!!isGoogle}`);
       let user = await storage.getUserByEmail(email);
+      console.log(`🔑 User lookup result: ${user ? `found (id=${user.id})` : 'NOT FOUND'}`);
 
       // If user not found and it's a Google sign-in, auto-create the account
       if (!user) {
