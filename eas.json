@@ -1,0 +1,26 @@
+{
+  "cli": {
+    "version": ">= 14.1.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://uto-production.up.railway.app",
+        "EXPO_PUBLIC_DOMAIN": "https://uto-production.up.railway.app",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TER5DH84iWPEJxi1JEXAudDH9lY62UYajQMXxRkDUQMc69vjNbBc1Kc3BFtGO0eJhwJavsnLSjfOm9XwvdnVqh600bzQTf8Uk"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

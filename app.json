@@ -10,10 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.uto.app",
+      "bundleIdentifier": "com.utocabs.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "UTO needs your location to show nearby drivers and provide ride services.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "UTO needs your location to track your ride and navigate to your destination."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "UTO needs your location to track your ride and navigate to your destination.",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "config": {
         "googleMapsApiKey": "AIzaSyCHpucmvtde0uRq3G_COT_Q5RMw3ceWMdE"
@@ -26,11 +27,13 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.uto.app",
+      "package": "com.utocabs.app",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
       "config": {
         "googleMaps": {
@@ -65,7 +68,7 @@
       [
         "@stripe/stripe-react-native",
         {
-          "merchantIdentifier": "merchant.com.uto.app",
+          "merchantIdentifier": "merchant.com.utocabs.app",
           "enableGooglePay": true
         }
       ]
@@ -75,8 +78,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "your-project-id-here"
+        "projectId": "5d2245c6-76b6-428e-aeee-57bd56251190"
       }
-    }
+    },
+    "owner": "utocabs"
   }
 }

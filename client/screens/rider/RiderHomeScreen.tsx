@@ -461,16 +461,6 @@ export default function RiderHomeScreen({ navigation }: any) {
           ))}
         </View>
 
-        {/* Promo banner */}
-        <Animated.View entering={FadeInDown.delay(700).duration(400)} style={styles.promoBanner}>
-          <View style={styles.promoContent}>
-            <ThemedText style={styles.promoTitle}>Get around quickly</ThemedText>
-            <ThemedText style={styles.promoSubtitle}>with UTO's low fares</ThemedText>
-          </View>
-          <View style={styles.promoImagePlaceholder}>
-            <MaterialIcons name="directions-car" size={40} color="#000000" />
-          </View>
-        </Animated.View>
 
 
       </ScrollView>
@@ -766,35 +756,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     textAlign: "center",
   },
-  promoBanner: {
-    flexDirection: "row",
-    backgroundColor: UTOColors.primary,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.lg,
-    marginBottom: Spacing.lg,
-    alignItems: "center",
-  },
-  promoContent: {
-    flex: 1,
-  },
-  promoTitle: {
-    color: "#000000",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  promoSubtitle: {
-    color: "#000000",
-    fontSize: 15,
-    fontWeight: "500",
-    opacity: 0.8,
-  },
-  promoImagePlaceholder: {
-    width: 80,
-    height: 60,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+
   offerCard: {
     flexDirection: "row",
     alignItems: "center",
