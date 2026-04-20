@@ -1047,6 +1047,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // ─── Temporary debug endpoint to diagnose production DB issues ───
+  app.get("/api/debug/db-check", async (_req: Request, res: Response) => {
+    try {
+      const hasUrl = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const hasKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const urlPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 30) || "NOT SET";
+
+      // Try a simple query
+      const { data, error, count } = await supabase
+        .from("users")
+        .select("id, email", { count: "exact" })
+        .limit(3);
+
+      // Try the specific user
+      const { data: specificUser, error: specificError } = await supabase
+        .from("users")
+        .select("id, email, full_name")
+        .eq("email", "infokrystalai@gmail.com")
+        .single();
+
+      res.json({
+        envVars: { hasUrl, hasKey, urlPrefix },
+        allUsersQuery: { count, sampleEmails: data?.map((u: any) => u.email) || [], error: error?.message || null },
+        specificUser: { found: !!specificUser, data: specificUser, error: specificError?.message || null },
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ─── Safe migration: ensure payment_method column exists on rides table ───
   try {
     const { error: migrationErr } = await supabase.rpc('exec_sql', {
