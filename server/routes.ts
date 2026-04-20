@@ -1186,8 +1186,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } else if (!isGoogle) {
         // Security logic: check if standard login attempts have matching passwords
-        if (!user.password || user.password !== password) {
-          return res.status(401).json({ error: "Invalid password or account requires Google sign-in" });
+        if (user.password) {
+          // User has a stored password — verify it matches
+          if (user.password !== password) {
+            return res.status(401).json({ error: "Invalid email or password" });
+          }
+        } else {
+          // User exists but has no password stored (e.g. created via admin panel)
+          // Set the provided password as their new password (first-time setup)
+          if (password) {
+            await storage.updateUser(user.id, { password });
+            console.log(`🔐 Password set for existing user: ${email}`);
+          }
         }
       }
 
