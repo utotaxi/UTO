@@ -1795,20 +1795,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!process.env.GOOGLE_PLACES_API_KEY) {
+        console.warn("⚠️ GOOGLE_PLACES_API_KEY is not set — returning mock predictions");
         return res.json({
           predictions: [
             {
-              place_id: "1",
+              place_id: "mock_1",
               description: "London, UK",
               structured_formatting: { main_text: "London", secondary_text: "UK" },
             },
             {
-              place_id: "2",
+              place_id: "mock_2",
               description: "Manchester, UK",
               structured_formatting: { main_text: "Manchester", secondary_text: "UK" },
             },
             {
-              place_id: "3",
+              place_id: "mock_3",
               description: "Birmingham, UK",
               structured_formatting: { main_text: "Birmingham", secondary_text: "UK" },
             },
@@ -1823,10 +1824,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       const data = await response.json();
+
+      // Handle Google API errors (invalid key, over quota, etc.)
+      if (data.status && data.status !== "OK" && data.status !== "ZERO_RESULTS") {
+        console.error(`❌ Google Places Autocomplete API error: status=${data.status}, message=${data.error_message || "none"}`);
+        return res.status(502).json({
+          error: `Google Places API error: ${data.error_message || data.status}`,
+          predictions: [],
+          status: data.status,
+        });
+      }
+
       res.json(data);
     } catch (error) {
       console.error("Places autocomplete error:", error);
-      res.status(500).json({ error: "Failed to get autocomplete results" });
+      res.status(500).json({ error: "Failed to get autocomplete results", predictions: [] });
     }
   });
 
@@ -1835,6 +1847,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { placeId } = req.params;
 
       if (!process.env.GOOGLE_PLACES_API_KEY) {
+        console.warn("⚠️ GOOGLE_PLACES_API_KEY is not set — returning mock place details");
         return res.json({
           result: {
             geometry: {
@@ -1850,6 +1863,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       const data = await response.json();
+
+      // Handle Google API errors
+      if (data.status && data.status !== "OK") {
+        console.error(`❌ Google Places Details API error: status=${data.status}, message=${data.error_message || "none"}`);
+        return res.status(502).json({
+          error: `Google Places API error: ${data.error_message || data.status}`,
+          status: data.status,
+        });
+      }
+
       res.json(data);
     } catch (error) {
       console.error("Places details error:", error);

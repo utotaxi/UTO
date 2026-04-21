@@ -31,9 +31,7 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "FOREGROUND_SERVICE",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "FOREGROUND_SERVICE"
       ],
       "config": {
         "googleMaps": {
@@ -81,6 +79,12 @@
         "projectId": "5d2245c6-76b6-428e-aeee-57bd56251190"
       }
     },
-    "owner": "utocabs"
+    "owner": "utocabs",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/5d2245c6-76b6-428e-aeee-57bd56251190"
+    }
   }
 }
