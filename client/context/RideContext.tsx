@@ -1188,7 +1188,34 @@ export function RideProvider({ children }: { children: ReactNode }) {
       }
 
       if (storedActive) {
-        setActiveRide(JSON.parse(storedActive));
+        const localActive = JSON.parse(storedActive);
+        setActiveRide(localActive);
+
+        // Verify with server if ride actually completed while app was closed
+        try {
+          const { api } = await import('@/lib/api');
+          const serverRide = await api.rides.get(localActive.id);
+          
+          if (serverRide) {
+            const isCompleted = serverRide.status === 'completed' || serverRide.status === 'cancelled' || serverRide.paymentStatus === 'paid' || serverRide.paymentStatus === 'completed';
+            if (isCompleted) {
+               setActiveRide(null);
+               await AsyncStorage.removeItem(ACTIVE_RIDE_KEY);
+               
+               const history = storedHistory ? JSON.parse(storedHistory) : [];
+               if (!history.find((r: Ride) => r.id === localActive.id)) {
+                 const finalRide = { ...localActive, status: serverRide.status as RideStatus, completedAt: new Date().toISOString() };
+                 const newHistory = [finalRide, ...history];
+                 setRideHistory(newHistory);
+                 await AsyncStorage.setItem(RIDE_HISTORY_KEY, JSON.stringify(newHistory));
+               }
+            } else {
+               setActiveRide({ ...localActive, status: serverRide.status as RideStatus });
+            }
+          }
+        } catch (syncErr) {
+          console.warn("Failed to sync active ride on load:", syncErr);
+        }
       }
     } catch (error) {
       console.error("Failed to load rides:", error);

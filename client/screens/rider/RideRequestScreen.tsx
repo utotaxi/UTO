@@ -2797,6 +2797,21 @@ export default function RideRequestScreen({ navigation, route }: any) {
 
   useEffect(() => {
     (async () => {
+      if (route?.params?.prefill) {
+        const { pickup: prefillPickup, dropoff: prefillDropoff } = route.params.prefill;
+        setPickup(prefillPickup.address);
+        setPickupLocation({ latitude: prefillPickup.latitude, longitude: prefillPickup.longitude });
+        setDropoff(prefillDropoff.address);
+        setDropoffLocation({ latitude: prefillDropoff.latitude, longitude: prefillDropoff.longitude });
+        
+        setLocation({
+          coords: { latitude: prefillPickup.latitude, longitude: prefillPickup.longitude, altitude: 0, accuracy: 0, altitudeAccuracy: 0, heading: 0, speed: 0 },
+          timestamp: Date.now(),
+        } as any);
+        setIsLoadingLocation(false);
+        return;
+      }
+
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {

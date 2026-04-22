@@ -122,7 +122,7 @@ export default function ActivityScreen({ navigation }: any) {
       <FlatList
         data={rideHistory}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <RideCard ride={item} />}
+        renderItem={({ item }) => <RideCard ride={item} onRebook={() => navigation.navigate("RideRequest", { prefill: { pickup: item.pickupLocation, dropoff: item.dropoffLocation } })} />}
         ListHeaderComponent={activeRide ? (
           <View style={styles.ongoingSection}>
             <ThemedText style={styles.sectionTitle}>Ongoing</ThemedText>

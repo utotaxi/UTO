@@ -16,11 +16,12 @@ import { Ride } from "@/context/RideContext";
 interface RideCardProps {
   ride: Ride;
   onPress?: () => void;
+  onRebook?: () => void;
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export function RideCard({ ride, onPress }: RideCardProps) {
+export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
   const { theme, isDark } = useTheme();
   const scale = useSharedValue(1);
 
@@ -140,9 +141,22 @@ export function RideCard({ ride, onPress }: RideCardProps) {
             </View>
           ) : null}
         </View>
-        <ThemedText style={[styles.price, { color: isDark ? "#FFFFFF" : theme.text }]}>
-          {formatPrice(ride.farePrice)}
-        </ThemedText>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          {onRebook && (ride.status === "completed" || ride.status === "cancelled") && (
+            <Pressable 
+              onPress={(e) => {
+                e.stopPropagation();
+                onRebook();
+              }}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: UTOColors.primary + "20", borderRadius: 12 }}
+            >
+              <ThemedText style={{ color: UTOColors.primary, fontSize: 13, fontWeight: '600' }}>Rebook</ThemedText>
+            </Pressable>
+          )}
+          <ThemedText style={[styles.price, { color: isDark ? "#FFFFFF" : theme.text }]}>
+            {formatPrice(ride.farePrice)}
+          </ThemedText>
+        </View>
       </View>
     </AnimatedPressable>
   );
