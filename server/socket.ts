@@ -996,6 +996,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
         if (rideInfo) {
           // Always notify the rider — include driverInfo if present (populated on accept)
           io.to(rideInfo.riderSocketId).emit("ride:update", update);
+          
+          // ALSO broadcast to the rider room in case they disconnected and reconnected with a new socket
+          if (rideInfo.riderId) {
+            io.to(`rider:${rideInfo.riderId}`).emit("ride:update", update);
+          }
 
           if (rideInfo.driverSocketId && rideInfo.driverSocketId !== socket.id) {
             // Driver accepted - send directly to their socket
@@ -1102,6 +1107,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
         if (update.status === "completed" || update.status === "cancelled") {
           activeRides.delete(update.rideId);
+          
+          // Set driver as available again so they can receive new ride requests
+          if (resolvedDriverId) {
+            try {
+              await supabase
+                .from("drivers")
+                .update({ is_available: true })
+                .eq("id", resolvedDriverId);
+              console.log(`✅ Driver ${resolvedDriverId} is now available again after ride ${update.status}`);
+            } catch (availErr) {
+              console.error(`❌ Failed to reset driver ${resolvedDriverId} availability:`, availErr);
+            }
+          }
         }
       } catch (error) {
         console.error("Error updating ride status:", error);
