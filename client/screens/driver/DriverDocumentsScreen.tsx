@@ -171,13 +171,7 @@ export default function DriverDocumentsScreen() {
             onPress={() => handleDocumentPick("documentBankStatementUrl", "documentBankStatementStatus")}
           />
           <View style={styles.divider} />
-          <DocumentItem
-            title="DVLA electronic counterpart check code"
-            status={driverProfile?.documentDvlaCheckCodeStatus}
-            isLoading={uploadingDoc === "documentDvlaCheckCodeUrl"}
-            onPress={() => handleDocumentPick("documentDvlaCheckCodeUrl", "documentDvlaCheckCodeStatus")}
-          />
-          <View style={styles.divider} />
+
           <DocumentItem
             title="National Insurance"
             status={driverProfile?.documentNationalInsuranceStatus}
