@@ -129,7 +129,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
   // ─── dispatchToNextDriver ──────────────────────────────────────────────
   // Pops the nearest driver from the heap and sends the ride exclusively to them.
   // Sets a 15-second timeout; if the driver doesn't accept, moves to the next.
-  function dispatchToNextDriver(rideId: string) {
+  async function dispatchToNextDriver(rideId: string) {
     const state = dispatchQueues.get(rideId);
     if (!state || state.cancelled) {
       dispatchQueues.delete(rideId);
@@ -154,8 +154,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.log(`🚫 No more drivers available within ${RADIUS_MILES} miles for ride ${rideId}`);
       io.to(state.riderSocketId).emit("ride:update", {
         rideId,
-        status: "no_drivers",
+        status: "cancelled_no_drivers",
       });
+
+      // Also update the ride in DB to cancelled
+      try {
+        await supabase
+          .from("rides")
+          .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+          .eq("id", rideId);
+        console.log(`✅ Ride ${rideId} marked cancelled in DB (no drivers available)`);
+      } catch (dbErr) {
+        console.error(`❌ Failed to cancel ride ${rideId} in DB:`, dbErr);
+      }
       dispatchQueues.delete(rideId);
       return;
     }
@@ -307,7 +318,20 @@ export function setupSocketIO(httpServer: HTTPServer) {
       if (heap.size === 0) {
         console.log('🚫 No drivers available at all — notifying rider');
         if (sourceSocketId) {
-          io.to(sourceSocketId).emit("ride:update", { rideId: rideData.id, status: "no_drivers" });
+          io.to(sourceSocketId).emit("ride:update", { rideId: rideData.id, status: "cancelled_no_drivers" });
+        }
+
+        // Also update the ride in DB to cancelled
+        if (rideData.id) {
+          try {
+            await supabase
+              .from("rides")
+              .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+              .eq("id", rideData.id);
+            console.log(`✅ Ride ${rideData.id} marked cancelled in DB (no drivers at all)`);
+          } catch (dbErr) {
+            console.error(`❌ Failed to cancel ride ${rideData.id} in DB:`, dbErr);
+          }
         }
         return;
       }

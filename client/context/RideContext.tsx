@@ -958,20 +958,7 @@ const RideContext = createContext<RideContextType | undefined>(undefined);
 const RIDE_HISTORY_KEY = "@uto_ride_history";
 const ACTIVE_RIDE_KEY = "@uto_active_ride";
 
-const VEHICLE_INFO: Record<RideType, { name: string; vehicle: string }[]> = {
-  saloon: [
-    { name: "John D.", vehicle: "Toyota Prius" },
-    { name: "Sarah M.", vehicle: "Honda Civic" },
-    { name: "Mike R.", vehicle: "Kia Niro" },
-    { name: "James W.", vehicle: "Mercedes E-Class" },
-    { name: "David L.", vehicle: "Audi A6" },
-  ],
-  minibus: [
-    { name: "Robert T.", vehicle: "Toyota Sienna" },
-    { name: "Lisa H.", vehicle: "Honda Odyssey" },
-    { name: "Chris P.", vehicle: "Ford Transit" },
-  ],
-};
+
 
 export function RideProvider({ children }: { children: ReactNode }) {
   const { user, updateProfile } = useAuth();
@@ -1267,11 +1254,6 @@ export function RideProvider({ children }: { children: ReactNode }) {
     const walletDeduction = (useWalletBalance && walletBalance > 0) ? Math.min(walletBalance, farePrice) : 0;
     const expectedCollectAmount = farePrice - walletDeduction;
 
-    const drivers = VEHICLE_INFO[rideType];
-    const driver = drivers[Math.floor(Math.random() * drivers.length)];
-
-    const plates = ["LB12 ABC", "XY23 DEF", "MN45 GHI", "OP67 JKL"];
-
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
     const newRide: Ride = {
@@ -1283,10 +1265,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
       farePrice,
       distanceKm: distanceMiles, // Store as miles for the UK market
       durationMinutes,
-      driverName: driver.name,
-      driverRating: 4.5 + Math.random() * 0.5,
-      vehicleInfo: driver.vehicle,
-      licensePlate: plates[Math.floor(Math.random() * plates.length)],
+      // Driver fields left undefined — populated when a real driver accepts via socket
+      driverName: undefined,
+      driverRating: undefined,
+      vehicleInfo: undefined,
+      licensePlate: undefined,
       otp,
       paymentMethod: paymentMethod || "cash",
       walletDeduction,

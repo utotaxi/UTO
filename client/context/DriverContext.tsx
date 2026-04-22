@@ -2791,7 +2791,7 @@ const DRIVER_PROFILE_KEY = "@uto_driver_profile";
 const TRIP_HISTORY_KEY = "@uto_trip_history";
 const ONLINE_STATUS_KEY = "@uto_online_status";
 
-const SAMPLE_TRIPS: Trip[] = [];
+// Trip history is always loaded from AsyncStorage cache + refreshed from Supabase
 
 export function DriverProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
@@ -2820,13 +2820,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (user) {
       loadStoredData();
     } else {
-      // Clear data when user signs out
+      // Clear in-memory state when user signs out
+      // BUT keep TRIP_HISTORY_KEY in AsyncStorage as cache so earnings
+      // display immediately on next login while Supabase fetch is in-flight
       setDriverProfileState(null);
       setTripHistory([]);
+      setDriverDeductions([]);
       setIsOnlineState(false);
       AsyncStorage.removeItem(DRIVER_PROFILE_KEY);
-      AsyncStorage.removeItem(TRIP_HISTORY_KEY);
       AsyncStorage.removeItem(ONLINE_STATUS_KEY);
+      // NOTE: We intentionally do NOT remove TRIP_HISTORY_KEY here.
+      // Trip history is cached locally so earnings show instantly on re-login
+      // before the Supabase refresh completes.
     }
   }, [user]);
 
@@ -2997,10 +3002,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       }
 
       if (storedTrips) {
-        setTripHistory(JSON.parse(storedTrips));
-      } else {
-        setTripHistory(SAMPLE_TRIPS);
-        await AsyncStorage.setItem(TRIP_HISTORY_KEY, JSON.stringify(SAMPLE_TRIPS));
+        const parsed = JSON.parse(storedTrips);
+        if (parsed.length > 0) {
+          setTripHistory(parsed);
+          console.log('✅ Loaded', parsed.length, 'cached trips from AsyncStorage');
+        }
       }
 
       if (storedOnline === "true") {
@@ -3010,6 +3016,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.error("Failed to load driver data:", error);
     } finally {
       setIsLoading(false);
+    }
+
+    // Always refresh from Supabase (source of truth) after loading cache
+    // This ensures earnings are always accurate even if local cache is stale
+    try {
+      await refreshData();
+    } catch (err) {
+      console.warn('⚠️ Post-load refreshData failed:', err);
     }
   };
 
@@ -3098,10 +3112,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // After auth is ready, sync driver profile FROM Supabase (source of truth)
-  useEffect(() => {
-    refreshData();
-  }, [user?.id]);
+  // Note: refreshData() is now called inside loadStoredData() after loading cache,
+  // so we don't need a separate effect here. This avoids the race condition where
+  // refreshData would run before loadStoredData finished.
+  // The loadStoredData effect (triggered by user change) handles both.
 
   const setIsOnline = async (online: boolean) => {
     setIsOnlineState(online);
