@@ -30,6 +30,8 @@ import { ModeBadge } from "@/components/ModeBadge";
 import { useTheme } from "@/hooks/useTheme";
 import { useDriver } from "@/context/DriverContext";
 import { useAuth } from "@/context/AuthContext";
+import { useNotifications } from "@/hooks/useNotifications";
+import { RatingModal } from "@/components/RatingModal";
 import { UTOColors, Spacing, BorderRadius, formatPrice } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { sendDriverLocation } from "@/lib/socket";
@@ -61,9 +63,13 @@ export default function DriverHomeScreen({ navigation }: any) {
     startRide,
     completeTrip,
     driverProfile,
+    pendingRating,
+    submitDriverRating,
+    dismissDriverRating,
   } = useDriver();
   
   const { user } = useAuth();
+  useNotifications(user?.id);
 
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
@@ -868,6 +874,16 @@ export default function DriverHomeScreen({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* Rating Modal — rate the rider after trip */}
+      <RatingModal
+        visible={!!pendingRating}
+        ratedRole="rider"
+        ratedName={pendingRating?.riderName || "Rider"}
+        rideId={pendingRating?.rideId || ""}
+        onSubmit={submitDriverRating}
+        onDismiss={dismissDriverRating}
+      />
     </View>
   );
 }

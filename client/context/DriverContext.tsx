@@ -2666,6 +2666,7 @@ import { getSocket, connectAsDriver, onNewRide, onRideUpdate, onRideExpired } fr
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
+import { sendLocalNotification } from "@/hooks/useNotifications";
 
 export interface DriverProfile {
   id?: string;
@@ -2776,6 +2777,9 @@ interface DriverContextType {
   dismissRiderCancellation: () => void;
   completedRidePayment: CompletedRidePayment | null;
   dismissPaymentCollection: (collectedAmount?: number, extraAmount?: number) => void;
+  pendingRating: { rideId: string; riderName: string } | null;
+  submitDriverRating: (rideId: string, rating: number, comment?: string) => void;
+  dismissDriverRating: () => void;
   acceptRide: () => void;
   declineRide: () => void;
   arrivedAtPickup: () => void;
@@ -2804,6 +2808,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [rideCancelledByRider, setRideCancelledByRider] = useState(false);
   const [completedRidePayment, setCompletedRidePayment] = useState<CompletedRidePayment | null>(null);
+  const [pendingRating, setPendingRating] = useState<{ rideId: string; riderName: string } | null>(null);
 
   const isOnlineRef = useRef(isOnline);
   const activeRideRequestRef = useRef(activeRideRequest);
@@ -2890,6 +2895,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || ride.farePrice || 0),
           });
           setRideState("incoming");
+
+          // 🔔 Notify driver of new ride request
+          sendLocalNotification(
+            "🚕 New Ride Request",
+            `${ride.riderName || "A rider"} needs a ride from ${ride.pickupAddress || ride.pickup_address || "nearby"}`,
+            { type: "ride_requested", rideId: ride.id }
+          );
         }
       });
     } catch (err) {
@@ -2974,6 +2986,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             } else {
               // Normal rider-initiated cancellation
               setRideCancelledByRider(true);
+
+              // 🔔 Notify driver of cancellation
+              sendLocalNotification(
+                "❌ Ride Cancelled",
+                `${currentRide.riderName || "The rider"} has cancelled the ride.`,
+                { type: "ride_cancelled", rideId: update.rideId }
+              );
             }
 
             setActiveRideRequest(null);
@@ -3325,6 +3344,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         paymentMethod: activeRideRequest.paymentMethod || 'cash',
         amountToCollect: activeRideRequest.expectedCollectAmount !== undefined ? activeRideRequest.expectedCollectAmount : activeRideRequest.estimatedFare,
       });
+
+      // 🔔 Notify driver of ride completion
+      sendLocalNotification(
+        "✅ Trip Completed",
+        `Trip with ${activeRideRequest.riderName} completed. Fare: £${activeRideRequest.estimatedFare.toFixed(2)}`,
+        { type: "ride_completed", rideId: activeRideRequest.id }
+      );
     }
     setActiveRideRequest(null);
     setRideState("none");
@@ -3354,6 +3380,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       console.warn('💰 ⚠️ No completedRidePayment.rideId — NOT emitting socket event');
     }
     setCompletedRidePayment(null);
+
+    // Trigger rating prompt after payment is collected
+    // Use a short delay to allow the payment modal to fully dismiss
+    const rideId = completedRidePayment?.rideId;
+    const riderName = completedRidePayment?.riderName;
+    if (rideId && riderName) {
+      setTimeout(() => {
+        setPendingRating({ rideId, riderName });
+      }, 800);
+    }
 
     // Refresh trip data from Supabase so earnings display updates
     setTimeout(() => {
@@ -3421,6 +3457,29 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  const submitDriverRating = async (rideId: string, rating: number, comment?: string) => {
+    try {
+      const baseUrl = getApiUrl();
+      await fetch(`${baseUrl}/api/rides/${rideId}/rating`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          riderRating: rating,
+          riderComment: comment,
+          ratedBy: "driver",
+        }),
+      });
+      console.log(`⭐ Driver submitted rating ${rating} for ride ${rideId}`);
+    } catch (err) {
+      console.warn("Failed to submit driver rating:", err);
+    }
+    setPendingRating(null);
+  };
+
+  const dismissDriverRating = () => {
+    setPendingRating(null);
+  };
+
   return (
     <DriverContext.Provider
       value={{
@@ -3437,6 +3496,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         dismissRiderCancellation: () => setRideCancelledByRider(false),
         completedRidePayment,
         dismissPaymentCollection,
+        pendingRating,
+        submitDriverRating,
+        dismissDriverRating,
         acceptRide,
         declineRide,
         arrivedAtPickup,

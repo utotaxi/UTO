@@ -26,6 +26,9 @@ import { ThemedText } from "@/components/ThemedText";
 import { MapViewWrapper, MarkerWrapper } from "@/components/MapView";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/context/AuthContext";
+import { useRide } from "@/context/RideContext";
+import { useNotifications } from "@/hooks/useNotifications";
+import { RatingModal } from "@/components/RatingModal";
 import { getApiUrl } from "@/lib/query-client";
 import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
 
@@ -115,6 +118,9 @@ export default function RiderHomeScreen({ navigation }: any) {
   const tabBarHeight = useBottomTabBarHeight();
   const { isDark } = useTheme();
   const { user } = useAuth();
+  const { pendingRating, submitRiderRating, dismissRiderRating } = useRide();
+  
+  useNotifications(user?.id);
 
   const [currentAddress, setCurrentAddress] = useState<string>("Locating...");
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
@@ -464,6 +470,16 @@ export default function RiderHomeScreen({ navigation }: any) {
 
 
       </ScrollView>
+
+      {/* Rating Modal — rate the driver after trip */}
+      <RatingModal
+        visible={!!pendingRating}
+        ratedRole="driver"
+        ratedName={pendingRating?.driverName || "Driver"}
+        rideId={pendingRating?.rideId || ""}
+        onSubmit={submitRiderRating}
+        onDismiss={dismissRiderRating}
+      />
     </View>
   );
 }

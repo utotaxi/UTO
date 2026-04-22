@@ -2420,6 +2420,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { riderRating, driverRating, riderComment, driverComment, ratedBy } = req.body;
+
+      const updateData: any = {};
+      
+      if (ratedBy === "driver") {
+        if (riderRating !== undefined) updateData.rider_rating = riderRating;
+        if (riderComment !== undefined) updateData.rider_comment = riderComment;
+      } else if (ratedBy === "rider") {
+        if (driverRating !== undefined) updateData.driver_rating = driverRating;
+        if (driverComment !== undefined) updateData.driver_comment = driverComment;
+      }
+
+      const { data, error } = await supabase
+        .from("rides")
+        .update(updateData)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Supabase update error saving rating:", error);
+        return res.status(500).json({ error: "Database error saving rating" });
+      }
+
+      res.json({ success: true, ride: data });
+    } catch (error: any) {
+      console.error("Save rating error:", error);
+      res.status(500).json({ error: error?.message || "Failed to save rating" });
+    }
+  });
+
   return httpServer;
 
 

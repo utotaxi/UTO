@@ -1,177 +1,186 @@
-// // import { useState, useEffect, useRef } from "react";
-// // import { Platform } from "react-native";
-// // import Constants from "expo-constants";
-// // import { getApiUrl } from "@/lib/query-client";
+import { useState, useEffect, useRef } from "react";
+import { Platform } from "react-native";
+import Constants from "expo-constants";
+import { getApiUrl } from "@/lib/query-client";
 
-// // let Notifications: typeof import("expo-notifications") | null = null;
+let Notifications: typeof import("expo-notifications") | null = null;
 
-// // try {
-// //   Notifications = require("expo-notifications");
-  
-// //   Notifications.setNotificationHandler({
-// //     handleNotification: async () => ({
-// //       shouldShowAlert: true,
-// //       shouldPlaySound: true,
-// //       shouldSetBadge: true,
-// //     }),
-// //   });
-// // } catch (error) {
-// //   console.log("expo-notifications not available");
-// // }
+try {
+  Notifications = require("expo-notifications");
 
-// // export interface NotificationData {
-// //   type: "ride_accepted" | "driver_arriving" | "ride_started" | "ride_completed" | "ride_cancelled";
-// //   rideId?: string;
-// //   message?: string;
-// // }
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+} catch (error) {
+  console.log("expo-notifications not available");
+}
 
-// // export function useNotifications(userId?: string) {
-// //   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-// //   const [notification, setNotification] = useState<any>(null);
-// //   const notificationListener = useRef<any>();
-// //   const responseListener = useRef<any>();
-// // }
+export interface NotificationData {
+  type:
+    | "ride_requested"
+    | "ride_accepted"
+    | "driver_arriving"
+    | "ride_started"
+    | "ride_completed"
+    | "ride_cancelled"
+    | "payment_collected"
+    | "no_show";
+  rideId?: string;
+  message?: string;
+}
 
-// import { useState, useEffect, useRef } from "react";
-// import { Platform } from "react-native";
-// import Constants from "expo-constants";
-// import { getApiUrl } from "@/lib/query-client";
+export function useNotifications(userId?: string) {
+  const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
+  const [notification, setNotification] = useState<any>(null);
+  const notificationListener = useRef<any>();
+  const responseListener = useRef<any>();
 
-// let Notifications: typeof import("expo-notifications") | null = null;
+  useEffect(() => {
+    if (!Notifications) return;
 
-// try {
-//   Notifications = require("expo-notifications");
-  
-//   Notifications.setNotificationHandler({
-//     handleNotification: async () => ({
-//       shouldShowAlert: true,
-//       shouldPlaySound: true,
-//       shouldSetBadge: true,
-//     }),
-//   });
-// } catch (error) {
-//   console.log("expo-notifications not available");
-// }
+    registerForPushNotifications().then((token) => {
+      if (token) {
+        setExpoPushToken(token);
+        if (userId) {
+          savePushToken(userId, token);
+        }
+      }
+    });
 
-// export interface NotificationData {
-//   type: "ride_accepted" | "driver_arriving" | "ride_started" | "ride_completed" | "ride_cancelled";
-//   rideId?: string;
-//   message?: string;
-// }
+    notificationListener.current =
+      Notifications.addNotificationReceivedListener((notif: any) => {
+        setNotification(notif);
+      });
 
-// export function useNotifications(userId?: string) {
-//   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-//   const [notification, setNotification] = useState<any>(null);
-//   const notificationListener = useRef<any>();
-//   const responseListener = useRef<any>();
+    responseListener.current =
+      Notifications.addNotificationResponseReceivedListener(
+        (response: any) => {
+          const data = response.notification.request.content
+            .data as NotificationData;
+          handleNotificationResponse(data);
+        }
+      );
 
-//   useEffect(() => {
-//     if (!Notifications) return;
+    return () => {
+      if (!Notifications) return;
+      if (notificationListener.current) {
+        Notifications.removeNotificationSubscription(
+          notificationListener.current
+        );
+      }
+      if (responseListener.current) {
+        Notifications.removeNotificationSubscription(
+          responseListener.current
+        );
+      }
+    };
+  }, [userId]);
 
-//     registerForPushNotifications().then((token) => {
-//       if (token) {
-//         setExpoPushToken(token);
-//         if (userId) {
-//           savePushToken(userId, token);
-//         }
-//       }
-//     });
+  return { expoPushToken, notification };
+}
 
-//     notificationListener.current = Notifications.addNotificationReceivedListener((notif: any) => {
-//       setNotification(notif);
-//     });
+async function registerForPushNotifications(): Promise<string | null> {
+  if (Platform.OS === "web" || !Notifications) {
+    return null;
+  }
 
-//     responseListener.current = Notifications.addNotificationResponseReceivedListener((response: any) => {
-//       const data = response.notification.request.content.data as NotificationData;
-//       handleNotificationResponse(data);
-//     });
+  let token: string | null = null;
 
-//     return () => {
-//       if (!Notifications) return;
-//       if (notificationListener.current) {
-//         Notifications.removeNotificationSubscription(notificationListener.current);
-//       }
-//       if (responseListener.current) {
-//         Notifications.removeNotificationSubscription(responseListener.current);
-//       }
-//     };
-//   }, [userId]);
+  const { status: existingStatus } =
+    await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
 
-//   return { expoPushToken, notification };
-// }
+  if (existingStatus !== "granted") {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
 
-// async function registerForPushNotifications(): Promise<string | null> {
-//   if (Platform.OS === "web" || !Notifications) {
-//     return null;
-//   }
+  if (finalStatus !== "granted") {
+    console.log("Failed to get push token for notifications");
+    return null;
+  }
 
-//   let token: string | null = null;
+  try {
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      (Constants as any).easConfig?.projectId;
 
-//   const { status: existingStatus } = await Notifications.getPermissionsAsync();
-//   let finalStatus = existingStatus;
+    if (projectId) {
+      const pushToken = await Notifications.getExpoPushTokenAsync({
+        projectId,
+      });
+      token = pushToken.data;
+    } else {
+      const pushToken = await Notifications.getExpoPushTokenAsync({
+        projectId: undefined as any,
+      });
+      token = pushToken.data;
+    }
+  } catch (error) {
+    console.error("Error getting push token:", error);
+  }
 
-//   if (existingStatus !== "granted") {
-//     const { status } = await Notifications.requestPermissionsAsync();
-//     finalStatus = status;
-//   }
+  if (Platform.OS === "android") {
+    Notifications.setNotificationChannelAsync("default", {
+      name: "default",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#F7C948",
+    });
+  }
 
-//   if (finalStatus !== "granted") {
-//     console.log("Failed to get push token for notifications");
-//     return null;
-//   }
+  return token;
+}
 
-//   try {
-//     const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? (Constants as any).easConfig?.projectId;
-    
-//     if (projectId) {
-//       const pushToken = await Notifications.getExpoPushTokenAsync({ projectId });
-//       token = pushToken.data;
-//     } else {
-//       const pushToken = await Notifications.getExpoPushTokenAsync({ projectId: undefined as any });
-//       token = pushToken.data;
-//     }
-//   } catch (error) {
-//     console.error("Error getting push token:", error);
-//   }
+async function savePushToken(userId: string, token: string) {
+  try {
+    const apiUrl = getApiUrl();
+    await fetch(`${apiUrl}/api/users/${userId}/push-token`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pushToken: token }),
+    });
+    console.log("✅ Push token saved for user", userId);
+  } catch (error) {
+    console.error("Failed to save push token:", error);
+  }
+}
 
-//   if (Platform.OS === "android") {
-//     Notifications.setNotificationChannelAsync("default", {
-//       name: "default",
-//       importance: Notifications.AndroidImportance.MAX,
-//       vibrationPattern: [0, 250, 250, 250],
-//       lightColor: "#F7C948",
-//     });
-//   }
+function handleNotificationResponse(data: NotificationData) {
+  console.log("Notification response:", data);
+  // Navigation handling can be added here if needed
+}
 
-//   return token;
-// }
+/**
+ * Schedule a local notification immediately.
+ * Used to notify rider/driver about ride status changes.
+ */
+export async function sendLocalNotification(
+  title: string,
+  body: string,
+  data?: NotificationData
+) {
+  if (!Notifications) {
+    console.log(`📢 [Local Notification] ${title}: ${body}`);
+    return;
+  }
 
-// async function savePushToken(userId: string, token: string) {
-//   try {
-//     const apiUrl = getApiUrl();
-//     await fetch(`${apiUrl}/api/users/${userId}/push-token`, {
-//       method: "PUT",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify({ pushToken: token }),
-//     });
-//   } catch (error) {
-//     console.error("Failed to save push token:", error);
-//   }
-// }
-
-// function handleNotificationResponse(data: NotificationData) {
-//   console.log("Notification response:", data);
-// }
-
-// export async function sendLocalNotification(title: string, body: string, data?: NotificationData) {
-//   if (!Notifications) return;
-  
-//   await Notifications.scheduleNotificationAsync({
-//     content: {
-//       title,
-//       body,
-//       data,
-//     },
-//     trigger: null,
-//   });
-// }
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data,
+        sound: "default",
+      },
+      trigger: null, // Fire immediately
+    });
+    console.log(`📢 Local notification sent: ${title}`);
+  } catch (err) {
+    console.warn("Failed to send local notification:", err);
+  }
+}

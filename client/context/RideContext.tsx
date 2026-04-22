@@ -908,6 +908,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getSocket, connectAsRider, onRideUpdate } from "@/lib/socket";
 import { getApiUrl } from "@/lib/query-client";
 import { useAuth } from "./AuthContext";
+import { sendLocalNotification } from "@/hooks/useNotifications";
 
 export type RideType = "saloon" | "minibus";
 export type RideStatus = "pending" | "accepted" | "arrived" | "in_progress" | "completed" | "cancelled";
@@ -950,6 +951,9 @@ interface RideContextType {
   completeRide: (rideId: string) => Promise<void>;
   updateRidePaymentMethod: (rideId: string, method: string) => Promise<void>;
   calculateDynamicFare: (distanceMiles: number, durationMin: number, rideType: string) => number;
+  pendingRating: { rideId: string; driverName: string } | null;
+  submitRiderRating: (rideId: string, rating: number, comment?: string) => void;
+  dismissRiderRating: () => void;
   isLoading: boolean;
 }
 
@@ -966,6 +970,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
   const [rideHistory, setRideHistory] = useState<Ride[]>([]);
   const [pricingRules, setPricingRules] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [pendingRating, setPendingRating] = useState<{ rideId: string; driverName: string } | null>(null);
 
   // Keep a ref to the latest user so socket callbacks always see current wallet balance
   const userRef = React.useRef(user);
@@ -1086,6 +1091,30 @@ export function RideProvider({ children }: { children: ReactNode }) {
               return newHistory;
             });
             AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
+
+            // 🔔 Notify rider + trigger rating on completion
+            if (update.status === "completed" || update.status === "payment_collected") {
+              sendLocalNotification(
+                "✅ Trip Completed",
+                `Your ride has been completed. Fare: £${current.farePrice?.toFixed(2) || '0.00'}`,
+                { type: "ride_completed", rideId: current.id }
+              );
+              // Trigger rating prompt after a short delay
+              const dName = current.driverName || "Your Driver";
+              const rId = current.id;
+              setTimeout(() => {
+                setPendingRating({ rideId: rId, driverName: dName });
+              }, 1500);
+            } else if (update.status === "cancelled" || update.status === "cancelled_no_drivers") {
+              sendLocalNotification(
+                "❌ Ride Cancelled",
+                update.status === "cancelled_no_drivers"
+                  ? "No drivers available right now. Please try again later."
+                  : "Your ride has been cancelled.",
+                { type: "ride_cancelled", rideId: current.id }
+              );
+            }
+
             return null;
           });
           return;
@@ -1110,6 +1139,29 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 : {}),
             };
             AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(console.error);
+
+            // 🔔 Notify rider when driver accepts
+            if (update.status === "accepted") {
+              const driverName = (update as any).driverInfo?.driverName || "Your driver";
+              sendLocalNotification(
+                "🚗 Driver Accepted!",
+                `${driverName} is on the way to pick you up.`,
+                { type: "ride_accepted", rideId: current.id }
+              );
+            } else if (update.status === "arrived") {
+              sendLocalNotification(
+                "📍 Driver Arrived",
+                "Your driver has arrived at the pickup location.",
+                { type: "driver_arriving", rideId: current.id }
+              );
+            } else if (update.status === "in_progress") {
+              sendLocalNotification(
+                "🚀 Ride Started",
+                "Your ride is now in progress. Enjoy the trip!",
+                { type: "ride_started", rideId: current.id }
+              );
+            }
+
             return updated;
           }
           return current;
@@ -1429,6 +1481,29 @@ export function RideProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const submitRiderRating = async (rideId: string, rating: number, comment?: string) => {
+    try {
+      const baseUrl = getApiUrl();
+      await fetch(`${baseUrl}/api/rides/${rideId}/rating`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driverRating: rating,
+          driverComment: comment,
+          ratedBy: "rider",
+        }),
+      });
+      console.log(`⭐ Rider submitted rating ${rating} for ride ${rideId}`);
+    } catch (err) {
+      console.warn("Failed to submit rider rating:", err);
+    }
+    setPendingRating(null);
+  };
+
+  const dismissRiderRating = () => {
+    setPendingRating(null);
+  };
+
   return (
     <RideContext.Provider
       value={{
@@ -1440,6 +1515,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
         completeRide,
         updateRidePaymentMethod,
         calculateDynamicFare,
+        pendingRating,
+        submitRiderRating,
+        dismissRiderRating,
         isLoading,
       }}
     >
