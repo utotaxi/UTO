@@ -21,19 +21,13 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-import * as WebBrowser from "expo-web-browser";
-import * as Google from "expo-auth-session/providers/google";
+import * as Linking from "expo-linking";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useAuth } from "@/context/AuthContext";
 import { useMode, UserRole } from "@/context/ModeContext";
 import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
-
-// Required for expo-auth-session to dismiss the browser on return
-WebBrowser.maybeCompleteAuthSession();
-
-const GOOGLE_WEB_CLIENT_ID =
-  "71047250131-ojek9cvckdsetdhvapvd7h5uk17mclcv.apps.googleusercontent.com";
+import { supabase } from "@/lib/supabase";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -62,7 +56,67 @@ export default function SignInScreen({ navigation, route }: any) {
     transform: [{ scale: googleButtonScale.value }],
   }));
 
+  // ── Deep-link listener for Google OAuth redirect ──
+  useEffect(() => {
+    const handleRedirect = async (event: { url: string }) => {
+      const url = event.url;
+      if (!url || !url.includes("code=")) return;
 
+      console.log("🔑 Google OAuth: deep link received");
+      setIsGoogleLoading(true);
+
+      try {
+        const codeMatch = url.match(/[?&]code=([^&#]+)/);
+        if (!codeMatch) {
+          setError("No authentication code received");
+          return;
+        }
+
+        const code = decodeURIComponent(codeMatch[1]);
+        console.log("🔑 Google OAuth: exchanging code for session");
+
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.exchangeCodeForSession(code);
+
+        if (sessionError || !sessionData?.user?.email) {
+          console.error("🔑 Code exchange error:", sessionError);
+          setError("Failed to verify Google account");
+          return;
+        }
+
+        const userEmail = sessionData.user.email;
+        const userFullName =
+          sessionData.user.user_metadata?.full_name ||
+          sessionData.user.user_metadata?.name ||
+          userEmail.split("@")[0];
+
+        console.log("🔑 Google OAuth: authenticated as", userEmail);
+
+        const success = await signIn(userEmail, "google", true, userFullName);
+        if (success) {
+          setUserRole(selectedRole === "driver" ? "driver" : "rider");
+        } else {
+          setError("Google sign in failed");
+        }
+      } catch (err) {
+        console.error("🔑 Google OAuth redirect error:", err);
+        setError("An unexpected error occurred");
+      } finally {
+        setIsGoogleLoading(false);
+      }
+    };
+
+    const sub = Linking.addEventListener("url", handleRedirect);
+
+    // Handle cold-start deep link
+    Linking.getInitialURL().then((url) => {
+      if (url && url.includes("code=")) {
+        handleRedirect({ url });
+      }
+    });
+
+    return () => sub.remove();
+  }, []);
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -88,78 +142,35 @@ export default function SignInScreen({ navigation, route }: any) {
     }
   };
 
-  // ── Google OAuth via expo-auth-session (no redirect interception needed) ──
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: GOOGLE_WEB_CLIENT_ID,
-  });
-
-  // Process the Google OAuth response when it arrives
-  useEffect(() => {
-    if (response?.type === "success" && response.authentication?.accessToken) {
-      handleGoogleToken(response.authentication.accessToken);
-    } else if (response?.type === "error") {
-      console.error("🔑 Google OAuth error:", response.error);
-      setError("Google sign in failed. Please try again.");
-      setIsGoogleLoading(false);
-    } else if (response?.type === "dismiss") {
-      // User cancelled — no error shown
-      console.log("🔑 Google OAuth: user dismissed");
-      setIsGoogleLoading(false);
-    }
-  }, [response]);
-
-  const handleGoogleToken = async (accessToken: string) => {
-    try {
-      console.log("🔑 Google OAuth: fetching user info...");
-
-      // Fetch the user's profile directly from Google
-      const userInfoRes = await fetch(
-        "https://www.googleapis.com/userinfo/v2/me",
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-
-      if (!userInfoRes.ok) {
-        console.error("🔑 Google userinfo error:", userInfoRes.status);
-        setError("Failed to get Google account info");
-        return;
-      }
-
-      const userInfo = await userInfoRes.json();
-      const userEmail: string = userInfo.email;
-      const userFullName: string = userInfo.name || userEmail.split("@")[0];
-
-      console.log("🔑 Google OAuth: authenticated as", userEmail);
-
-      // Use the real Google email to create / login the user via the server API
-      const success = await signIn(
-        userEmail,
-        "google",
-        true,
-        userFullName,
-      );
-
-      if (success) {
-        setUserRole(selectedRole === "driver" ? "driver" : "rider");
-      } else {
-        setError("Google sign in failed");
-      }
-    } catch (err) {
-      console.error("🔑 Google OAuth token error:", err);
-      setError("An unexpected error occurred");
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
-
   const handleGoogleSignIn = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsGoogleLoading(true);
     setError("");
 
     try {
-      await promptAsync();
+      const redirectUrl = Linking.createURL("google-auth");
+      console.log("🔑 Google OAuth: redirectUrl =", redirectUrl);
+
+      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true,
+          queryParams: { prompt: "select_account" },
+        },
+      });
+
+      if (oauthError || !data?.url) {
+        console.error("🔑 Google OAuth URL error:", oauthError);
+        setError("Failed to start Google sign in");
+        setIsGoogleLoading(false);
+        return;
+      }
+
+      // Open system browser — the deep-link listener handles the return
+      await Linking.openURL(data.url);
     } catch (err) {
-      console.error("🔑 Google OAuth prompt error:", err);
+      console.error("🔑 Google OAuth error:", err);
       setError("Failed to open Google sign in");
       setIsGoogleLoading(false);
     }
