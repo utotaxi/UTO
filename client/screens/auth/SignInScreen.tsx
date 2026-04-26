@@ -21,11 +21,17 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
+import * as WebBrowser from "expo-web-browser";
+import { makeRedirectUri } from "expo-auth-session";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useAuth } from "@/context/AuthContext";
 import { useMode, UserRole } from "@/context/ModeContext";
 import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
+import { supabase } from "@/lib/supabase";
+
+// Dismiss any lingering browser auth sessions on mount
+WebBrowser.maybeCompleteAuthSession();
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -86,13 +92,137 @@ export default function SignInScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      const success = await signIn("google@example.com", "google", true);
-      if (success) {
-        setUserRole(selectedRole === "driver" ? "driver" : "rider");
+      // Build the redirect URI — explicitly pass the scheme so EAS
+      // production builds always generate "uto://..." regardless of context
+      const redirectUrl = makeRedirectUri({ scheme: "uto" });
+
+      console.log("🔑 Google OAuth: starting, redirectUrl =", redirectUrl);
+
+      // Ask Supabase to generate the Google OAuth URL (PKCE flow)
+      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true,
+          queryParams: {
+            prompt: "select_account", // Always show Google account picker
+          },
+        },
+      });
+
+      if (oauthError || !data?.url) {
+        console.error("🔑 Google OAuth URL error:", oauthError);
+        setError("Failed to start Google sign in");
+        return;
+      }
+
+      // Open the Google sign-in page in an in-app browser
+      // (Chrome Custom Tabs on Android / SFSafariViewController on iOS)
+      const result = await WebBrowser.openAuthSessionAsync(
+        data.url,
+        redirectUrl,
+      );
+
+      if (result.type === "success" && result.url) {
+        console.log("🔑 Google OAuth: browser returned success");
+
+        // --- Robust URL parsing ---
+        // Hermes (React Native's JS engine) may not handle custom schemes
+        // like "uto://" in the URL constructor, so we parse manually.
+        const returnedUrlStr = result.url;
+
+        // Check for PKCE auth code in query params
+        let code: string | null = null;
+        const questionIdx = returnedUrlStr.indexOf("?");
+        if (questionIdx !== -1) {
+          const queryStr = returnedUrlStr.substring(questionIdx + 1);
+          // Strip any fragment from the query portion
+          const hashInQuery = queryStr.indexOf("#");
+          const cleanQuery = hashInQuery !== -1 ? queryStr.substring(0, hashInQuery) : queryStr;
+          const queryParams = new URLSearchParams(cleanQuery);
+          code = queryParams.get("code");
+        }
+
+        // Check for implicit-flow tokens in fragment
+        let accessToken: string | null = null;
+        let refreshToken: string | null = null;
+        const hashIdx = returnedUrlStr.indexOf("#");
+        if (hashIdx !== -1) {
+          const fragmentParams = new URLSearchParams(
+            returnedUrlStr.substring(hashIdx + 1),
+          );
+          accessToken = fragmentParams.get("access_token");
+          refreshToken = fragmentParams.get("refresh_token");
+        }
+
+        let userEmail: string | undefined;
+        let userFullName: string | undefined;
+
+        if (code) {
+          // Exchange the authorization code for a session (PKCE)
+          console.log("🔑 Google OAuth: exchanging PKCE code for session");
+          const { data: sessionData, error: sessionError } =
+            await supabase.auth.exchangeCodeForSession(code);
+
+          if (sessionError || !sessionData?.user?.email) {
+            console.error("🔑 Code exchange error:", sessionError);
+            setError("Failed to verify Google account");
+            return;
+          }
+
+          userEmail = sessionData.user.email;
+          userFullName =
+            sessionData.user.user_metadata?.full_name ||
+            sessionData.user.user_metadata?.name;
+        } else if (accessToken) {
+          // Set session from implicit-flow tokens
+          console.log("🔑 Google OAuth: setting session from access token");
+          const { data: sessionData, error: sessionError } =
+            await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken || "",
+            });
+
+          if (sessionError || !sessionData?.user?.email) {
+            console.error("🔑 Set session error:", sessionError);
+            setError("Failed to verify Google account");
+            return;
+          }
+
+          userEmail = sessionData.user.email;
+          userFullName =
+            sessionData.user.user_metadata?.full_name ||
+            sessionData.user.user_metadata?.name;
+        } else {
+          console.error("🔑 Google OAuth: no code or token in redirect URL:", returnedUrlStr);
+          setError("No authentication credentials received");
+          return;
+        }
+
+        console.log("🔑 Google OAuth: authenticated as", userEmail);
+
+        // Use the real Google email to create / login the user in the custom
+        // users table via the existing server API on Railway
+        const success = await signIn(
+          userEmail,
+          "google",
+          true,
+          userFullName || userEmail.split("@")[0],
+        );
+
+        if (success) {
+          setUserRole(selectedRole === "driver" ? "driver" : "rider");
+        } else {
+          setError("Google sign in failed");
+        }
+      } else if (result.type === "cancel" || result.type === "dismiss") {
+        // User closed the browser – no error to show
+        console.log("🔑 Google OAuth: user cancelled");
       } else {
-        setError("Google sign in failed");
+        setError("Google sign in was interrupted");
       }
     } catch (err) {
+      console.error("🔑 Google OAuth unexpected error:", err);
       setError("An unexpected error occurred");
     } finally {
       setIsGoogleLoading(false);

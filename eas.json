@@ -16,7 +16,9 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://uto-production.up.railway.app",
         "EXPO_PUBLIC_DOMAIN": "https://uto-production.up.railway.app",
-        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TER5DH84iWPEJxi1JEXAudDH9lY62UYajQMXxRkDUQMc69vjNbBc1Kc3BFtGO0eJhwJavsnLSjfOm9XwvdnVqh600bzQTf8Uk"
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TER5DH84iWPEJxi1JEXAudDH9lY62UYajQMXxRkDUQMc69vjNbBc1Kc3BFtGO0eJhwJavsnLSjfOm9XwvdnVqh600bzQTf8Uk",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://tadqvfnqykmjdxzpoczp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhZHF2Zm5xeWttamR4enBvY3pwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NDQyNTEsImV4cCI6MjA4ODEyMDI1MX0.0Fhl0RuTFk-qtPQ5Au7iZrk9mnE8Gieth7PWdc12rxo"
       }
     },
     "production": {
@@ -24,7 +26,9 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://uto-production.up.railway.app",
         "EXPO_PUBLIC_DOMAIN": "https://uto-production.up.railway.app",
-        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TER5DH84iWPEJxi1JEXAudDH9lY62UYajQMXxRkDUQMc69vjNbBc1Kc3BFtGO0eJhwJavsnLSjfOm9XwvdnVqh600bzQTf8Uk"
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51TER5DH84iWPEJxi1JEXAudDH9lY62UYajQMXxRkDUQMc69vjNbBc1Kc3BFtGO0eJhwJavsnLSjfOm9XwvdnVqh600bzQTf8Uk",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://tadqvfnqykmjdxzpoczp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhZHF2Zm5xeWttamR4enBvY3pwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NDQyNTEsImV4cCI6MjA4ODEyMDI1MX0.0Fhl0RuTFk-qtPQ5Au7iZrk9mnE8Gieth7PWdc12rxo"
       }
     }
   },
