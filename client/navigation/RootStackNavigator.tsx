@@ -186,7 +186,7 @@ export default function RootStackNavigator() {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       {!isAuthenticated ? (
-        <>
+        <Stack.Group screenOptions={{ animation: 'fade' }}>
           <Stack.Screen
             name="Welcome"
             component={WelcomeScreen}
@@ -212,9 +212,9 @@ export default function RootStackNavigator() {
             component={TermsScreen}
             options={{ headerShown: false, animation: "slide_from_bottom" }}
           />
-        </>
+        </Stack.Group>
       ) : (
-        <>
+        <Stack.Group screenOptions={{ animation: 'fade' }}>
           <Stack.Screen
             name="Main"
             component={MainNavigator}
@@ -327,7 +327,7 @@ export default function RootStackNavigator() {
             component={TaxSummariesScreen}
             options={{ headerTitle: "Tax summaries", presentation: "card" }}
           />
-        </>
+        </Stack.Group>
       )}
     </Stack.Navigator>
   );

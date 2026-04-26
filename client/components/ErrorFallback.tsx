@@ -84,6 +84,10 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             Try Again
           </ThemedText>
         </Pressable>
+
+        <ThemedText style={{ fontSize: 10, color: theme.textSecondary, marginTop: Spacing.xl, textAlign: "center", opacity: 0.6 }}>
+          {error?.message || "Unknown error"}
+        </ThemedText>
       </View>
 
       {__DEV__ ? (
