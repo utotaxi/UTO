@@ -76,6 +76,27 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "UTO needs your permission to access photos for your profile picture and documents.",
+          "cameraPermission": "UTO needs your permission to access the camera for your profile picture and documents.",
+          "colors": {
+            "cropToolbarColor": "#000000",
+            "cropToolbarActionColor": "#FFD000",
+            "cropToolbarIconColor": "#FFD000",
+            "cropScreenBackgroundColor": "#1A1A1A"
+          },
+          "dark": {
+            "colors": {
+              "cropToolbarColor": "#000000",
+              "cropToolbarActionColor": "#FFD000",
+              "cropToolbarIconColor": "#FFD000",
+              "cropScreenBackgroundColor": "#1A1A1A"
+            }
+          }
+        }
+      ],
+      [
         "@stripe/stripe-react-native",
         {
           "merchantIdentifier": "merchant.com.utocabs.app",
