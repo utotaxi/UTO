@@ -76,7 +76,38 @@ export default function RiderProfileScreen({ navigation }: any) {
     })();
   }, [user?.id]);
 
-  const handlePickImage = async () => {
+  const processImageResult = (result: ImagePicker.ImagePickerResult) => {
+    if (!result.canceled && result.assets[0]) {
+      setProfileImage(result.assets[0].uri);
+      if (result.assets[0].base64) {
+        setProfileBase64(result.assets[0].base64);
+      }
+      if (!isEditing) setIsEditing(true);
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    try {
+      const permResult = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permResult.granted) {
+        Alert.alert("Permission Required", "Please allow camera access to take a selfie.");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+        cameraType: ImagePicker.CameraType.front,
+      });
+      processImageResult(result);
+    } catch (err) {
+      console.error("Camera error:", err);
+      Alert.alert("Error", "Failed to open camera.");
+    }
+  };
+
+  const handlePickLibrary = async () => {
     try {
       const permResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permResult.granted) {
@@ -89,20 +120,26 @@ export default function RiderProfileScreen({ navigation }: any) {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.7,
-        base64: true, // Need base64 to upload server-side
+        base64: true,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        setProfileImage(result.assets[0].uri);
-        if (result.assets[0].base64) {
-          setProfileBase64(result.assets[0].base64);
-        }
-        if (!isEditing) setIsEditing(true);
-      }
+      processImageResult(result);
     } catch (err) {
       console.error("Image picker error:", err);
       Alert.alert("Error", "Failed to open image picker.");
     }
+  };
+
+  const handlePickImage = () => {
+    Alert.alert(
+      "Profile Picture",
+      "Choose an option to update your profile picture",
+      [
+        { text: "Take a Selfie", onPress: handleTakePhoto },
+        { text: "Choose from Library", onPress: handlePickLibrary },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
   };
 
   const handleSave = async () => {
