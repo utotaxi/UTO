@@ -22,6 +22,7 @@ import Animated, {
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
+import * as WebBrowser from "expo-web-browser";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useAuth } from "@/context/AuthContext";
@@ -56,31 +57,36 @@ export default function SignInScreen({ navigation, route }: any) {
     transform: [{ scale: googleButtonScale.value }],
   }));
 
-  // ── Deep-link listener for Google OAuth redirect ──
+  // ── Deep-link listener for Google OAuth redirect (Fallback for cold starts) ──
   useEffect(() => {
+    WebBrowser.maybeCompleteAuthSession();
+
     const handleRedirect = async (event: { url: string }) => {
       const url = event.url;
       if (!url || !url.includes("code=")) return;
 
-      console.log("🔑 Google OAuth: deep link received");
+      console.log("🔑 Google OAuth: deep link received (fallback listener)");
       setIsGoogleLoading(true);
 
       try {
-        const codeMatch = url.match(/[?&]code=([^&#]+)/);
+        const codeMatch = url.match(/[?&#]code=([^&#]+)/);
         if (!codeMatch) {
-          setError("No authentication code received");
+          setError("No authentication code received in URL");
           return;
         }
 
         const code = decodeURIComponent(codeMatch[1]);
         console.log("🔑 Google OAuth: exchanging code for session");
 
+        // Ensure Supabase storage is initialized before exchanging
+        await supabase.auth.getSession();
+
         const { data: sessionData, error: sessionError } =
           await supabase.auth.exchangeCodeForSession(code);
 
         if (sessionError || !sessionData?.user?.email) {
           console.error("🔑 Code exchange error:", sessionError);
-          setError("Failed to verify Google account");
+          setError(`Auth Error: ${sessionError?.message || "Failed to verify Google account"}`);
           return;
         }
 
@@ -96,11 +102,11 @@ export default function SignInScreen({ navigation, route }: any) {
         if (success) {
           setUserRole(selectedRole === "driver" ? "driver" : "rider");
         } else {
-          setError("Google sign in failed");
+          setError("Server Error: Google sign in failed on the backend");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("🔑 Google OAuth redirect error:", err);
-        setError("An unexpected error occurred");
+        setError(`Error: ${err?.message || "An unexpected error occurred"}`);
       } finally {
         setIsGoogleLoading(false);
       }
@@ -167,11 +173,51 @@ export default function SignInScreen({ navigation, route }: any) {
         return;
       }
 
-      // Open system browser — the deep-link listener handles the return
-      await Linking.openURL(data.url);
-    } catch (err) {
+      // Open WebBrowser — it handles the deep-link return automatically without restarting the app
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      console.log("🔑 Google OAuth: WebBrowser result =", result);
+
+      if (result.type === "success" && result.url) {
+        const url = result.url;
+        const codeMatch = url.match(/[?&#]code=([^&#]+)/);
+        if (!codeMatch) {
+          setError("No authentication code received in URL");
+          setIsGoogleLoading(false);
+          return;
+        }
+
+        const code = decodeURIComponent(codeMatch[1]);
+        console.log("🔑 Google OAuth: exchanging code for session from WebBrowser");
+
+        await supabase.auth.getSession();
+        const { data: sessionData, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
+
+        if (sessionError || !sessionData?.user?.email) {
+          console.error("🔑 Code exchange error:", sessionError);
+          setError(`Auth Error: ${sessionError?.message || "Failed to verify Google account"}`);
+          setIsGoogleLoading(false);
+          return;
+        }
+
+        const userEmail = sessionData.user.email;
+        const userFullName =
+          sessionData.user.user_metadata?.full_name ||
+          sessionData.user.user_metadata?.name ||
+          userEmail.split("@")[0];
+
+        const success = await signIn(userEmail, "google", true, userFullName);
+        if (success) {
+          setUserRole(selectedRole === "driver" ? "driver" : "rider");
+        } else {
+          setError("Server Error: Google sign in failed on the backend");
+        }
+      } else {
+        // User cancelled or it failed
+        setIsGoogleLoading(false);
+      }
+    } catch (err: any) {
       console.error("🔑 Google OAuth error:", err);
-      setError("Failed to open Google sign in");
+      setError(`Error: ${err?.message || "Failed to open Google sign in"}`);
       setIsGoogleLoading(false);
     }
   };
