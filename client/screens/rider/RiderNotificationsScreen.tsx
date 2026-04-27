@@ -245,18 +245,7 @@ export default function RiderNotificationsScreen({ navigation }: any) {
           </ThemedText>
         </Animated.View>
 
-        {/* Status bar */}
-        <Animated.View
-          entering={FadeInDown.delay(120).duration(400)}
-          style={styles.statusBar}
-        >
-          <ThemedText style={styles.statusText}>
-            {essentialOnlyCount}/10 notifications enabled
-          </ThemedText>
-          {lastSaved ? (
-            <ThemedText style={styles.savedText}>Saved ✓</ThemedText>
-          ) : null}
-        </Animated.View>
+
 
         {sections.map((section, sIndex) => (
           <Animated.View
@@ -283,28 +272,7 @@ export default function RiderNotificationsScreen({ navigation }: any) {
           </Animated.View>
         ))}
 
-        {/* Action buttons */}
-        <Animated.View
-          entering={FadeInDown.delay(450).duration(400)}
-          style={styles.section}
-        >
-          <View style={styles.actionRow}>
-            <Pressable
-              onPress={handleUnsubscribeAll}
-              style={styles.unsubscribeButton}
-            >
-              <MaterialIcons name="notifications-off" size={18} color="#EF4444" />
-              <ThemedText style={styles.unsubscribeText}>Essential only</ThemedText>
-            </Pressable>
-            <Pressable
-              onPress={handleEnableAll}
-              style={[styles.unsubscribeButton, { borderColor: "#10B98140" }]}
-            >
-              <MaterialIcons name="notifications-active" size={18} color="#10B981" />
-              <ThemedText style={[styles.unsubscribeText, { color: "#10B981" }]}>Enable all</ThemedText>
-            </Pressable>
-          </View>
-        </Animated.View>
+
       </ScrollView>
     </View>
   );
