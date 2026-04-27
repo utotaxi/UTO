@@ -78,9 +78,8 @@ export default function SignInScreen({ navigation, route }: any) {
         const code = decodeURIComponent(codeMatch[1]);
         console.log("🔑 Google OAuth: exchanging code for session");
 
-        // Ensure Supabase storage is initialized before exchanging
-        await supabase.auth.getSession();
-
+        // Exchange the code for a session directly. Do NOT call getSession() first,
+        // as it may clear the PKCE verifier from storage and cause 'invalid flow state'
         const { data: sessionData, error: sessionError } =
           await supabase.auth.exchangeCodeForSession(code);
 
@@ -189,7 +188,6 @@ export default function SignInScreen({ navigation, route }: any) {
         const code = decodeURIComponent(codeMatch[1]);
         console.log("🔑 Google OAuth: exchanging code for session from WebBrowser");
 
-        await supabase.auth.getSession();
         const { data: sessionData, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
 
         if (sessionError || !sessionData?.user?.email) {

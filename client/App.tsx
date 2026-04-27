@@ -22,7 +22,7 @@ import { StripeProvider } from "@stripe/stripe-react-native";
 
 import RootStackNavigator from "@/navigation/RootStackNavigator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { AuthProvider } from "@/context/AuthContext";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ModeProvider } from "@/context/ModeContext";
 import { RideProvider } from "@/context/RideContext";
 import { DriverProvider } from "@/context/DriverContext";
@@ -69,31 +69,46 @@ export default function App() {
   }
 
   return (
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <StripeProvider publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""}>
-          <SafeAreaProvider>
-            <GestureHandlerRootView style={styles.root}>
-              <KeyboardProvider>
-                <ThemeProvider>
-                  <AuthProvider>
-                    <ModeProvider>
-                      <RideProvider>
-                        <DriverProvider>
-                          <NavigationContainer>
-                            <RootStackNavigator />
-                          </NavigationContainer>
-                          <StatusBar style="auto" />
-                        </DriverProvider>
-                      </RideProvider>
-                    </ModeProvider>
-                  </AuthProvider>
-                </ThemeProvider>
-              </KeyboardProvider>
-            </GestureHandlerRootView>
-          </SafeAreaProvider>
-        </StripeProvider>
-      </QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <StripeProvider publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""}>
+        <SafeAreaProvider>
+          <GestureHandlerRootView style={styles.root}>
+            <KeyboardProvider>
+              <ThemeProvider>
+                <AuthProvider>
+                  <ModeProvider>
+                    <RideProvider>
+                      <DriverProvider>
+                        {/* AppShell reads isAuthenticated and passes it as resetKey to ErrorBoundary
+                            so any transient error during auth transitions is auto-cleared */}
+                        <AppShell />
+                      </DriverProvider>
+                    </RideProvider>
+                  </ModeProvider>
+                </AuthProvider>
+              </ThemeProvider>
+            </KeyboardProvider>
+          </GestureHandlerRootView>
+        </SafeAreaProvider>
+      </StripeProvider>
+    </QueryClientProvider>
+  );
+}
+
+/**
+ * Sits inside AuthProvider so it can read isAuthenticated and pass it
+ * as resetKey to ErrorBoundary. This ensures the boundary auto-resets
+ * whenever the user logs in or out, preventing a transient nav-teardown
+ * error from permanently blocking the UI.
+ */
+function AppShell() {
+  const { isAuthenticated } = useAuth();
+  return (
+    <ErrorBoundary resetKey={isAuthenticated}>
+      <NavigationContainer>
+        <RootStackNavigator />
+      </NavigationContainer>
+      <StatusBar style="auto" />
     </ErrorBoundary>
   );
 }

@@ -4,6 +4,9 @@ import { ErrorFallback, ErrorFallbackProps } from "@/components/ErrorFallback";
 export type ErrorBoundaryProps = PropsWithChildren<{
   FallbackComponent?: ComponentType<ErrorFallbackProps>;
   onError?: (error: Error, stackTrace: string) => void;
+  /** When this value changes, the boundary auto-resets — pass isAuthenticated so auth
+   *  transitions clear any transient render error before the user sees the fallback */
+  resetKey?: string | number | boolean;
 }>;
 
 type ErrorBoundaryState = { error: Error | null };
@@ -38,6 +41,16 @@ export class ErrorBoundary extends Component<
   resetError = (): void => {
     this.setState({ error: null });
   };
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps): void {
+    // Auto-reset when the resetKey changes (e.g. user logs in or out).
+    // This prevents a transient navigation tear-down error from permanently
+    // showing the ErrorFallback after the auth transition completes.
+    if (this.state.error !== null && prevProps.resetKey !== this.props.resetKey) {
+      console.log('[ErrorBoundary] resetKey changed — auto-resetting error boundary');
+      this.setState({ error: null });
+    }
+  }
 
   render() {
     const { FallbackComponent } = this.props;

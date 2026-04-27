@@ -169,6 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setUser(null);
       await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+      await supabase.auth.signOut();
     } catch (error) {
       console.error("Sign out failed:", error);
     }
