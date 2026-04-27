@@ -196,15 +196,13 @@ export default function RiderNotificationsScreen({ navigation }: any) {
       title: "SMS",
       items: [
         { key: "smsRideUpdates" as const, label: "Ride Updates via SMS", subtitle: "Text messages for ride confirmations", icon: "sms" as const },
-        { key: "smsPromotions" as const, label: "Marketing SMS", subtitle: "Special deals and offers via text", icon: "campaign" as const },
       ],
     },
     {
       title: "EMAIL",
       items: [
         { key: "emailReceipts" as const, label: "Trip Receipts", subtitle: "Receive trip receipts via email", icon: "receipt" as const },
-        { key: "emailPromotions" as const, label: "Promotions", subtitle: "Deals and personalised offers", icon: "mail" as const },
-        { key: "emailNewsletter" as const, label: "UTO News", subtitle: "Product updates and company news", icon: "article" as const },
+        { key: "emailPromotions" as const, label: "Promotions", subtitle: "Stay updated with upcoming offers", icon: "mail" as const },
       ],
     },
   ];
