@@ -13,6 +13,12 @@ const supabaseAnonKey =
  * Client-side Supabase instance (anon key) used exclusively for
  * Supabase Auth operations (Google OAuth).
  *
+ * We use `implicit` flow instead of `pkce` because React Native's
+ * WebBrowser redirects can cause the OS to kill the app process,
+ * which destroys the PKCE code_verifier stored in AsyncStorage.
+ * The implicit flow returns access_token + refresh_token directly
+ * in the URL fragment, so no code exchange step is needed.
+ *
  * All other data operations continue to go through the Express API
  * which uses the service-role key on the server.
  */
@@ -22,6 +28,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
-    flowType: "pkce",
+    flowType: "implicit",
   },
 });
+

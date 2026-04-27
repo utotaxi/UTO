@@ -57,66 +57,89 @@ export default function SignInScreen({ navigation, route }: any) {
     transform: [{ scale: googleButtonScale.value }],
   }));
 
+  // ── Helper: extract a parameter from URL hash fragment or query string ──
+  const extractParam = (url: string, param: string): string | null => {
+    // Try hash fragment first (implicit flow puts tokens after #)
+    const hashIndex = url.indexOf("#");
+    if (hashIndex !== -1) {
+      const fragment = url.substring(hashIndex + 1);
+      const match = new RegExp(`(?:^|&)${param}=([^&]+)`).exec(fragment);
+      if (match) return decodeURIComponent(match[1]);
+    }
+    // Fallback to query string
+    const match = new RegExp(`[?&]${param}=([^&#]+)`).exec(url);
+    return match ? decodeURIComponent(match[1]) : null;
+  };
+
+  // ── Process the OAuth redirect URL (works for both WebBrowser and deep-link) ──
+  const processOAuthRedirect = async (url: string) => {
+    console.log("🔑 Google OAuth: processing redirect URL");
+    setIsGoogleLoading(true);
+
+    try {
+      const accessToken = extractParam(url, "access_token");
+      const refreshToken = extractParam(url, "refresh_token");
+
+      if (!accessToken) {
+        // Not an implicit-flow redirect — ignore silently
+        console.warn("🔑 No access_token in redirect URL, ignoring");
+        setIsGoogleLoading(false);
+        return;
+      }
+
+      console.log("🔑 Google OAuth: setting session from tokens");
+
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken || "",
+        });
+
+      if (sessionError || !sessionData?.user?.email) {
+        console.error("🔑 setSession error:", sessionError);
+        setError(`Auth Error: ${sessionError?.message || "Failed to verify Google account"}`);
+        setIsGoogleLoading(false);
+        return;
+      }
+
+      const userEmail = sessionData.user.email;
+      const userFullName =
+        sessionData.user.user_metadata?.full_name ||
+        sessionData.user.user_metadata?.name ||
+        userEmail.split("@")[0];
+
+      console.log("🔑 Google OAuth: authenticated as", userEmail);
+
+      const success = await signIn(userEmail, "google", true, userFullName);
+      if (success) {
+        setUserRole(selectedRole === "driver" ? "driver" : "rider");
+      } else {
+        setError("Server Error: Google sign in failed on the backend");
+      }
+    } catch (err: any) {
+      console.error("🔑 Google OAuth redirect error:", err);
+      setError(`Error: ${err?.message || "An unexpected error occurred"}`);
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
   // ── Deep-link listener for Google OAuth redirect (Fallback for cold starts) ──
   useEffect(() => {
     WebBrowser.maybeCompleteAuthSession();
 
-    const handleRedirect = async (event: { url: string }) => {
+    const handleRedirect = (event: { url: string }) => {
       const url = event.url;
-      if (!url || !url.includes("code=")) return;
-
-      console.log("🔑 Google OAuth: deep link received (fallback listener)");
-      setIsGoogleLoading(true);
-
-      try {
-        const codeMatch = url.match(/[?&#]code=([^&#]+)/);
-        if (!codeMatch) {
-          setError("No authentication code received in URL");
-          return;
-        }
-
-        const code = decodeURIComponent(codeMatch[1]);
-        console.log("🔑 Google OAuth: exchanging code for session");
-
-        // Exchange the code for a session directly. Do NOT call getSession() first,
-        // as it may clear the PKCE verifier from storage and cause 'invalid flow state'
-        const { data: sessionData, error: sessionError } =
-          await supabase.auth.exchangeCodeForSession(code);
-
-        if (sessionError || !sessionData?.user?.email) {
-          console.error("🔑 Code exchange error:", sessionError);
-          setError(`Auth Error: ${sessionError?.message || "Failed to verify Google account"}`);
-          return;
-        }
-
-        const userEmail = sessionData.user.email;
-        const userFullName =
-          sessionData.user.user_metadata?.full_name ||
-          sessionData.user.user_metadata?.name ||
-          userEmail.split("@")[0];
-
-        console.log("🔑 Google OAuth: authenticated as", userEmail);
-
-        const success = await signIn(userEmail, "google", true, userFullName);
-        if (success) {
-          setUserRole(selectedRole === "driver" ? "driver" : "rider");
-        } else {
-          setError("Server Error: Google sign in failed on the backend");
-        }
-      } catch (err: any) {
-        console.error("🔑 Google OAuth redirect error:", err);
-        setError(`Error: ${err?.message || "An unexpected error occurred"}`);
-      } finally {
-        setIsGoogleLoading(false);
-      }
+      if (!url || !url.includes("access_token=")) return;
+      processOAuthRedirect(url);
     };
 
     const sub = Linking.addEventListener("url", handleRedirect);
 
     // Handle cold-start deep link
     Linking.getInitialURL().then((url) => {
-      if (url && url.includes("code=")) {
-        handleRedirect({ url });
+      if (url && url.includes("access_token=")) {
+        processOAuthRedirect(url);
       }
     });
 
@@ -174,41 +197,11 @@ export default function SignInScreen({ navigation, route }: any) {
 
       // Open WebBrowser — it handles the deep-link return automatically without restarting the app
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-      console.log("🔑 Google OAuth: WebBrowser result =", result);
+      console.log("🔑 Google OAuth: WebBrowser result =", result.type);
 
       if (result.type === "success" && result.url) {
-        const url = result.url;
-        const codeMatch = url.match(/[?&#]code=([^&#]+)/);
-        if (!codeMatch) {
-          setError("No authentication code received in URL");
-          setIsGoogleLoading(false);
-          return;
-        }
-
-        const code = decodeURIComponent(codeMatch[1]);
-        console.log("🔑 Google OAuth: exchanging code for session from WebBrowser");
-
-        const { data: sessionData, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
-
-        if (sessionError || !sessionData?.user?.email) {
-          console.error("🔑 Code exchange error:", sessionError);
-          setError(`Auth Error: ${sessionError?.message || "Failed to verify Google account"}`);
-          setIsGoogleLoading(false);
-          return;
-        }
-
-        const userEmail = sessionData.user.email;
-        const userFullName =
-          sessionData.user.user_metadata?.full_name ||
-          sessionData.user.user_metadata?.name ||
-          userEmail.split("@")[0];
-
-        const success = await signIn(userEmail, "google", true, userFullName);
-        if (success) {
-          setUserRole(selectedRole === "driver" ? "driver" : "rider");
-        } else {
-          setError("Server Error: Google sign in failed on the backend");
-        }
+        // Implicit flow: tokens are in the URL fragment — use shared handler
+        await processOAuthRedirect(result.url);
       } else {
         // User cancelled or it failed
         setIsGoogleLoading(false);
