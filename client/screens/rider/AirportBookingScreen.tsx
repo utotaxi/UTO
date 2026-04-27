@@ -59,7 +59,43 @@ export default function AirportBookingScreen({ navigation }: any) {
   const [flightNumber, setFlightNumber] = useState('');
 
   // Round trip
-  const [isRoundTrip, setIsRoundTrip] = useState(false);
+  const [isReturnJourney, setIsReturnJourney] = useState(false);
+
+  // Return Journey Details
+  const [returnSelectedVehicle, setReturnSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
+  const [returnFlightNumber, setReturnFlightNumber] = useState('');
+  const [returnEstimatedFare, setReturnEstimatedFare] = useState<number | null>(null);
+
+  const [returnSelectedDate, setReturnSelectedDate] = useState<Date>(() => {
+    const d = new Date(openedAt);
+    d.setHours(d.getHours() + 24, 0, 0, 0);
+    return d;
+  });
+  const [returnHourVal, setReturnHourVal] = useState(() => returnSelectedDate.getHours());
+  const [returnMinuteVal, setReturnMinuteVal] = useState(() => {
+    const m = returnSelectedDate.getMinutes();
+    return Math.round(m / 5) * 5 % 60;
+  });
+  const [showReturnCalendar, setShowReturnCalendar] = useState(false);
+  const [returnCalendarMonth, setReturnCalendarMonth] = useState(() => ({
+    year: returnSelectedDate.getFullYear(),
+    month: returnSelectedDate.getMonth(),
+  }));
+
+  // Sync return hour/minute
+  useEffect(() => {
+    setReturnSelectedDate(prev => {
+      const d = new Date(prev);
+      d.setHours(returnHourVal, returnMinuteVal, 0, 0);
+      return d;
+    });
+  }, [returnHourVal, returnMinuteVal]);
+
+  const canReturnNavPrev = returnCalendarMonth.year > todayMonth.year ||
+    (returnCalendarMonth.year === todayMonth.year && returnCalendarMonth.month > todayMonth.month);
+  const canReturnNavNext = returnCalendarMonth.year < maxMonth.year ||
+    (returnCalendarMonth.year === maxMonth.year && returnCalendarMonth.month < maxMonth.month);
+
 
   // Vehicle type
   const [selectedVehicle, setSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
@@ -138,24 +174,65 @@ export default function AirportBookingScreen({ navigation }: any) {
 
         const distanceMiles = dist * 0.621371;
         let fare = calculateDynamicFare(distanceMiles, dur, selectedVehicle);
-        // Double fare for round trip
-        if (isRoundTrip) fare = fare * 2;
         setEstimatedFare(fare);
+        let rFare = calculateDynamicFare(distanceMiles, dur, returnSelectedVehicle);
+        setReturnEstimatedFare(rFare);
       } catch (err) {
         console.warn('Failed to calculate fare:', err);
         const fallbackMiles = 3.5;
         let fare = calculateDynamicFare(fallbackMiles, 15, selectedVehicle);
-        if (isRoundTrip) fare = fare * 2;
         setEstimatedFare(fare);
+        let rFare = calculateDynamicFare(fallbackMiles, 15, returnSelectedVehicle);
+        setReturnEstimatedFare(rFare);
       } finally {
         setIsCalculatingFare(false);
       }
     };
 
     calculateFare();
-  }, [pickupLocation, dropoffLocation, selectedVehicle, isRoundTrip]);
+  }, [pickupLocation, dropoffLocation, selectedVehicle, returnSelectedVehicle, isReturnJourney]);
 
   // ── Calendar render ─────────────────────────────────────────────
+  const renderReturnCalendar = () => {
+    const firstDay = new Date(returnCalendarMonth.year, returnCalendarMonth.month, 1).getDay();
+    const daysInMonth = new Date(returnCalendarMonth.year, returnCalendarMonth.month + 1, 0).getDate();
+    const todayStart = new Date(openedAt.getFullYear(), openedAt.getMonth(), openedAt.getDate());
+    const cells: React.ReactElement[] = [];
+
+    for (let i = 0; i < firstDay; i++) {
+      cells.push(<View key={`re${i}`} style={s.calCell} />);
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const cellDate = new Date(returnCalendarMonth.year, returnCalendarMonth.month, d);
+      const isSelected = cellDate.toDateString() === returnSelectedDate.toDateString();
+      const isPast = cellDate < todayStart;
+      const isTooFar = cellDate > maxDate;
+      const disabled = isPast || isTooFar;
+
+      cells.push(
+        <Pressable
+          key={d}
+          style={[s.calCell, isSelected && s.calCellSelected, disabled && s.calCellDisabled]}
+          onPress={() => {
+            if (disabled) return;
+            setReturnSelectedDate(prev => {
+              const nd = new Date(cellDate);
+              nd.setHours(prev.getHours(), prev.getMinutes(), 0, 0);
+              return nd;
+            });
+            setShowReturnCalendar(false);
+          }}
+        >
+          <Text style={[s.calCellText, isSelected && s.calCellTextSelected, disabled && s.calCellTextDisabled]}>
+            {d}
+          </Text>
+        </Pressable>
+      );
+    }
+    return cells;
+  };
+
   const renderCalendar = () => {
     const firstDay = new Date(calendarMonth.year, calendarMonth.month, 1).getDay();
     const daysInMonth = new Date(calendarMonth.year, calendarMonth.month + 1, 0).getDate();
@@ -200,6 +277,11 @@ export default function AirportBookingScreen({ navigation }: any) {
     if (!pickup) { Alert.alert('Missing pickup', 'Please enter a pickup location.'); return; }
     if (!dropoff) { Alert.alert('Missing destination', 'Please enter a destination.'); return; }
 
+    if (!flightNumber || flightNumber.trim() === '') {
+      Alert.alert('Missing flight number', 'Please enter your flight number before booking your airport transfer.');
+      return;
+    }
+
     const scheduledTime = new Date(selectedDate);
     scheduledTime.setHours(hourVal, minuteVal, 0, 0);
     const rightNow = new Date();
@@ -207,6 +289,39 @@ export default function AirportBookingScreen({ navigation }: any) {
     if (scheduledTime <= rightNow) {
       Alert.alert('Time has passed', `Scheduled time ${fmtTime(scheduledTime)} is in the past. Please select a future time.`);
       return;
+    }
+
+    const timeDiffMs = scheduledTime.getTime() - rightNow.getTime();
+    if (timeDiffMs < 10 * 60 * 60 * 1000) {
+      Alert.alert(
+        'Airport Transfer Notice', 
+        'Airport transfers must be booked at least 10 hours in advance. Thank you for your understanding.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    let returnScheduledTime;
+    if (isReturnJourney) {
+      if (!returnFlightNumber || returnFlightNumber.trim() === '') {
+        Alert.alert('Missing return flight number', 'Please enter your return flight number before booking your airport transfer.');
+        return;
+      }
+      returnScheduledTime = new Date(returnSelectedDate);
+      returnScheduledTime.setHours(returnHourVal, returnMinuteVal, 0, 0);
+      if (returnScheduledTime <= scheduledTime) {
+        Alert.alert('Invalid return time', 'Return journey time must be after the outbound journey.');
+        return;
+      }
+      const returnTimeDiffMs = returnScheduledTime.getTime() - rightNow.getTime();
+      if (returnTimeDiffMs < 10 * 60 * 60 * 1000) {
+        Alert.alert(
+          'Airport Transfer Notice', 
+          'Return airport transfers must be booked at least 10 hours in advance. Thank you for your understanding.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
     }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -230,7 +345,7 @@ export default function AirportBookingScreen({ navigation }: any) {
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
           durationMinutes: durationMin ?? null,
           flightNumber: flightNumber || null,
-          isRoundTrip: isRoundTrip,
+          isReturnJourney: isReturnJourney,
           bookingType: 'airport',
         }),
       });
@@ -242,9 +357,41 @@ export default function AirportBookingScreen({ navigation }: any) {
         throw new Error(resBody.error || `Server error ${res.status}`);
       }
 
+      if (isReturnJourney && returnScheduledTime) {
+        const returnRes = await fetch(`${getApiUrl()}/api/later-bookings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            riderId: user?.id,
+            pickupAddress: dropoff, // reversed
+            pickupLatitude: dropoffLocation?.latitude ?? null,
+            pickupLongitude: dropoffLocation?.longitude ?? null,
+            dropoffAddress: pickup, // reversed
+            dropoffLatitude: pickupLocation?.latitude ?? null,
+            dropoffLongitude: pickupLocation?.longitude ?? null,
+            pickupAt: returnScheduledTime.toISOString(),
+            dropoffBy: new Date(returnScheduledTime.getTime() + 60 * 60 * 1000).toISOString(),
+            estimatedFare: returnEstimatedFare ?? null,
+            vehicleType: returnSelectedVehicle,
+            distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
+            durationMinutes: durationMin ?? null,
+            flightNumber: returnFlightNumber || null,
+            isReturnJourney: true,
+            bookingType: 'airport',
+          }),
+        });
+
+        let returnResBody: any = {};
+        try { returnResBody = await returnRes.json(); } catch (_) {}
+
+        if (!returnRes.ok) {
+           throw new Error(returnResBody.error || `Server error on return booking ${returnRes.status}`);
+        }
+      }
+
       Alert.alert(
         '✈️ Airport Transfer Booked!',
-        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isRoundTrip ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
+        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {
@@ -378,29 +525,27 @@ export default function AirportBookingScreen({ navigation }: any) {
 
         {/* ── Round Trip Toggle ── */}
         <Pressable
-          style={[s.roundTripCard, isRoundTrip && s.roundTripCardActive]}
+          style={[s.roundTripCard, isReturnJourney && s.roundTripCardActive]}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setIsRoundTrip(!isRoundTrip);
+            setIsReturnJourney(!isReturnJourney);
           }}
         >
           <View style={s.roundTripLeft}>
             <MaterialIcons
               name="sync"
               size={22}
-              color={isRoundTrip ? '#000000' : '#6B7280'}
+              color={isReturnJourney ? '#000000' : '#6B7280'}
             />
             <View>
-              <Text style={[s.roundTripTitle, isRoundTrip && s.roundTripTitleActive]}>
-                Round Trip
-              </Text>
-              <Text style={[s.roundTripSub, isRoundTrip && s.roundTripSubActive]}>
+              <Text style={[s.roundTripTitle, isReturnJourney && s.roundTripTitleActive]}>Return Journey</Text>
+              <Text style={[s.roundTripSub, isReturnJourney && s.roundTripSubActive]}>
                 Book return journey
               </Text>
             </View>
           </View>
-          <View style={[s.roundTripToggle, isRoundTrip && s.roundTripToggleActive]}>
-            <View style={[s.roundTripDot, isRoundTrip && s.roundTripDotActive]} />
+          <View style={[s.roundTripToggle, isReturnJourney && s.roundTripToggleActive]}>
+            <View style={[s.roundTripDot, isReturnJourney && s.roundTripDotActive]} />
           </View>
         </Pressable>
 
@@ -502,24 +647,128 @@ export default function AirportBookingScreen({ navigation }: any) {
               </Pressable>
             </View>
           </View>
-        </View>
+        
+        {/* ── Return Journey Details ── */}
+        {isReturnJourney && (
+          <View style={[s.timeCard, { marginTop: -8 }]}>
+            <Text style={s.timeSectionTitle}>Return Details</Text>
+            
+            {/* Return Locations Display */}
+            <View style={{ paddingHorizontal: 20, paddingBottom: 16 }}>
+              <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '500', marginBottom: 4 }}>Return Pickup</Text>
+              <Text style={{ fontSize: 15, color: '#111827', fontWeight: '600', marginBottom: 12 }}>{dropoff || 'Same as outbound dropoff'}</Text>
+              
+              <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '500', marginBottom: 4 }}>Return Drop-off</Text>
+              <Text style={{ fontSize: 15, color: '#111827', fontWeight: '600' }}>{pickup || 'Same as outbound pickup'}</Text>
+            </View>
 
+            {/* Return Flight Number */}
+            <View style={[s.flightCard, { marginHorizontal: 16, marginBottom: 16, elevation: 0, borderWidth: 1, borderColor: '#F3F4F6' }]}>
+              <View style={s.flightHeader}>
+                <MaterialIcons name="flight-land" size={20} color={UTO_YELLOW} />
+                <Text style={s.flightLabel}>Return Flight Number</Text>
+              </View>
+              <TextInput
+                style={s.flightInput}
+                value={returnFlightNumber}
+                onChangeText={setReturnFlightNumber}
+                placeholder="e.g. BA 5678"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="characters"
+              />
+            </View>
+
+            {/* Return Vehicle */}
+            <View style={[s.vehicleSelector, { marginHorizontal: 16, marginBottom: 16 }]}>
+              <Text style={s.vehicleSelectorTitle}>Return Vehicle</Text>
+              <View style={s.vehicleOptions}>
+                <Pressable
+                  style={[s.vehicleOption, returnSelectedVehicle === 'saloon' && s.vehicleOptionActive]}
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('saloon'); }}
+                >
+                  <Text style={[s.vehicleOptionName, returnSelectedVehicle === 'saloon' && s.vehicleOptionNameActive]}>Saloon</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.vehicleOption, returnSelectedVehicle === 'minibus' && s.vehicleOptionActive]}
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('minibus'); }}
+                >
+                  <Text style={[s.vehicleOptionName, returnSelectedVehicle === 'minibus' && s.vehicleOptionNameActive]}>Minibus</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Return Date Header */}
+            <TouchableOpacity style={s.dateHeader} onPress={() => setShowReturnCalendar(!showReturnCalendar)} activeOpacity={0.85}>
+              <Text style={s.dateHeaderYear}>{returnSelectedDate.getFullYear()}</Text>
+              <Text style={s.dateHeaderDate}>{fmtDate(returnSelectedDate)}</Text>
+            </TouchableOpacity>
+
+            {/* Return Calendar */}
+            {showReturnCalendar && (
+              <View style={s.calBox}>
+                <View style={s.calMonthRow}>
+                  <Pressable onPress={() => {
+                    if (!canReturnNavPrev) return;
+                    setReturnCalendarMonth(p => { let m = p.month - 1, y = p.year; if (m < 0) { m = 11; y--; } return { year: y, month: m }; });
+                  }} style={{ opacity: canReturnNavPrev ? 1 : 0.2 }}>
+                    <MaterialIcons name="chevron-left" size={28} color="#111827" />
+                  </Pressable>
+                  <Text style={s.calMonthLabel}>
+                    {new Date(returnCalendarMonth.year, returnCalendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+                  </Text>
+                  <Pressable onPress={() => {
+                    if (!canReturnNavNext) return;
+                    setReturnCalendarMonth(p => { let m = p.month + 1, y = p.year; if (m > 11) { m = 0; y++; } return { year: y, month: m }; });
+                  }} style={{ opacity: canReturnNavNext ? 1 : 0.2 }}>
+                    <MaterialIcons name="chevron-right" size={28} color="#111827" />
+                  </Pressable>
+                </View>
+                <View style={s.calDayNames}>
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dn, i) => <Text key={i} style={s.calDayName}>{dn}</Text>)}
+                </View>
+                <View style={s.calGrid}>{renderReturnCalendar()}</View>
+                <View style={s.calFooter}>
+                  <Pressable onPress={() => setShowReturnCalendar(false)}><Text style={s.calCancel}>CANCEL</Text></Pressable>
+                  <Pressable onPress={() => setShowReturnCalendar(false)}><Text style={s.calOk}>OK</Text></Pressable>
+                </View>
+              </View>
+            )}
+
+            {/* Return Time Spinner */}
+            <Text style={s.timeLabel}>Return Pickup Time</Text>
+            <View style={s.spinnerRow}>
+              <View style={s.spinnerCol}>
+                <Pressable onPress={() => setReturnHourVal(h => (h - 1 + 24) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-up" size={36} color="#333" /></Pressable>
+                <Text style={s.spinnerVal}>{String(returnHourVal).padStart(2, '0')}</Text>
+                <Pressable onPress={() => setReturnHourVal(h => (h + 1) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
+              </View>
+              <Text style={s.spinnerColon}>:</Text>
+              <View style={s.spinnerCol}>
+                <Pressable onPress={() => setReturnMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-up" size={36} color="#333" /></Pressable>
+                <Text style={s.spinnerVal}>{String(returnMinuteVal).padStart(2, '0')}</Text>
+                <Pressable onPress={() => setReturnMinuteVal(m => (Math.round(m / 5) * 5 + 5) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
+              </View>
+            </View>
+          </View>
+        )}
+        
         {/* ── Estimated Fare Card ── */}
         {(estimatedFare !== null || isCalculatingFare) && (
           <View style={s.fareCard}>
             <View style={s.fareCardHeader}>
               <MaterialIcons name="receipt" size={20} color={UTO_YELLOW} />
-              <Text style={s.fareCardTitle}>Estimated Fare{isRoundTrip ? ' (Round Trip)' : ''}</Text>
+              <Text style={s.fareCardTitle}>Estimated Fare{isReturnJourney ? ' (Outbound)' : ''}</Text>
             </View>
             {isCalculatingFare ? (
               <ActivityIndicator size="small" color={UTO_YELLOW} style={{ marginTop: 8 }} />
             ) : (
               <>
-                <Text style={s.fareCardPrice}>£{estimatedFare!.toFixed(2)}</Text>
+                <Text style={s.fareCardPrice}>£{(!isReturnJourney ? estimatedFare! : (estimatedFare! + (returnEstimatedFare || 0))).toFixed(2)}</Text>
                 {distanceKm !== null && durationMin !== null && (
                   <Text style={s.fareCardSub}>
-                    {(distanceKm * 0.621371).toFixed(1)} miles · ~{durationMin} min · {selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}
-                    {isRoundTrip ? ' · Return' : ''}
+                    {isReturnJourney 
+                      ? `Outbound: £${estimatedFare!.toFixed(2)} · Return: £${(returnEstimatedFare||0).toFixed(2)}` 
+                      : `${(distanceKm * 0.621371).toFixed(1)} miles · ~${durationMin} min · ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}`}
                   </Text>
                 )}
               </>
@@ -553,8 +802,8 @@ export default function AirportBookingScreen({ navigation }: any) {
             ? <ActivityIndicator color="#000000" />
             : <Text style={s.continueBtnText}>
                 {estimatedFare
-                  ? `Book ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isRoundTrip ? ' Return' : ''} · £${estimatedFare.toFixed(2)}`
-                  : `Book ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isRoundTrip ? ' Return' : ''} Transfer`}
+                  ? `Book ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' + Return' : ''} · £${(!isReturnJourney ? estimatedFare : (estimatedFare + (returnEstimatedFare||0))).toFixed(2)}`
+                  : `Book ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' + Return' : ''} Transfer`}
               </Text>
           }
         </TouchableOpacity>
