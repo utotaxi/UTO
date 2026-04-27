@@ -100,13 +100,17 @@ import { Spacing } from "@/constants/theme";
 export default function ActivityScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
-  const { rideHistory, activeRide } = useRide();
+  const { rideHistory, activeRide, refreshRideHistory } = useRide();
 
   const [refreshing, setRefreshing] = React.useState(false);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      await refreshRideHistory();
+    } catch (e) {
+      console.warn("Failed to refresh ride history:", e);
+    }
     setRefreshing(false);
   };
 

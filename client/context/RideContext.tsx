@@ -951,6 +951,7 @@ interface RideContextType {
   completeRide: (rideId: string) => Promise<void>;
   updateRidePaymentMethod: (rideId: string, method: string) => Promise<void>;
   calculateDynamicFare: (distanceMiles: number, durationMin: number, rideType: string) => number;
+  refreshRideHistory: () => Promise<void>;
   pendingRating: { rideId: string; driverName: string } | null;
   submitRiderRating: (rideId: string, rating: number, comment?: string) => void;
   dismissRiderRating: () => void;
@@ -1223,6 +1224,81 @@ export function RideProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   };
+
+  // ─── Fetch ride history from server and merge with local ───────────────
+  const refreshRideHistory = async () => {
+    if (!user?.id) return;
+    try {
+      const { api } = await import('@/lib/api');
+      const serverRides = await api.rides.getByRider(user.id);
+      console.log(`📋 [RideContext] Fetched ${serverRides.length} rides from server for rider ${user.id}`);
+
+      // Convert server rides (camelCase API format) into our local Ride shape
+      const serverHistory: Ride[] = serverRides
+        .filter((r: any) => r.status === 'completed' || r.status === 'cancelled')
+        .map((r: any) => ({
+          id: r.id,
+          pickupLocation: {
+            address: r.pickupAddress || 'Unknown pickup',
+            latitude: r.pickupLatitude || 0,
+            longitude: r.pickupLongitude || 0,
+          },
+          dropoffLocation: {
+            address: r.dropoffAddress || 'Unknown dropoff',
+            latitude: r.dropoffLatitude || 0,
+            longitude: r.dropoffLongitude || 0,
+          },
+          rideType: (r.vehicleType || 'saloon') as RideType,
+          status: r.status as RideStatus,
+          farePrice: r.finalPrice || r.estimatedPrice || 0,
+          distanceKm: r.distance || 0,
+          durationMinutes: r.estimatedDuration || 0,
+          driverName: r.driverName || undefined,
+          driverRating: r.driverRating || undefined,
+          paymentMethod: r.paymentMethod || undefined,
+          paymentStatus: r.paymentStatus || undefined,
+          createdAt: r.requestedAt || new Date().toISOString(),
+          completedAt: r.completedAt || r.cancelledAt || new Date().toISOString(),
+        }));
+
+      // Merge: server rides take priority (they have ground-truth status)
+      setRideHistory((prevLocal) => {
+        const localMap = new Map(prevLocal.map(r => [r.id, r]));
+        const serverMap = new Map(serverHistory.map(r => [r.id, r]));
+
+        // Start with server rides, then add any local-only rides
+        const merged = new Map<string, Ride>();
+        for (const [id, ride] of serverMap) {
+          // Preserve local enrichment (driverName etc) if server doesn't have it
+          const local = localMap.get(id);
+          merged.set(id, local ? { ...local, ...ride, driverName: ride.driverName || local.driverName } : ride);
+        }
+        // Add local-only entries (e.g. rides from a different device session)
+        for (const [id, ride] of localMap) {
+          if (!merged.has(id)) {
+            merged.set(id, ride);
+          }
+        }
+
+        const mergedArray = Array.from(merged.values())
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        // Persist merged history
+        AsyncStorage.setItem(RIDE_HISTORY_KEY, JSON.stringify(mergedArray)).catch(console.error);
+        console.log(`✅ [RideContext] Merged ride history: ${mergedArray.length} rides (${serverHistory.length} from server, ${prevLocal.length} local)`);
+        return mergedArray;
+      });
+    } catch (err) {
+      console.warn('⚠️ [RideContext] Failed to refresh ride history from server:', err);
+    }
+  };
+
+  // Auto-sync ride history from server when user becomes available
+  useEffect(() => {
+    if (user?.id) {
+      refreshRideHistory();
+    }
+  }, [user?.id]);
 
   const calculateDynamicFare = (distanceMiles: number, durationMin: number, rideType: string): number => {
     const formattedType = rideType.charAt(0).toUpperCase() + rideType.slice(1);
@@ -1542,6 +1618,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
         completeRide,
         updateRidePaymentMethod,
         calculateDynamicFare,
+        refreshRideHistory,
         pendingRating,
         submitRiderRating,
         dismissRiderRating,
