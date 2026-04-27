@@ -12,6 +12,7 @@ import {
   Platform,
   Modal,
   TextInput,
+  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -62,6 +63,10 @@ export default function DriverHomeScreen({ navigation }: any) {
     arrivedAtPickup,
     startRide,
     completeTrip,
+    noShowRide,
+    agreeToWait,
+    paidWaitingStartedAt,
+    waitingChargePerMin,
     driverProfile,
     pendingRating,
     submitDriverRating,
@@ -80,6 +85,7 @@ export default function DriverHomeScreen({ navigation }: any) {
   const [routeDurationText, setRouteDurationText] = useState<string | null>(null);
   const [collectedAmountStr, setCollectedAmountStr] = useState<string>("");
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
+  const [paidWaitingElapsedSec, setPaidWaitingElapsedSec] = useState(0);
 
   useEffect(() => {
     if (completedRidePayment) {
@@ -252,6 +258,60 @@ export default function DriverHomeScreen({ navigation }: any) {
     }, 1000);
     return () => clearInterval(interval);
   }, [rideState]);
+
+  // Track paid waiting elapsed time
+  useEffect(() => {
+    if (!paidWaitingStartedAt) {
+      setPaidWaitingElapsedSec(0);
+      return;
+    }
+    const start = new Date(paidWaitingStartedAt).getTime();
+    const interval = setInterval(() => {
+      setPaidWaitingElapsedSec(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [paidWaitingStartedAt]);
+
+  const FREE_WAITING_SECONDS = 10 * 60; // 10 minutes
+  const freeWaitingExpired = waitingElapsedSec >= FREE_WAITING_SECONDS;
+
+  const handleCallRider = () => {
+    const phone = activeRideRequest?.riderPhone;
+    if (phone) {
+      Linking.openURL(`tel:${phone}`);
+    } else {
+      Alert.alert("No Phone Number", "The rider's phone number is not available.");
+    }
+  };
+
+  const handleNoShow = () => {
+    Alert.alert(
+      "Mark as No Show?",
+      "The rider will be charged the full fare amount as per the no-show policy. Are you sure?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm No Show",
+          style: "destructive",
+          onPress: () => noShowRide(),
+        },
+      ]
+    );
+  };
+
+  const handleAgreeToWait = () => {
+    Alert.alert(
+      "Start Paid Waiting?",
+      `Paid waiting will be charged at £${waitingChargePerMin.toFixed(2)}/minute and added to the final fare.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Start Paid Waiting",
+          onPress: () => agreeToWait(),
+        },
+      ]
+    );
+  };
 
   const handleAccept = () => {
     acceptRide();
@@ -529,15 +589,97 @@ export default function DriverHomeScreen({ navigation }: any) {
           exiting={FadeOut.duration(200)}
           style={[styles.rideRequestContainer, { bottom: insets.bottom + Spacing.lg }]}
         >
-          <View style={[styles.otpInputContainer, { backgroundColor: theme.backgroundDefault }]}>
-            {/* Waiting indicator */}
-            <View style={[styles.waitingBadge, { backgroundColor: UTOColors.warning + '15' }]}>
-              <MaterialIcons name="timer" size={16} color={UTOColors.warning} />
-              <ThemedText style={{ color: UTOColors.warning, fontSize: 13, fontWeight: '600' }}>
-                Waiting {Math.floor(waitingElapsedSec / 60).toString().padStart(2, '0')}:{(waitingElapsedSec % 60).toString().padStart(2, '0')}
-                {waitingElapsedSec >= 540 ? ' — Ride will auto-cancel soon' : ''}
-              </ThemedText>
+          <ScrollView style={[styles.otpInputContainer, { backgroundColor: theme.backgroundDefault, maxHeight: 520 }]} showsVerticalScrollIndicator={false}>
+            {/* ── Rider Contact Info ── */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.acceptedRiderName}>{activeRideRequest.riderName}</ThemedText>
+                {activeRideRequest.riderPhone ? (
+                  <ThemedText style={{ color: theme.textSecondary, fontSize: 13, marginTop: 2 }}>
+                    📞 {activeRideRequest.riderPhone}
+                  </ThemedText>
+                ) : null}
+              </View>
+              <Pressable
+                onPress={handleCallRider}
+                style={{
+                  width: 44, height: 44, borderRadius: 22,
+                  backgroundColor: UTOColors.success + '20',
+                  alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <MaterialIcons name="phone" size={22} color={UTOColors.success} />
+              </Pressable>
             </View>
+
+            {/* ── Waiting Timer ── */}
+            {!paidWaitingStartedAt ? (
+              // FREE WAITING PHASE
+              <View style={[styles.waitingBadge, {
+                backgroundColor: freeWaitingExpired ? UTOColors.error + '15' : UTOColors.warning + '15',
+                marginBottom: 12,
+              }]}>
+                <MaterialIcons
+                  name={freeWaitingExpired ? "warning" : "timer"}
+                  size={16}
+                  color={freeWaitingExpired ? UTOColors.error : UTOColors.warning}
+                />
+                <ThemedText style={{
+                  color: freeWaitingExpired ? UTOColors.error : UTOColors.warning,
+                  fontSize: 13, fontWeight: '600', flex: 1,
+                }}>
+                  {freeWaitingExpired
+                    ? `Free waiting expired – ${Math.floor(waitingElapsedSec / 60).toString().padStart(2, '0')}:${(waitingElapsedSec % 60).toString().padStart(2, '0')}`
+                    : `Waiting for rider – free waiting time ${Math.floor((FREE_WAITING_SECONDS - waitingElapsedSec) / 60).toString().padStart(2, '0')}:${((FREE_WAITING_SECONDS - waitingElapsedSec) % 60).toString().padStart(2, '0')}`
+                  }
+                </ThemedText>
+              </View>
+            ) : (
+              // PAID WAITING PHASE
+              <View style={[styles.waitingBadge, { backgroundColor: UTOColors.driver.primary + '15', marginBottom: 12 }]}>
+                <MaterialIcons name="attach-money" size={16} color={UTOColors.driver.primary} />
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={{ color: UTOColors.driver.primary, fontSize: 13, fontWeight: '600' }}>
+                    Paid waiting: {Math.floor(paidWaitingElapsedSec / 60).toString().padStart(2, '0')}:{(paidWaitingElapsedSec % 60).toString().padStart(2, '0')}
+                  </ThemedText>
+                  <ThemedText style={{ color: UTOColors.driver.primary, fontSize: 12, marginTop: 2 }}>
+                    Charge: £{(Math.floor(paidWaitingElapsedSec / 60) * waitingChargePerMin).toFixed(2)} (£{waitingChargePerMin.toFixed(2)}/min)
+                  </ThemedText>
+                </View>
+              </View>
+            )}
+
+            {/* ── No Show / Agree to Wait buttons (after 10 min free waiting) ── */}
+            {freeWaitingExpired && !paidWaitingStartedAt ? (
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+                <Pressable
+                  onPress={handleNoShow}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: UTOColors.error + '15',
+                    paddingVertical: 14, borderRadius: 12, gap: 6,
+                    borderWidth: 1, borderColor: UTOColors.error + '30',
+                  }}
+                >
+                  <MaterialIcons name="person-off" size={18} color={UTOColors.error} />
+                  <ThemedText style={{ color: UTOColors.error, fontWeight: '600', fontSize: 14 }}>No Show</ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={handleAgreeToWait}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: UTOColors.success + '15',
+                    paddingVertical: 14, borderRadius: 12, gap: 6,
+                    borderWidth: 1, borderColor: UTOColors.success + '30',
+                  }}
+                >
+                  <MaterialIcons name="timer" size={18} color={UTOColors.success} />
+                  <ThemedText style={{ color: UTOColors.success, fontWeight: '600', fontSize: 14 }}>Agree to Wait</ThemedText>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {/* ── OTP Entry (always available when rider shows up) ── */}
             <ThemedText style={styles.otpTitle}>Enter Rider PIN</ThemedText>
             <ThemedText style={[styles.otpSubtitle, { color: theme.textSecondary }]}>
               Ask the rider for their 4-digit PIN to start the ride
@@ -608,7 +750,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                 Start Ride
               </ThemedText>
             </Pressable>
-          </View>
+          </ScrollView>
         </Animated.View>
       ) : null}
 

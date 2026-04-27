@@ -111,7 +111,7 @@ interface DispatchState {
 const dispatchQueues = new Map<string, DispatchState>();
 
 // Track arrived-at-pickup timers so we can auto-cancel if rider doesn't board
-const arrivedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// No longer tracking arrived timers server-side as the driver manually initiates No Show after 10 min
 
 export function setupSocketIO(httpServer: HTTPServer) {
   const io = new Server(httpServer, {
@@ -623,12 +623,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             // Keep driver_id set if not already saved
             if (resolvedDriverId) updateData.driver_id = resolvedDriverId;
 
-            // ✅ Clear the arrived timer — rider boarded successfully
-            if (arrivedTimers.has(update.rideId)) {
-              clearTimeout(arrivedTimers.get(update.rideId)!);
-              arrivedTimers.delete(update.rideId);
-              console.log(`✅ Arrived timer cleared for ride ${update.rideId} — rider boarded`);
-            }
+            // (arrived timer clear logic removed as it's now client-side)
           }
           else if (update.status === "completed") {
             updateData.completed_at = new Date().toISOString();
@@ -636,11 +631,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             // Ensure driver_id is ALWAYS set on completion
             if (resolvedDriverId) updateData.driver_id = resolvedDriverId;
 
-            // ✅ Clear the arrived timer if still running
-            if (arrivedTimers.has(update.rideId)) {
-              clearTimeout(arrivedTimers.get(update.rideId)!);
-              arrivedTimers.delete(update.rideId);
-            }
+            // (arrived timer clear logic removed as it's now client-side)
 
             // ─── Charge saved card if payment_method is 'card' ──────────────
             try {
@@ -699,12 +690,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           else if (update.status === "cancelled") {
             updateData.cancelled_at = new Date().toISOString();
 
-            // ✅ Clear the arrived timer if still running
-            if (arrivedTimers.has(update.rideId)) {
-              clearTimeout(arrivedTimers.get(update.rideId)!);
-              arrivedTimers.delete(update.rideId);
-              console.log(`✅ Arrived timer cleared for ride ${update.rideId} — ride cancelled`);
-            }
+            // (arrived timer clear logic removed as it's now client-side)
           }
 
           console.log(`📝 Updating ride ${update.rideId} in Supabase with:`, JSON.stringify(updateData));
@@ -744,250 +730,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(`🚗 Driver socket ${socket.id} linked to ride ${update.rideId}`);
         }
 
-        // ─── Start 10-minute no-show timer when driver arrives ────────────────
+        // ─── Mark driver arrival time for customer countdown ────────────────
         if (update.status === "arrived") {
           const driverArrivedAt = new Date().toISOString();
-
-          // Clear any existing timer for this ride (safety)
-          if (arrivedTimers.has(update.rideId)) {
-            clearTimeout(arrivedTimers.get(update.rideId)!);
-          }
-
-          console.log(`⏱️ Starting ${ARRIVED_TIMEOUT_MS / 60000}-minute no-show timer for ride ${update.rideId}`);
-
-          const timer = setTimeout(async () => {
-            arrivedTimers.delete(update.rideId);
-            console.log(`⏱️🚫 Rider no-show! 10 minutes expired for ride ${update.rideId} — auto-cancelling`);
-
-            try {
-              // 1. Look up the ride to get fare and rider info
-              const { data: rideRow } = await supabase
-                .from("rides")
-                .select("*")
-                .eq("id", update.rideId)
-                .single();
-
-              if (!rideRow) {
-                console.error(`❌ No-show handler: ride ${update.rideId} not found in DB`);
-                return;
-              }
-
-              // Only proceed if ride is still in "arrived" status (hasn't started or been cancelled)
-              if (rideRow.status !== "arrived") {
-                console.log(`ℹ️ No-show timer fired but ride ${update.rideId} is now ${rideRow.status} — skipping`);
-                return;
-              }
-
-              const fareAmount = rideRow.estimated_price || 0;
-              const ridePaymentMethod = rideRow.payment_method || "cash";
-
-              console.log(`💳 No-show: ride ${update.rideId} payment_method=${ridePaymentMethod}, fare=£${fareAmount}`);
-
-              // ─── 2. Charge the rider's saved card via Stripe ────────────────────
-              // Regardless of whether the rider chose "cash" or "card", we try to
-              // charge their saved card first (the requirement is: if they picked
-              // cash and don't show up, charge the card they saved on file).
-              let stripeChargeSuccess = false;
-              let stripePaymentIntentId: string | undefined;
-              let stripeChargeError: string | undefined;
-
-              if (rideRow.rider_id && fareAmount > 0) {
-                try {
-                  // Look up the rider's stripe_customer_id
-                  const { data: riderUser } = await supabase
-                    .from("users")
-                    .select("stripe_customer_id, wallet_balance")
-                    .eq("id", rideRow.rider_id)
-                    .single();
-
-                  const stripeCustomerId = riderUser?.stripe_customer_id;
-
-                  if (stripeCustomerId) {
-                    console.log(`💳 Attempting to charge saved card for rider ${rideRow.rider_id} (Stripe customer: ${stripeCustomerId})`);
-
-                    const chargeResult = await chargeSavedCard(
-                      stripeCustomerId,
-                      fareAmount,
-                      update.rideId,
-                      "gbp",
-                      "no_show_fee"
-                    );
-
-                    stripeChargeSuccess = chargeResult.success;
-                    stripePaymentIntentId = chargeResult.paymentIntentId;
-                    stripeChargeError = chargeResult.error;
-
-                    if (stripeChargeSuccess) {
-                      console.log(`✅ No-show fee £${fareAmount} charged to saved card for ride ${update.rideId}`);
-                    } else {
-                      console.warn(`⚠️ Stripe card charge failed: ${stripeChargeError} — will fall back to wallet`);
-                    }
-                  } else {
-                    console.warn(`⚠️ Rider ${rideRow.rider_id} has no Stripe customer ID — will fall back to wallet`);
-                    stripeChargeError = "No Stripe customer ID on file";
-                  }
-                } catch (stripeErr) {
-                  console.error("❌ Stripe charge attempt failed:", stripeErr);
-                  stripeChargeError = String(stripeErr);
-                }
-              }
-
-              // ─── 3. Cancel the ride in DB ────────────────────────────────────────
-              const cancelPayload: Record<string, any> = {
-                status: "cancelled",
-                cancelled_at: new Date().toISOString(),
-                payment_status: stripeChargeSuccess ? "no_show_card_charged" : "no_show_wallet_charged",
-              };
-              if (stripePaymentIntentId) {
-                cancelPayload.payment_intent_id = stripePaymentIntentId;
-              }
-
-              await supabase
-                .from("rides")
-                .update(cancelPayload)
-                .eq("id", update.rideId);
-
-              console.log(`✅ Ride ${update.rideId} cancelled in DB due to no-show (charged via: ${stripeChargeSuccess ? 'card' : 'wallet'})`);
-
-              // ─── 4. If card charge failed, fall back to wallet deduction ─────────
-              if (!stripeChargeSuccess && rideRow.rider_id && fareAmount > 0) {
-                try {
-                  const { data: userRow } = await supabase
-                    .from("users")
-                    .select("wallet_balance")
-                    .eq("id", rideRow.rider_id)
-                    .single();
-
-                  const currentBalance = userRow?.wallet_balance || 0;
-                  const newBalance = Math.max(0, currentBalance - fareAmount);
-
-                  await supabase
-                    .from("users")
-                    .update({ wallet_balance: newBalance })
-                    .eq("id", rideRow.rider_id);
-
-                  console.log(`💰 No-show penalty (wallet fallback): Debited £${fareAmount} from rider ${rideRow.rider_id} wallet (${currentBalance} → ${newBalance})`);
-
-                  // Record wallet transaction
-                  await supabase
-                    .from("wallet_transactions")
-                    .insert({
-                      user_id: rideRow.rider_id,
-                      ride_id: update.rideId,
-                      amount: fareAmount,
-                      type: "debit",
-                      description: `No-show cancellation fee — driver waited 10 minutes (card charge failed: ${stripeChargeError || 'unknown'})`,
-                    });
-
-                  console.log(`✅ No-show wallet transaction recorded for rider ${rideRow.rider_id}`);
-                } catch (walletErr) {
-                  console.error("❌ Failed to debit no-show penalty from wallet:", walletErr);
-                }
-              }
-
-              // ─── 5. Record payment in payments table ─────────────────────────────
-              if (rideRow.rider_id && fareAmount > 0) {
-                try {
-                  await supabase.from("payments").insert({
-                    ride_id: update.rideId,
-                    user_id: rideRow.rider_id,
-                    amount: fareAmount,
-                    currency: "gbp",
-                    status: "succeeded",
-                    payment_method: stripeChargeSuccess ? "card" : "wallet",
-                    stripe_payment_intent_id: stripePaymentIntentId || null,
-                    completed_at: new Date().toISOString(),
-                  });
-                  console.log(`✅ No-show payment record inserted: £${fareAmount} via ${stripeChargeSuccess ? 'card' : 'wallet'}`);
-                } catch (paymentErr) {
-                  console.error("❌ Failed to insert no-show payment record:", paymentErr);
-                }
-
-                // Record wallet transaction for card charges too (for rider visibility)
-                if (stripeChargeSuccess) {
-                  try {
-                    await supabase
-                      .from("wallet_transactions")
-                      .insert({
-                        user_id: rideRow.rider_id,
-                        ride_id: update.rideId,
-                        amount: fareAmount,
-                        type: "debit",
-                        description: `No-show cancellation fee — charged to saved card`,
-                      });
-                  } catch (_) {
-                    // Non-critical
-                  }
-                }
-              }
-
-              // ─── 5b. Credit driver's earnings with the no-show fee ────────────────
-              if (rideRow.driver_id && fareAmount > 0) {
-                try {
-                  const { data: driverData } = await supabase
-                    .from("drivers")
-                    .select("total_earnings")
-                    .eq("id", rideRow.driver_id)
-                    .single();
-
-                  const currentEarnings = driverData?.total_earnings || 0;
-                  const newEarnings = Number((currentEarnings + fareAmount).toFixed(2));
-
-                  const { error: earningsErr } = await supabase
-                    .from("drivers")
-                    .update({ total_earnings: newEarnings })
-                    .eq("id", rideRow.driver_id);
-
-                  if (earningsErr) {
-                    console.error("❌ Failed to update driver earnings on no-show:", earningsErr);
-                  } else {
-                    console.log(`✅ Driver ${rideRow.driver_id} earnings updated for no-show: +£${fareAmount} (total: £${newEarnings})`);
-                  }
-                } catch (earningsErr) {
-                  console.error("❌ Error updating driver earnings on no-show:", earningsErr);
-                }
-              } else {
-                console.warn(`⚠️ No-show: driver_id=${rideRow.driver_id}, fareAmount=${fareAmount} — skipping earnings credit`);
-              }
-
-              // ─── 6. Notify the rider ─────────────────────────────────────────────
-              io.to(`rider:${rideRow.rider_id}`).emit("ride:update", {
-                rideId: update.rideId,
-                status: "cancelled_no_show",
-                noShowFare: fareAmount,
-                chargedVia: stripeChargeSuccess ? "card" : "wallet",
-              });
-
-              // ─── 7. Notify the driver ────────────────────────────────────────────
-              const rInfo = activeRides.get(update.rideId);
-              if (rInfo?.driverSocketId) {
-                io.to(rInfo.driverSocketId).emit("ride:update", {
-                  rideId: update.rideId,
-                  status: "cancelled_no_show",
-                  noShowFare: fareAmount,
-                  earningsAdded: fareAmount,
-                });
-              }
-              // Also broadcast to driver room
-              if (rideRow.driver_id) {
-                io.to(`driver:${rideRow.driver_id}`).emit("ride:update", {
-                  rideId: update.rideId,
-                  status: "cancelled_no_show",
-                  noShowFare: fareAmount,
-                  earningsAdded: fareAmount,
-                });
-              }
-
-              // ─── 8. Clean up ─────────────────────────────────────────────────────
-              activeRides.delete(update.rideId);
-              console.log(`✅ No-show cancellation complete for ride ${update.rideId} (charged via: ${stripeChargeSuccess ? 'card' : 'wallet'})`);
-
-            } catch (error) {
-              console.error("❌ Error in no-show auto-cancellation handler:", error);
-            }
-          }, ARRIVED_TIMEOUT_MS);
-
-          arrivedTimers.set(update.rideId, timer);
+          console.log(`⏱️ Driver arrived for ride ${update.rideId}. Notifying rider to start 10-minute free waiting timer.`);
 
           // Enrich the update with driverArrivedAt so the rider app can start the countdown
           (update as any).driverArrivedAt = driverArrivedAt;
@@ -1123,6 +869,246 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
       } catch (error) {
         console.error("Error updating ride status:", error);
+      }
+    });
+
+    // ─── Driver-Initiated No Show ──────────────────────────────────────
+    socket.on("ride:no_show", async (data: { rideId: string, driverId: string }) => {
+      console.log(`⏱️🚫 Driver ${data.driverId} initiated No Show for ride ${data.rideId}`);
+
+      try {
+        // 1. Look up the ride to get fare and rider info
+        const { data: rideRow } = await supabase
+          .from("rides")
+          .select("*")
+          .eq("id", data.rideId)
+          .single();
+
+        if (!rideRow) {
+          console.error(`❌ No-show handler: ride ${data.rideId} not found in DB`);
+          return;
+        }
+
+        // Only proceed if ride is still in "arrived" status
+        if (rideRow.status !== "arrived") {
+          console.log(`ℹ️ No-show fired but ride ${data.rideId} is now ${rideRow.status} — skipping`);
+          return;
+        }
+
+        const fareAmount = rideRow.estimated_price || 0;
+        const ridePaymentMethod = rideRow.payment_method || "cash";
+
+        console.log(`💳 No-show: ride ${data.rideId} payment_method=${ridePaymentMethod}, fare=£${fareAmount}`);
+
+        // ─── 2. Charge the rider's saved card via Stripe ────────────────────
+        let stripeChargeSuccess = false;
+        let stripePaymentIntentId: string | undefined;
+        let stripeChargeError: string | undefined;
+
+        if (rideRow.rider_id && fareAmount > 0) {
+          try {
+            const { data: riderUser } = await supabase
+              .from("users")
+              .select("stripe_customer_id, wallet_balance")
+              .eq("id", rideRow.rider_id)
+              .single();
+
+            const stripeCustomerId = riderUser?.stripe_customer_id;
+
+            if (stripeCustomerId) {
+              console.log(`💳 Attempting to charge saved card for rider ${rideRow.rider_id} (Stripe customer: ${stripeCustomerId})`);
+              const chargeResult = await chargeSavedCard(
+                stripeCustomerId,
+                fareAmount,
+                data.rideId,
+                "gbp",
+                "no_show_fee"
+              );
+
+              stripeChargeSuccess = chargeResult.success;
+              stripePaymentIntentId = chargeResult.paymentIntentId;
+              stripeChargeError = chargeResult.error;
+
+              if (stripeChargeSuccess) {
+                console.log(`✅ No-show fee £${fareAmount} charged to saved card for ride ${data.rideId}`);
+              } else {
+                console.warn(`⚠️ Stripe card charge failed: ${stripeChargeError} — will fall back to wallet`);
+              }
+            } else {
+              console.warn(`⚠️ Rider ${rideRow.rider_id} has no Stripe customer ID — will fall back to wallet`);
+              stripeChargeError = "No Stripe customer ID on file";
+            }
+          } catch (stripeErr) {
+            console.error("❌ Stripe charge attempt failed:", stripeErr);
+            stripeChargeError = String(stripeErr);
+          }
+        }
+
+        // ─── 3. Cancel the ride in DB ────────────────────────────────────────
+        const cancelPayload: Record<string, any> = {
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          payment_status: stripeChargeSuccess ? "no_show_card_charged" : "no_show_wallet_charged",
+        };
+        if (stripePaymentIntentId) {
+          cancelPayload.payment_intent_id = stripePaymentIntentId;
+        }
+
+        await supabase
+          .from("rides")
+          .update(cancelPayload)
+          .eq("id", data.rideId);
+
+        console.log(`✅ Ride ${data.rideId} cancelled in DB due to no-show (charged via: ${stripeChargeSuccess ? 'card' : 'wallet'})`);
+
+        // ─── 4. If card charge failed, fall back to wallet deduction ─────────
+        if (!stripeChargeSuccess && rideRow.rider_id && fareAmount > 0) {
+          try {
+            const { data: userRow } = await supabase
+              .from("users")
+              .select("wallet_balance")
+              .eq("id", rideRow.rider_id)
+              .single();
+
+            const currentBalance = userRow?.wallet_balance || 0;
+            const newBalance = Math.max(0, currentBalance - fareAmount);
+
+            await supabase
+              .from("users")
+              .update({ wallet_balance: newBalance })
+              .eq("id", rideRow.rider_id);
+
+            console.log(`💰 No-show penalty (wallet fallback): Debited £${fareAmount} from rider ${rideRow.rider_id} wallet (${currentBalance} → ${newBalance})`);
+
+            await supabase
+              .from("wallet_transactions")
+              .insert({
+                user_id: rideRow.rider_id,
+                ride_id: data.rideId,
+                amount: fareAmount,
+                type: "debit",
+                description: `No-show cancellation fee — driver waited 10 minutes (card charge failed: ${stripeChargeError || 'unknown'})`,
+              });
+          } catch (walletErr) {
+            console.error("❌ Failed to debit no-show penalty from wallet:", walletErr);
+          }
+        }
+
+        // ─── 5. Record payment in payments table ─────────────────────────────
+        if (rideRow.rider_id && fareAmount > 0) {
+          try {
+            await supabase.from("payments").insert({
+              ride_id: data.rideId,
+              user_id: rideRow.rider_id,
+              amount: fareAmount,
+              currency: "gbp",
+              status: "succeeded",
+              payment_method: stripeChargeSuccess ? "card" : "wallet",
+              stripe_payment_intent_id: stripePaymentIntentId || null,
+              completed_at: new Date().toISOString(),
+            });
+          } catch (paymentErr) {
+            console.error("❌ Failed to insert no-show payment record:", paymentErr);
+          }
+
+          if (stripeChargeSuccess) {
+            try {
+              await supabase
+                .from("wallet_transactions")
+                .insert({
+                  user_id: rideRow.rider_id,
+                  ride_id: data.rideId,
+                  amount: fareAmount,
+                  type: "debit",
+                  description: `No-show cancellation fee — charged to saved card`,
+                });
+            } catch (_) { }
+          }
+        }
+
+        // ─── 5b. Credit driver's earnings with the no-show fee ────────────────
+        if (rideRow.driver_id && fareAmount > 0) {
+          try {
+            const { data: driverData } = await supabase
+              .from("drivers")
+              .select("total_earnings")
+              .eq("id", rideRow.driver_id)
+              .single();
+
+            const currentEarnings = driverData?.total_earnings || 0;
+            const newEarnings = Number((currentEarnings + fareAmount).toFixed(2));
+
+            await supabase
+              .from("drivers")
+              .update({ total_earnings: newEarnings })
+              .eq("id", rideRow.driver_id);
+
+            console.log(`✅ Driver ${rideRow.driver_id} earnings updated for no-show: +£${fareAmount} (total: £${newEarnings})`);
+          } catch (earningsErr) {
+            console.error("❌ Error updating driver earnings on no-show:", earningsErr);
+          }
+        }
+
+        // ─── 6. Notify the rider ─────────────────────────────────────────────
+        io.to(`rider:${rideRow.rider_id}`).emit("ride:update", {
+          rideId: data.rideId,
+          status: "cancelled_no_show",
+          noShowFare: fareAmount,
+          chargedVia: stripeChargeSuccess ? "card" : "wallet",
+        });
+
+        // ─── 7. Notify the driver ────────────────────────────────────────────
+        const rInfo = activeRides.get(data.rideId);
+        if (rInfo?.driverSocketId) {
+          io.to(rInfo.driverSocketId).emit("ride:update", {
+            rideId: data.rideId,
+            status: "cancelled_no_show",
+            noShowFare: fareAmount,
+            earningsAdded: fareAmount,
+          });
+        }
+        if (rideRow.driver_id) {
+          io.to(`driver:${rideRow.driver_id}`).emit("ride:update", {
+            rideId: data.rideId,
+            status: "cancelled_no_show",
+            noShowFare: fareAmount,
+            earningsAdded: fareAmount,
+          });
+        }
+
+        // ─── 8. Set driver available again ────────────────────────────────────────────
+        try {
+          await supabase
+            .from("drivers")
+            .update({ is_available: true })
+            .eq("id", data.driverId);
+        } catch (_) {}
+
+        // ─── 9. Clean up ─────────────────────────────────────────────────────
+        activeRides.delete(data.rideId);
+        console.log(`✅ No-show cancellation complete for ride ${data.rideId}`);
+
+      } catch (error) {
+        console.error("❌ Error in no-show auto-cancellation handler:", error);
+      }
+    });
+
+    // ─── Driver Agrees to Wait ──────────────────────────────────────
+    socket.on("ride:agree_to_wait", async (data: { rideId: string, driverId: string, paidWaitingStartedAt: string, waitingChargePerMin: number }) => {
+      console.log(`⏱️💰 Driver ${data.driverId} agreed to wait for ride ${data.rideId} at £${data.waitingChargePerMin}/min`);
+      
+      // Look up the ride to notify the rider
+      try {
+        const { data: rideRow } = await supabase.from("rides").select("rider_id").eq("id", data.rideId).single();
+        if (rideRow?.rider_id) {
+          io.to(`rider:${rideRow.rider_id}`).emit("ride:paid_waiting_started", {
+            rideId: data.rideId,
+            paidWaitingStartedAt: data.paidWaitingStartedAt,
+            waitingChargePerMin: data.waitingChargePerMin
+          });
+        }
+      } catch (e) {
+        console.warn("Could not notify rider of paid waiting:", e);
       }
     });
 

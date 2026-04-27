@@ -2732,6 +2732,7 @@ export interface Earnings {
 export interface RideRequest {
   id: string;
   riderName: string;
+  riderPhone?: string;
   pickupAddress: string;
   dropoffAddress: string;
   pickupLatitude: number;
@@ -2785,6 +2786,10 @@ interface DriverContextType {
   arrivedAtPickup: () => void;
   startRide: (rideId: string, otp: string) => Promise<boolean>;
   completeTrip: () => void;
+  noShowRide: () => void;
+  agreeToWait: () => void;
+  paidWaitingStartedAt: string | null;
+  waitingChargePerMin: number;
   refreshData: () => Promise<void>;
   isLoading: boolean;
 }
@@ -2808,6 +2813,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [rideCancelledByRider, setRideCancelledByRider] = useState(false);
   const [completedRidePayment, setCompletedRidePayment] = useState<CompletedRidePayment | null>(null);
+  const [paidWaitingStartedAt, setPaidWaitingStartedAt] = useState<string | null>(null);
+  const [waitingChargePerMin, setWaitingChargePerMin] = useState(0.50); // default £0.50/min
   const [pendingRating, setPendingRating] = useState<{ rideId: string; riderName: string } | null>(null);
 
   const isOnlineRef = useRef(isOnline);
@@ -3276,10 +3283,66 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const arrivedAtPickup = () => {
     if (!activeRideRequest) return;
     setRideState("at_pickup");
+    setPaidWaitingStartedAt(null); // Reset paid waiting
 
     try {
       const socket = getSocket();
       socket.emit("ride:status", { rideId: activeRideRequest.id, status: "arrived", driverId: driverProfile?.id || user?.id || undefined });
+    } catch (err) {
+      console.warn("Socket emit failed:", err);
+    }
+
+    // Fetch waiting charge rate from pricing rules
+    (async () => {
+      try {
+        const { api } = await import('@/lib/api');
+        const rules = await api.pricingRules.getActive();
+        const vehiclePricing = rules?.vehicles || rules?.pricing;
+        const rideType = (activeRideRequest as any)?.rideType || 'saloon';
+        const formattedType = rideType.charAt(0).toUpperCase() + rideType.slice(1);
+        const waitPrice = parseFloat(vehiclePricing?.[formattedType]?.waiting_price || '0.50');
+        setWaitingChargePerMin(waitPrice > 0 ? waitPrice : 0.50);
+        console.log(`⏱️ Waiting charge rate: £${waitPrice}/min`);
+      } catch (e) {
+        console.warn('Could not fetch waiting price, using default £0.50/min');
+        setWaitingChargePerMin(0.50);
+      }
+    })();
+  };
+
+  // Driver-initiated No Show (after 10 min free waiting)
+  const noShowRide = () => {
+    if (!activeRideRequest) return;
+    console.log('🚫 Driver initiated No Show for ride:', activeRideRequest.id);
+
+    try {
+      const socket = getSocket();
+      socket.emit("ride:no_show", {
+        rideId: activeRideRequest.id,
+        driverId: driverProfile?.id || user?.id || undefined,
+      });
+    } catch (err) {
+      console.warn("Socket emit failed:", err);
+    }
+    // The server will handle the cancellation + charging
+    // and emit cancelled_no_show back which our existing listener handles
+  };
+
+  // Driver agrees to continue waiting (paid waiting starts)
+  const agreeToWait = () => {
+    if (!activeRideRequest) return;
+    const now = new Date().toISOString();
+    setPaidWaitingStartedAt(now);
+    console.log(`⏱️💰 Paid waiting started at ${now} for ride ${activeRideRequest.id}`);
+
+    try {
+      const socket = getSocket();
+      socket.emit("ride:agree_to_wait", {
+        rideId: activeRideRequest.id,
+        driverId: driverProfile?.id || user?.id || undefined,
+        paidWaitingStartedAt: now,
+        waitingChargePerMin,
+      });
     } catch (err) {
       console.warn("Socket emit failed:", err);
     }
@@ -3304,12 +3367,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (activeRideRequest) {
       const completedAt = new Date().toISOString();
 
+      // Calculate waiting charge if paid waiting was active
+      let waitingCharge = 0;
+      if (paidWaitingStartedAt) {
+        const paidWaitingMs = Date.now() - new Date(paidWaitingStartedAt).getTime();
+        const paidWaitingMin = Math.max(0, Math.floor(paidWaitingMs / 60000));
+        waitingCharge = Math.round(paidWaitingMin * waitingChargePerMin * 100) / 100;
+        console.log(`⏱️💰 Paid waiting: ${paidWaitingMin} mins × £${waitingChargePerMin} = £${waitingCharge}`);
+      }
+
+      const totalFare = Math.round((activeRideRequest.estimatedFare + waitingCharge) * 100) / 100;
+
       const newTrip: Trip = {
         id: `trip_${Date.now()}`,
         riderName: activeRideRequest.riderName,
         pickupAddress: activeRideRequest.pickupAddress,
         dropoffAddress: activeRideRequest.dropoffAddress,
-        farePrice: activeRideRequest.estimatedFare,
+        farePrice: totalFare,
         distanceMiles: activeRideRequest.distanceMiles,
         durationMinutes: activeRideRequest.durationMinutes,
         completedAt,
@@ -3326,10 +3400,20 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       try {
         const socket = getSocket();
-        socket.emit("ride:status", { rideId: activeRideRequest.id, status: "completed", driverId: driverProfile?.id || user?.id || undefined });
+        socket.emit("ride:status", {
+          rideId: activeRideRequest.id,
+          status: "completed",
+          driverId: driverProfile?.id || user?.id || undefined,
+          waitingCharge,
+          totalFare,
+        });
       } catch (err) {
         console.warn("Socket emit failed:", err);
       }
+
+      // Calculate amount to collect (including waiting charge)
+      const baseCollect = activeRideRequest.expectedCollectAmount !== undefined ? activeRideRequest.expectedCollectAmount : activeRideRequest.estimatedFare;
+      const amountToCollect = Math.round((baseCollect + waitingCharge) * 100) / 100;
 
       // Show the payment collection screen to the driver
       setCompletedRidePayment({
@@ -3337,21 +3421,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         riderName: activeRideRequest.riderName,
         pickupAddress: activeRideRequest.pickupAddress,
         dropoffAddress: activeRideRequest.dropoffAddress,
-        fareAmount: activeRideRequest.estimatedFare,
+        fareAmount: totalFare,
         distanceMiles: activeRideRequest.distanceMiles,
         durationMinutes: activeRideRequest.durationMinutes,
         completedAt,
         paymentMethod: activeRideRequest.paymentMethod || 'cash',
-        amountToCollect: activeRideRequest.expectedCollectAmount !== undefined ? activeRideRequest.expectedCollectAmount : activeRideRequest.estimatedFare,
+        amountToCollect,
       });
 
       // 🔔 Notify driver of ride completion
       sendLocalNotification(
         "✅ Trip Completed",
-        `Trip with ${activeRideRequest.riderName} completed. Fare: £${activeRideRequest.estimatedFare.toFixed(2)}`,
+        `Trip with ${activeRideRequest.riderName} completed. Fare: £${totalFare.toFixed(2)}${waitingCharge > 0 ? ` (incl. £${waitingCharge.toFixed(2)} waiting)` : ''}`,
         { type: "ride_completed", rideId: activeRideRequest.id }
       );
     }
+    setPaidWaitingStartedAt(null);
     setActiveRideRequest(null);
     setRideState("none");
   };
@@ -3504,6 +3589,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         arrivedAtPickup,
         startRide,
         completeTrip,
+        noShowRide,
+        agreeToWait,
+        paidWaitingStartedAt,
+        waitingChargePerMin,
         refreshData,
         isLoading,
       }}

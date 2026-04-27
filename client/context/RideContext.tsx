@@ -1464,6 +1464,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
         ...newRide,
         riderId: user?.id,
         riderName: riderName || user?.fullName || "Rider",
+        riderPhone: user?.phone || "",
       });
     } catch (err) {
       console.warn("Socket emit failed:", err);
