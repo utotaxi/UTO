@@ -167,11 +167,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
-      setUser(null);
+      // Step 1: Show loading spinner FIRST.
+      // RootStackNavigator checks `authLoading` and renders a plain spinner
+      // instead of any navigation stack. This cleanly unmounts ALL authenticated
+      // screens (and their hooks/contexts) before we change the auth state,
+      // preventing the "undefined is not a function" crash that occurs when
+      // screens are torn down mid-render during a navigation tree swap.
+      setIsLoading(true);
+
+      // Step 2: Clear credentials while loading spinner is showing
       await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
-      await supabase.auth.signOut();
+      try { await supabase.auth.signOut(); } catch (_) { /* non-critical */ }
+
+      // Step 3: Now safely clear the user — screens are already gone
+      setUser(null);
     } catch (error) {
       console.error("Sign out failed:", error);
+    } finally {
+      // Step 4: Hide loading — now shows the unauthenticated Welcome screen
+      setIsLoading(false);
     }
   };
 
