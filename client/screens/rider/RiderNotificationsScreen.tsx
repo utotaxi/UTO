@@ -189,7 +189,6 @@ export default function RiderNotificationsScreen({ navigation }: any) {
       items: [
         { key: "pushRideUpdates" as const, label: "Ride Updates", subtitle: "Driver arrival, ride status, and trip progress", icon: "directions-car" as const },
         { key: "pushPayments" as const, label: "Payments & Receipts", subtitle: "Payment confirmations and wallet updates", icon: "payment" as const },
-        { key: "pushSafety" as const, label: "Safety Alerts", subtitle: "Important safety notifications (always on)", icon: "security" as const },
         { key: "pushPromotions" as const, label: "Promotions & Offers", subtitle: "Discounts, promo codes, and special deals", icon: "local-offer" as const },
       ],
     },
@@ -204,7 +203,6 @@ export default function RiderNotificationsScreen({ navigation }: any) {
       title: "EMAIL",
       items: [
         { key: "emailReceipts" as const, label: "Trip Receipts", subtitle: "Receive trip receipts via email", icon: "receipt" as const },
-        { key: "emailSafety" as const, label: "Account & Safety", subtitle: "Security alerts and account updates (always on)", icon: "verified-user" as const },
         { key: "emailPromotions" as const, label: "Promotions", subtitle: "Deals and personalised offers", icon: "mail" as const },
         { key: "emailNewsletter" as const, label: "UTO News", subtitle: "Product updates and company news", icon: "article" as const },
       ],
@@ -245,7 +243,7 @@ export default function RiderNotificationsScreen({ navigation }: any) {
         >
           <MaterialIcons name="info-outline" size={20} color={UTOColors.primary} />
           <ThemedText style={styles.infoBannerText}>
-            Manage how you receive notifications. Safety alerts cannot be turned off for your protection.
+            Manage how you receive notifications to stay updated on your trips.
           </ThemedText>
         </Animated.View>
 
@@ -271,8 +269,6 @@ export default function RiderNotificationsScreen({ navigation }: any) {
             <ThemedText style={styles.sectionTitle}>{section.title}</ThemedText>
             <View style={styles.sectionCard}>
               {section.items.map((item, iIndex) => {
-                // Safety prefs are always on and disabled
-                const isSafetyPref = item.key === "pushSafety" || item.key === "emailSafety";
                 return (
                   <NotificationToggle
                     key={item.key}
@@ -282,7 +278,6 @@ export default function RiderNotificationsScreen({ navigation }: any) {
                     value={prefs[item.key]}
                     onToggle={() => togglePref(item.key)}
                     isLast={iIndex === section.items.length - 1}
-                    disabled={isSafetyPref}
                   />
                 );
               })}
