@@ -647,6 +647,7 @@ export default function AirportBookingScreen({ navigation }: any) {
               </Pressable>
             </View>
           </View>
+        </View>
         
         {/* ── Return Journey Details ── */}
         {isReturnJourney && (
