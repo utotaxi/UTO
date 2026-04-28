@@ -2092,18 +2092,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         riderId, pickupAddress, pickupLatitude, pickupLongitude,
         dropoffAddress, dropoffLatitude, dropoffLongitude, pickupAt, dropoffBy,
         vehicleType, estimatedFare, distanceMiles: clientDistanceMiles, durationMinutes: clientDurationMinutes,
-        flightNumber, isRoundTrip, bookingType
+        flightNumber, isRoundTrip, bookingType, passengers, luggage
       } = req.body;
 
-      if (!riderId || !pickupAddress || !dropoffAddress || !pickupAt || !dropoffBy) {
+      if (!riderId || !pickupAddress || !dropoffAddress || !pickupAt) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
       const pickupTime = new Date(pickupAt);
-      const dropoffTime = new Date(dropoffBy);
+      const dropoffTime = dropoffBy ? new Date(dropoffBy) : null;
       const now = new Date();
 
-      if (isNaN(pickupTime.getTime()) || isNaN(dropoffTime.getTime())) {
+      if (isNaN(pickupTime.getTime())) {
         return res.status(400).json({ error: "Invalid date format" });
       }
 
@@ -2117,9 +2117,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Pickup time cannot be more than 365 days in the future" });
       }
 
-      const gapMs = dropoffTime.getTime() - pickupTime.getTime();
-      if (gapMs < 30 * 60 * 1000) {
-        return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs/60000)} min)` });
+      if (dropoffTime) {
+        const gapMs = dropoffTime.getTime() - pickupTime.getTime();
+        if (gapMs < 30 * 60 * 1000) {
+          return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs/60000)} min)` });
+        }
       }
 
       const timeDiffMs = pickupTime.getTime() - now.getTime();
@@ -2194,7 +2196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           dropoff_latitude: dropoffLatitude ?? null,
           dropoff_longitude: dropoffLongitude ?? null,
           pickup_at: pickupTime.toISOString(),
-          dropoff_by: dropoffTime.toISOString(),
+          dropoff_by: dropoffTime ? dropoffTime.toISOString() : null,
           status: "scheduled",
           vehicle_type: vehicleType || 'saloon',
           estimated_fare: estimatedFare ?? null,
@@ -2203,6 +2205,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           flight_number: flightNumber ?? null,
           is_round_trip: isRoundTrip ?? false,
           booking_type: bookingType || 'standard',
+          passengers: passengers ?? 1,
+          luggage: luggage ?? 0,
       };
 
       let { data, error } = await sb
@@ -2221,6 +2225,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         delete insertData.flight_number;
         delete insertData.is_round_trip;
         delete insertData.booking_type;
+        delete insertData.passengers;
+        delete insertData.luggage;
         const retry = await sb
           .from("later_bookings")
           .insert(insertData)

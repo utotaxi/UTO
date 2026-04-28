@@ -2578,9 +2578,11 @@ export default function RideRequestScreen({ navigation, route }: any) {
   const [isScheduleMode, setIsScheduleMode] = useState(initScheduleMode);
   const [showChooseTimeModal, setShowChooseTimeModal] = useState(initScheduleMode);
 
-  // 'pickup' = user picks pickup time, dropoff calculated
-  // 'dropoff' = user picks dropoff time, pickup calculated
-  const [scheduleTab, setScheduleTab] = useState<'pickup' | 'dropoff'>('pickup');
+  // 'pickup' = user picks pickup time
+
+  // Passengers & luggage for scheduled rides
+  const [schedPassengers, setSchedPassengers] = useState(1);
+  const [schedLuggage, setSchedLuggage] = useState(0);
 
   // Date state
   const now = new Date();
@@ -2605,24 +2607,11 @@ export default function RideRequestScreen({ navigation, route }: any) {
     return Math.round(m / 5) * 5;
   });
 
-  // Trip duration used for opposite-time calculation (min 30 min enforced)
-  const tripDurationMin = Math.max(durationMin ?? 30, 30);
-
-  // Compute pickup / dropoff times based on active tab
+  // Compute pickup time
   const pickupTime: Date = (() => {
     const base = new Date(scheduledDate);
     base.setHours(hourVal, minuteVal, 0, 0);
-    if (scheduleTab === 'pickup') return base;
-    // dropoff tab: pickup = selected - tripDuration
-    return new Date(base.getTime() - tripDurationMin * 60000);
-  })();
-
-  const dropoffTime: Date = (() => {
-    const base = new Date(scheduledDate);
-    base.setHours(hourVal, minuteVal, 0, 0);
-    if (scheduleTab === 'dropoff') return base;
-    // pickup tab: dropoff = selected + tripDuration
-    return new Date(base.getTime() + tripDurationMin * 60000);
+    return base;
   })();
 
   // Sync hour/minute into scheduledDate when spinners change
@@ -3350,25 +3339,8 @@ export default function RideRequestScreen({ navigation, route }: any) {
             <View style={{ width: 40 }} />
           </View>
 
-          {/* Tab: Pickup at / Dropoff by */}
-          <View style={schedStyles.tabRow}>
-            <Pressable
-              style={[schedStyles.tabBtn, scheduleTab === 'pickup' && schedStyles.tabBtnActive]}
-              onPress={() => setScheduleTab('pickup')}
-            >
-              <Text style={[schedStyles.tabText, scheduleTab === 'pickup' && schedStyles.tabTextActive]}>
-                Pickup at
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[schedStyles.tabBtn, scheduleTab === 'dropoff' && schedStyles.tabBtnActive]}
-              onPress={() => setScheduleTab('dropoff')}
-            >
-              <Text style={[schedStyles.tabText, scheduleTab === 'dropoff' && schedStyles.tabTextActive]}>
-                Dropoff by
-              </Text>
-            </Pressable>
-          </View>
+          {/* Pickup time header */}
+          <Text style={[schedStyles.headerTitle, { paddingLeft: 8, paddingTop: 8, paddingBottom: 0, fontSize: 16, color: '#6B7280' }]}>Pickup Time</Text>
 
           <ScrollView contentContainerStyle={schedStyles.body} showsVerticalScrollIndicator={false}>
 
@@ -3485,7 +3457,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
 
             {/* Time label: what the user is editing */}
             <Text style={schedStyles.timeLabel}>
-              {scheduleTab === 'pickup' ? 'Pickup time' : 'Dropoff time'}
+              Pickup time
             </Text>
 
             {/* Time picker: hour/minute spinners */}
@@ -3535,35 +3507,52 @@ export default function RideRequestScreen({ navigation, route }: any) {
               </View>
             </View>
 
-            {/* Opposite-time info card */}
-            <View style={schedStyles.oppositeCard}>
-              {scheduleTab === 'pickup' ? (
-                <>
-                  <Text style={schedStyles.oppositeTitle}>
-                    {dropoffTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} drop-off time
-                  </Text>
-                  <Text style={schedStyles.oppositeSub}>About {tripDurationMin} min trip</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={schedStyles.oppositeTitle}>
-                    {pickupTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} pick-up time
-                  </Text>
-                  <Text style={schedStyles.oppositeSub}>About {tripDurationMin} min trip</Text>
-                </>
-              )}
-              {/* Estimated fare in schedule modal */}
-              {distanceKm !== null && (
-                <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#E5E7EB' }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
-                    Estimated Fare: £{calculatePrice(selectedVehicle).toFixed(2)}
-                  </Text>
-                  <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
-                    {(distanceKm * 0.621371).toFixed(1)} miles · {VEHICLE_OPTIONS.find(v => v.type === selectedVehicle)?.name}
-                  </Text>
+            {/* Passengers & Luggage counters */}
+            <View style={schedStyles.counterSection}>
+              <View style={schedStyles.counterRow}>
+                <View style={schedStyles.counterLeft}>
+                  <MaterialIcons name="person" size={22} color="#374151" />
+                  <Text style={schedStyles.counterLabel}>Passengers</Text>
                 </View>
-              )}
+                <View style={schedStyles.counterControls}>
+                  <Pressable style={[schedStyles.counterBtn, schedPassengers <= 1 && schedStyles.counterBtnDisabled]} onPress={() => { if (schedPassengers > 1) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSchedPassengers(p => p - 1); } }}>
+                    <MaterialIcons name="remove" size={20} color={schedPassengers <= 1 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                  <Text style={schedStyles.counterValue}>{schedPassengers}</Text>
+                  <Pressable style={[schedStyles.counterBtn, schedPassengers >= 8 && schedStyles.counterBtnDisabled]} onPress={() => { if (schedPassengers < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSchedPassengers(p => p + 1); } }}>
+                    <MaterialIcons name="add" size={20} color={schedPassengers >= 8 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                </View>
+              </View>
+              <View style={schedStyles.counterDivider} />
+              <View style={schedStyles.counterRow}>
+                <View style={schedStyles.counterLeft}>
+                  <MaterialIcons name="luggage" size={22} color="#374151" />
+                  <Text style={schedStyles.counterLabel}>Luggage</Text>
+                </View>
+                <View style={schedStyles.counterControls}>
+                  <Pressable style={[schedStyles.counterBtn, schedLuggage <= 0 && schedStyles.counterBtnDisabled]} onPress={() => { if (schedLuggage > 0) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSchedLuggage(l => l - 1); } }}>
+                    <MaterialIcons name="remove" size={20} color={schedLuggage <= 0 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                  <Text style={schedStyles.counterValue}>{schedLuggage}</Text>
+                  <Pressable style={[schedStyles.counterBtn, schedLuggage >= 8 && schedStyles.counterBtnDisabled]} onPress={() => { if (schedLuggage < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSchedLuggage(l => l + 1); } }}>
+                    <MaterialIcons name="add" size={20} color={schedLuggage >= 8 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                </View>
+              </View>
             </View>
+
+            {/* Estimated fare in schedule modal */}
+            {distanceKm !== null && (
+              <View style={schedStyles.oppositeCard}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+                  Estimated Fare: £{calculatePrice(selectedVehicle).toFixed(2)}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                  {(distanceKm * 0.621371).toFixed(1)} miles · {VEHICLE_OPTIONS.find(v => v.type === selectedVehicle)?.name}
+                </Text>
+              </View>
+            )}
 
             <View style={{ minHeight: 24 }} />
           </ScrollView>
@@ -3583,12 +3572,6 @@ export default function RideRequestScreen({ navigation, route }: any) {
 
                 if (finalPickup <= now2) {
                   Alert.alert('Invalid time', 'Pickup time must be in the future.');
-                  return;
-                }
-                // 30-min minimum check
-                const diffMs = dropoffTime.getTime() - finalPickup.getTime();
-                if (diffMs < 30 * 60000) {
-                  Alert.alert('Too close', 'Minimum 30 minutes required between pickup and dropoff.');
                   return;
                 }
 
@@ -3614,7 +3597,8 @@ export default function RideRequestScreen({ navigation, route }: any) {
                         vehicleType: selectedVehicle,
                         estimatedFare: fare,
                         pickupAt: finalPickup.toISOString(),
-                        dropoffBy: dropoffTime.toISOString(),
+                        passengers: schedPassengers,
+                        luggage: schedLuggage,
                       }),
                     });
                     Alert.alert(
@@ -4123,5 +4107,60 @@ const schedStyles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
   },
+  // Passengers & Luggage counters
+  counterSection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginHorizontal: 16,
+  },
+  counterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  counterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  counterLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  counterControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  counterBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  counterBtnDisabled: {
+    borderColor: '#F3F4F6',
+    backgroundColor: '#F9FAFB',
+  },
+  counterValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  counterDivider: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
+    marginVertical: 4,
+  },
 });
-

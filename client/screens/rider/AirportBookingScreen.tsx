@@ -58,6 +58,10 @@ export default function AirportBookingScreen({ navigation }: any) {
   // Flight details
   const [flightNumber, setFlightNumber] = useState('');
 
+  // Passengers & luggage
+  const [passengers, setPassengers] = useState(1);
+  const [luggage, setLuggage] = useState(0);
+
   // Round trip
   const [isReturnJourney, setIsReturnJourney] = useState(false);
 
@@ -338,7 +342,6 @@ export default function AirportBookingScreen({ navigation }: any) {
           dropoffLatitude: dropoffLocation?.latitude ?? null,
           dropoffLongitude: dropoffLocation?.longitude ?? null,
           pickupAt: scheduledTime.toISOString(),
-          dropoffBy: new Date(scheduledTime.getTime() + 60 * 60 * 1000).toISOString(),
           estimatedFare: estimatedFare ?? null,
           vehicleType: selectedVehicle,
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
@@ -346,6 +349,8 @@ export default function AirportBookingScreen({ navigation }: any) {
           flightNumber: flightNumber || null,
           isReturnJourney: isReturnJourney,
           bookingType: 'airport',
+          passengers,
+          luggage,
         }),
       });
 
@@ -369,7 +374,6 @@ export default function AirportBookingScreen({ navigation }: any) {
             dropoffLatitude: pickupLocation?.latitude ?? null,
             dropoffLongitude: pickupLocation?.longitude ?? null,
             pickupAt: returnScheduledTime.toISOString(),
-            dropoffBy: new Date(returnScheduledTime.getTime() + 60 * 60 * 1000).toISOString(),
             estimatedFare: returnEstimatedFare ?? null,
             vehicleType: returnSelectedVehicle,
             distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
@@ -377,6 +381,8 @@ export default function AirportBookingScreen({ navigation }: any) {
             flightNumber: returnFlightNumber || null,
             isReturnJourney: true,
             bookingType: 'airport',
+            passengers,
+            luggage,
           }),
         });
 
@@ -390,7 +396,7 @@ export default function AirportBookingScreen({ navigation }: any) {
 
       Alert.alert(
         '✈️ Airport Transfer Booked!',
-        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
+        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}\n${passengers} passenger(s), ${luggage} bag(s)${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {
@@ -519,6 +525,41 @@ export default function AirportBookingScreen({ navigation }: any) {
                 Up to 8 passengers
               </Text>
             </Pressable>
+          </View>
+        </View>
+
+        {/* ── Passengers & Luggage ── */}
+        <View style={s.counterSection}>
+          <View style={s.counterRow}>
+            <View style={s.counterLeft}>
+              <MaterialIcons name="person" size={22} color="#374151" />
+              <Text style={s.counterLabel}>Passengers</Text>
+            </View>
+            <View style={s.counterControls}>
+              <Pressable style={[s.counterBtn, passengers <= 1 && s.counterBtnDisabled]} onPress={() => { if (passengers > 1) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p - 1); } }}>
+                <MaterialIcons name="remove" size={20} color={passengers <= 1 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+              <Text style={s.counterValue}>{passengers}</Text>
+              <Pressable style={[s.counterBtn, passengers >= 8 && s.counterBtnDisabled]} onPress={() => { if (passengers < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p + 1); } }}>
+                <MaterialIcons name="add" size={20} color={passengers >= 8 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+            </View>
+          </View>
+          <View style={s.counterDivider} />
+          <View style={s.counterRow}>
+            <View style={s.counterLeft}>
+              <MaterialIcons name="luggage" size={22} color="#374151" />
+              <Text style={s.counterLabel}>Luggage</Text>
+            </View>
+            <View style={s.counterControls}>
+              <Pressable style={[s.counterBtn, luggage <= 0 && s.counterBtnDisabled]} onPress={() => { if (luggage > 0) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l - 1); } }}>
+                <MaterialIcons name="remove" size={20} color={luggage <= 0 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+              <Text style={s.counterValue}>{luggage}</Text>
+              <Pressable style={[s.counterBtn, luggage >= 8 && s.counterBtnDisabled]} onPress={() => { if (luggage < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l + 1); } }}>
+                <MaterialIcons name="add" size={20} color={luggage >= 8 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+            </View>
           </View>
         </View>
 
@@ -1143,4 +1184,65 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   continueBtnText: { color: '#000000', fontSize: 17, fontWeight: '700' },
+
+  // Passengers & Luggage counters
+  counterSection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  counterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  counterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  counterLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  counterControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  counterBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  counterBtnDisabled: {
+    borderColor: '#F3F4F6',
+    backgroundColor: '#F9FAFB',
+  },
+  counterValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  counterDivider: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
+    marginVertical: 4,
+  },
 });

@@ -34,6 +34,8 @@ interface ScheduledRide {
   distance_miles?: number;
   duration_minutes?: number;
   vehicle_type?: string;
+  passengers?: number;
+  luggage?: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -58,7 +60,6 @@ function statusLabel(status: BookingStatus): { label: string; color: string; bg:
 // ── Ride Card ────────────────────────────────────────────────────────
 function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCancel: (ride: ScheduledRide) => void; calculateFare: (dist: number, dur: number, type: string) => number }) {
   const pickup = fmtDateTime(ride.pickup_at);
-  const dropoff = fmtDateTime(ride.dropoff_by);
   const badge = statusLabel(ride.status);
   const canCancel = ride.status === 'scheduled' || ride.status === 'driver_accepted';
 
@@ -98,8 +99,16 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
           <View style={cs.addrBlock}>
             <Text style={cs.addrLabel}>DROPOFF</Text>
             <Text style={cs.addrText} numberOfLines={2}>{ride.dropoff_address}</Text>
-            <Text style={cs.addrTime}>{dropoff.date}  ·  {dropoff.time}</Text>
           </View>
+          {/* Passengers & Luggage */}
+          {(ride.passengers || ride.luggage) ? (
+            <View style={cs.infoRow}>
+              <MaterialIcons name="person" size={14} color="#9CA3AF" />
+              <Text style={cs.infoText}>{ride.passengers || 1} passenger(s)</Text>
+              <MaterialIcons name="luggage" size={14} color="#9CA3AF" style={{ marginLeft: 10 }} />
+              <Text style={cs.infoText}>{ride.luggage || 0} bag(s)</Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -343,6 +352,8 @@ const cs = StyleSheet.create({
   addrLabel: { fontSize: 10, fontWeight: '700', color: '#6B7280', letterSpacing: 1, marginBottom: 2 },
   addrText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF', lineHeight: 20 },
   addrTime: { fontSize: 13, color: '#9CA3AF', marginTop: 3 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 4 },
+  infoText: { fontSize: 12, color: '#9CA3AF' },
 
   // Cancel button
   cancelBtn: {

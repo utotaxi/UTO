@@ -43,13 +43,17 @@ function fmtDate(d: Date) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-const MIN_GAP_MS = 30 * 60 * 1000; // 30 minutes
+
 
 // ── Main Screen ────────────────────────────────────────────────────
 export default function LaterRideScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { calculateDynamicFare } = useRide();
+
+  // Passengers & luggage
+  const [passengers, setPassengers] = useState(1);
+  const [luggage, setLuggage] = useState(0);
 
   // Locations
   const [pickup, setPickup] = useState('');
@@ -68,8 +72,8 @@ export default function LaterRideScreen({ navigation }: any) {
   const openedAt = React.useRef(new Date()).current;
   const maxDate = React.useRef(new Date(openedAt.getTime() + 365 * 24 * 60 * 60 * 1000)).current;
 
-  // Default: pickup = openedAt + 1 hour (rounded to nearest 5 min), dropoff = pickup + 30 min
-  const [tab, setTab] = useState<Tab>('pickup');
+  // Default: pickup = openedAt + 1 hour (rounded to nearest 5 min)
+
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
     const d = new Date(openedAt);
     d.setHours(d.getHours() + 1, 0, 0, 0);
@@ -150,42 +154,11 @@ export default function LaterRideScreen({ navigation }: any) {
     calculateFare();
   }, [pickupLocation, dropoffLocation, selectedVehicle]);
 
-  // ── Tab switching: update spinner to show the COMPUTED opposite time ────
-  // This ensures: Pickup 18:00 → switch to Dropoff → spinner shows 18:30
-  //               Dropoff 18:30 → switch back to Pickup → spinner shows 18:00
-  const switchToTab = (newTab: Tab) => {
-    if (newTab === tab) return;
-    const currentTotalMin = hourVal * 60 + minuteVal;
-    let newTotalMin: number;
-    if (newTab === 'dropoff') {
-      // switching pickup → dropoff: show computedDropoff = current + 30
-      newTotalMin = currentTotalMin + 30;
-    } else {
-      // switching dropoff → pickup: show computedPickup = current - 30
-      newTotalMin = currentTotalMin - 30;
-    }
-    // Wrap to 0-1439 (24h range)
-    newTotalMin = ((newTotalMin % 1440) + 1440) % 1440;
-    setHourVal(Math.floor(newTotalMin / 60));
-    setMinuteVal(newTotalMin % 60);
-    setTab(newTab);
-  };
-
-  // Compute both times based on active tab
-  //   Pickup tab: user picks pickup → dropoff = pickup + 30 min
-  //   Dropoff tab: user picks dropoff → pickup = dropoff - 30 min
+  // Compute pickup time from spinner
   const computedPickup: Date = (() => {
     const base = new Date(selectedDate);
     base.setHours(hourVal, minuteVal, 0, 0);
-    if (tab === 'pickup') return base;
-    return new Date(base.getTime() - MIN_GAP_MS);
-  })();
-
-  const computedDropoff: Date = (() => {
-    const base = new Date(selectedDate);
-    base.setHours(hourVal, minuteVal, 0, 0);
-    if (tab === 'dropoff') return base;
-    return new Date(base.getTime() + MIN_GAP_MS);
+    return base;
   })();
 
   const handleContinue = async () => {
@@ -193,15 +166,10 @@ export default function LaterRideScreen({ navigation }: any) {
     if (!dropoff) { Alert.alert('Missing destination', 'Please enter a destination.'); return; }
 
     const finalPickup = computedPickup;
-    const finalDropoff = computedDropoff;
-    const rightNow = new Date(); // fresh check at button-press time
+    const rightNow = new Date();
 
     if (finalPickup <= rightNow) {
       Alert.alert('Time has passed', `Pickup time ${fmtTime(finalPickup)} is in the past. Please select a future time.`);
-      return;
-    }
-    if (finalDropoff.getTime() - finalPickup.getTime() < MIN_GAP_MS) {
-      Alert.alert('Too close', 'Minimum 30 minutes required between pickup and dropoff.');
       return;
     }
 
@@ -220,11 +188,12 @@ export default function LaterRideScreen({ navigation }: any) {
           dropoffLatitude: dropoffLocation?.latitude ?? null,
           dropoffLongitude: dropoffLocation?.longitude ?? null,
           pickupAt: finalPickup.toISOString(),
-          dropoffBy: finalDropoff.toISOString(),
           estimatedFare: estimatedFare ?? null,
           vehicleType: selectedVehicle,
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
           durationMinutes: durationMin ?? null,
+          passengers,
+          luggage,
         }),
       });
 
@@ -237,7 +206,7 @@ export default function LaterRideScreen({ navigation }: any) {
 
       Alert.alert(
         '🗓 Ride Scheduled!',
-        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\nDropoff by: ${fmtDate(finalDropoff)} at ${fmtTime(finalDropoff)}${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
+        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\n${passengers} passenger(s), ${luggage} bag(s)${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {
@@ -401,25 +370,44 @@ export default function LaterRideScreen({ navigation }: any) {
           </View>
         </View>
 
-        {/* ── Choose a time section ── */}
-        <View style={s.timeCard}>
-          <Text style={s.timeSectionTitle}>Choose a time</Text>
-
-          {/* Tabs */}
-          <View style={s.tabRow}>
-            <Pressable
-              style={[s.tabBtn, tab === 'pickup' && s.tabBtnActive]}
-              onPress={() => switchToTab('pickup')}
-            >
-              <Text style={[s.tabText, tab === 'pickup' && s.tabTextActive]}>Pickup at</Text>
-            </Pressable>
-            <Pressable
-              style={[s.tabBtn, tab === 'dropoff' && s.tabBtnActive]}
-              onPress={() => switchToTab('dropoff')}
-            >
-              <Text style={[s.tabText, tab === 'dropoff' && s.tabTextActive]}>Dropoff by</Text>
-            </Pressable>
+        {/* ── Passengers & Luggage ── */}
+        <View style={s.counterSection}>
+          <View style={s.counterRow}>
+            <View style={s.counterLeft}>
+              <MaterialIcons name="person" size={22} color="#374151" />
+              <Text style={s.counterLabel}>Passengers</Text>
+            </View>
+            <View style={s.counterControls}>
+              <Pressable style={[s.counterBtn, passengers <= 1 && s.counterBtnDisabled]} onPress={() => { if (passengers > 1) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p - 1); } }}>
+                <MaterialIcons name="remove" size={20} color={passengers <= 1 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+              <Text style={s.counterValue}>{passengers}</Text>
+              <Pressable style={[s.counterBtn, passengers >= 8 && s.counterBtnDisabled]} onPress={() => { if (passengers < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p + 1); } }}>
+                <MaterialIcons name="add" size={20} color={passengers >= 8 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+            </View>
           </View>
+          <View style={s.counterDivider} />
+          <View style={s.counterRow}>
+            <View style={s.counterLeft}>
+              <MaterialIcons name="luggage" size={22} color="#374151" />
+              <Text style={s.counterLabel}>Luggage</Text>
+            </View>
+            <View style={s.counterControls}>
+              <Pressable style={[s.counterBtn, luggage <= 0 && s.counterBtnDisabled]} onPress={() => { if (luggage > 0) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l - 1); } }}>
+                <MaterialIcons name="remove" size={20} color={luggage <= 0 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+              <Text style={s.counterValue}>{luggage}</Text>
+              <Pressable style={[s.counterBtn, luggage >= 8 && s.counterBtnDisabled]} onPress={() => { if (luggage < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l + 1); } }}>
+                <MaterialIcons name="add" size={20} color={luggage >= 8 ? '#D1D5DB' : '#374151'} />
+              </Pressable>
+            </View>
+          </View>
+        </View>
+
+        {/* ── Pickup time section ── */}
+        <View style={s.timeCard}>
+          <Text style={s.timeSectionTitle}>Pickup Time</Text>
 
           {/* Dark date header — tap to open calendar */}
           <TouchableOpacity style={s.dateHeader} onPress={() => setShowCalendar(!showCalendar)} activeOpacity={0.85}>
@@ -479,7 +467,7 @@ export default function LaterRideScreen({ navigation }: any) {
           )}
 
           {/* Time spinner */}
-          <Text style={s.timeLabel}>{tab === 'pickup' ? 'Pickup time' : 'Dropoff time'}</Text>
+          <Text style={s.timeLabel}>Pickup time</Text>
           <View style={s.spinnerRow}>
             {/* Hour */}
             <View style={s.spinnerCol}>
@@ -514,21 +502,6 @@ export default function LaterRideScreen({ navigation }: any) {
                 <MaterialIcons name="keyboard-arrow-down" size={36} color="#333" />
               </Pressable>
             </View>
-          </View>
-
-          {/* Opposite time info */}
-          <View style={s.oppositeCard}>
-            {tab === 'pickup' ? (
-              <>
-                <Text style={s.oppositeTitle}>{fmtTime(computedDropoff)} dropoff by</Text>
-                <Text style={s.oppositeSub}>30 min after pickup</Text>
-              </>
-            ) : (
-              <>
-                <Text style={s.oppositeTitle}>{fmtTime(computedPickup)} pick-up time</Text>
-                <Text style={s.oppositeSub}>30 min before dropoff</Text>
-              </>
-            )}
           </View>
         </View>
 
@@ -852,4 +825,65 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   continueBtnText: { color: '#000000', fontSize: 17, fontWeight: '700' },
+
+  // Passengers & Luggage counters
+  counterSection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  counterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  counterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  counterLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  counterControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  counterBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  counterBtnDisabled: {
+    borderColor: '#F3F4F6',
+    backgroundColor: '#F9FAFB',
+  },
+  counterValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  counterDivider: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
+    marginVertical: 4,
+  },
 });

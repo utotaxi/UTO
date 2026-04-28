@@ -30,6 +30,8 @@ interface LaterBooking {
   created_at: string;
   estimated_fare?: number | null;
   driver_id?: string | null;
+  passengers?: number;
+  luggage?: number;
 }
 
 function fmtDateTime(iso: string) {
@@ -96,8 +98,10 @@ function BookingCard({
 
       <View style={s.cardFooter}>
         <View style={s.dropoffRow}>
-          <Feather name="clock" size={13} color="#6B7280" />
-          <Text style={s.dropoffText}>Dropoff by {fmtDateTime(item.dropoff_by)}</Text>
+          <MaterialIcons name="person" size={13} color="#6B7280" />
+          <Text style={s.dropoffText}>{item.passengers || 1} pax</Text>
+          <MaterialIcons name="luggage" size={13} color="#6B7280" style={{ marginLeft: 8 }} />
+          <Text style={s.dropoffText}>{item.luggage || 0} bags</Text>
         </View>
         {item.status === 'scheduled' && (
           <Pressable
