@@ -61,7 +61,54 @@ export default function AirportBookingScreen({ navigation }: any) {
   // Round trip
   const [isReturnJourney, setIsReturnJourney] = useState(false);
 
-  // Return Journey Details
+  // Vehicle type
+  const [selectedVehicle, setSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
+
+  // Pricing
+  const [estimatedFare, setEstimatedFare] = useState<number | null>(null);
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [durationMin, setDurationMin] = useState<number | null>(null);
+  const [isCalculatingFare, setIsCalculatingFare] = useState(false);
+
+  // Schedule — openedAt & maxDate MUST be declared before anything that references them
+  const openedAt = React.useRef(new Date()).current;
+  const maxDate = React.useRef(new Date(openedAt.getTime() + 365 * 24 * 60 * 60 * 1000)).current;
+
+  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+    const d = new Date(openedAt);
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+    return d;
+  });
+  const [hourVal, setHourVal] = useState(() => selectedDate.getHours());
+  const [minuteVal, setMinuteVal] = useState(() => {
+    const m = selectedDate.getMinutes();
+    return Math.round(m / 5) * 5 % 60;
+  });
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => ({
+    year: selectedDate.getFullYear(),
+    month: selectedDate.getMonth(),
+  }));
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync hour/minute → selectedDate
+  useEffect(() => {
+    setSelectedDate(prev => {
+      const d = new Date(prev);
+      d.setHours(hourVal, minuteVal, 0, 0);
+      return d;
+    });
+  }, [hourVal, minuteVal]);
+
+  // Calendar navigation limits — MUST be declared before return journey nav limits
+  const todayMonth = { year: openedAt.getFullYear(), month: openedAt.getMonth() };
+  const maxMonth = { year: maxDate.getFullYear(), month: maxDate.getMonth() };
+  const canNavPrev = calendarMonth.year > todayMonth.year ||
+    (calendarMonth.year === todayMonth.year && calendarMonth.month > todayMonth.month);
+  const canNavNext = calendarMonth.year < maxMonth.year ||
+    (calendarMonth.year === maxMonth.year && calendarMonth.month < maxMonth.month);
+
+  // Return Journey Details — placed AFTER openedAt, todayMonth, maxMonth
   const [returnSelectedVehicle, setReturnSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
   const [returnFlightNumber, setReturnFlightNumber] = useState('');
   const [returnEstimatedFare, setReturnEstimatedFare] = useState<number | null>(null);
@@ -95,54 +142,6 @@ export default function AirportBookingScreen({ navigation }: any) {
     (returnCalendarMonth.year === todayMonth.year && returnCalendarMonth.month > todayMonth.month);
   const canReturnNavNext = returnCalendarMonth.year < maxMonth.year ||
     (returnCalendarMonth.year === maxMonth.year && returnCalendarMonth.month < maxMonth.month);
-
-
-  // Vehicle type
-  const [selectedVehicle, setSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
-
-  // Pricing
-  const [estimatedFare, setEstimatedFare] = useState<number | null>(null);
-  const [distanceKm, setDistanceKm] = useState<number | null>(null);
-  const [durationMin, setDurationMin] = useState<number | null>(null);
-  const [isCalculatingFare, setIsCalculatingFare] = useState(false);
-
-  // Schedule
-  const openedAt = React.useRef(new Date()).current;
-  const maxDate = React.useRef(new Date(openedAt.getTime() + 365 * 24 * 60 * 60 * 1000)).current;
-
-  const [selectedDate, setSelectedDate] = useState<Date>(() => {
-    const d = new Date(openedAt);
-    d.setHours(d.getHours() + 1, 0, 0, 0);
-    return d;
-  });
-  const [hourVal, setHourVal] = useState(() => selectedDate.getHours());
-  const [minuteVal, setMinuteVal] = useState(() => {
-    const m = selectedDate.getMinutes();
-    return Math.round(m / 5) * 5 % 60;
-  });
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [calendarMonth, setCalendarMonth] = useState(() => ({
-    year: selectedDate.getFullYear(),
-    month: selectedDate.getMonth(),
-  }));
-  const [isSaving, setIsSaving] = useState(false);
-
-  // Sync hour/minute → selectedDate
-  useEffect(() => {
-    setSelectedDate(prev => {
-      const d = new Date(prev);
-      d.setHours(hourVal, minuteVal, 0, 0);
-      return d;
-    });
-  }, [hourVal, minuteVal]);
-
-  // Calendar navigation limits
-  const todayMonth = { year: openedAt.getFullYear(), month: openedAt.getMonth() };
-  const maxMonth = { year: maxDate.getFullYear(), month: maxDate.getMonth() };
-  const canNavPrev = calendarMonth.year > todayMonth.year ||
-    (calendarMonth.year === todayMonth.year && calendarMonth.month > todayMonth.month);
-  const canNavNext = calendarMonth.year < maxMonth.year ||
-    (calendarMonth.year === maxMonth.year && calendarMonth.month < maxMonth.month);
 
   // ── Calculate fare when both locations are set or vehicle changes ──
   useEffect(() => {
