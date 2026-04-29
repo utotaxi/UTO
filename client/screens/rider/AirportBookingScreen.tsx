@@ -65,8 +65,28 @@ export default function AirportBookingScreen({ navigation }: any) {
   // Round trip
   const [isReturnJourney, setIsReturnJourney] = useState(false);
 
-  // Vehicle type
-  const [selectedVehicle, setSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
+  // Return journey locations (manual entry)
+  const [returnPickup, setReturnPickup] = useState('');
+  const [returnDropoff, setReturnDropoff] = useState('');
+  const [returnPickupLocation, setReturnPickupLocation] = useState<LatLng | null>(null);
+  const [returnDropoffLocation, setReturnDropoffLocation] = useState<LatLng | null>(null);
+
+  // Vehicle type — now supports 3 types
+  type VehicleType = 'saloon' | 'people_carrier' | 'minibus';
+  const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>('saloon');
+
+  // Coupon
+  const [couponCode, setCouponCode] = useState('');
+  const [couponDiscount, setCouponDiscount] = useState<number>(0);
+  const [couponDescription, setCouponDescription] = useState('');
+  const [isCouponApplied, setIsCouponApplied] = useState(false);
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState('');
+
+  // Vehicle eligibility based on passengers & luggage
+  const isSaloonEligible = (passengers <= 3 && luggage <= 3) || (passengers <= 4 && luggage === 0);
+  const isCarrierEligible = (passengers <= 5 && luggage <= 5) || (passengers <= 6 && luggage === 0);
+  const isMinibusEligible = passengers <= 8 && luggage <= 8;
 
   // Pricing
   const [estimatedFare, setEstimatedFare] = useState<number | null>(null);
@@ -113,7 +133,14 @@ export default function AirportBookingScreen({ navigation }: any) {
     (calendarMonth.year === maxMonth.year && calendarMonth.month < maxMonth.month);
 
   // Return Journey Details — placed AFTER openedAt, todayMonth, maxMonth
-  const [returnSelectedVehicle, setReturnSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
+  const [returnSelectedVehicle, setReturnSelectedVehicle] = useState<VehicleType>('saloon');
+
+  // Auto-select eligible vehicle when passengers/luggage change
+  useEffect(() => {
+    if (isSaloonEligible) { if (selectedVehicle !== 'saloon' && selectedVehicle !== 'people_carrier' && selectedVehicle !== 'minibus') setSelectedVehicle('saloon'); }
+    else if (isCarrierEligible) { if (selectedVehicle === 'saloon') setSelectedVehicle('people_carrier'); }
+    else if (isMinibusEligible) { setSelectedVehicle('minibus'); }
+  }, [passengers, luggage]);
   const [returnFlightNumber, setReturnFlightNumber] = useState('');
   const [returnEstimatedFare, setReturnEstimatedFare] = useState<number | null>(null);
 
@@ -147,6 +174,31 @@ export default function AirportBookingScreen({ navigation }: any) {
   const canReturnNavNext = returnCalendarMonth.year < maxMonth.year ||
     (returnCalendarMonth.year === maxMonth.year && returnCalendarMonth.month < maxMonth.month);
 
+  // ── Coupon validation ──
+  const handleValidateCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setIsValidatingCoupon(true);
+    setCouponError('');
+    try {
+      const res = await fetch(`${getApiUrl()}/api/coupons/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: couponCode.trim(), fareAmount: estimatedFare ?? 0 }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setCouponError(data.error || 'Invalid coupon'); setIsCouponApplied(false); setCouponDiscount(0); return; }
+      setCouponDiscount(data.coupon.discountAmount);
+      setCouponDescription(data.coupon.description);
+      setIsCouponApplied(true);
+    } catch { setCouponError('Failed to validate coupon'); }
+    finally { setIsValidatingCoupon(false); }
+  };
+
+  const handleRemoveCoupon = () => { setCouponCode(''); setCouponDiscount(0); setCouponDescription(''); setIsCouponApplied(false); setCouponError(''); };
+
+  // Map people_carrier → minibus for fare calc (pricing only has saloon/minibus tiers)
+  const fareVehicle = (v: VehicleType) => v === 'people_carrier' ? 'minibus' : v;
+
   // ── Calculate fare when both locations are set or vehicle changes ──
   useEffect(() => {
     if (!pickupLocation || !dropoffLocation) {
@@ -176,16 +228,16 @@ export default function AirportBookingScreen({ navigation }: any) {
         setDurationMin(dur);
 
         const distanceMiles = dist * 0.621371;
-        let fare = calculateDynamicFare(distanceMiles, dur, selectedVehicle);
+        let fare = calculateDynamicFare(distanceMiles, dur, fareVehicle(selectedVehicle));
         setEstimatedFare(fare);
-        let rFare = calculateDynamicFare(distanceMiles, dur, returnSelectedVehicle);
+        let rFare = calculateDynamicFare(distanceMiles, dur, fareVehicle(returnSelectedVehicle));
         setReturnEstimatedFare(rFare);
       } catch (err) {
         console.warn('Failed to calculate fare:', err);
         const fallbackMiles = 3.5;
-        let fare = calculateDynamicFare(fallbackMiles, 15, selectedVehicle);
+        let fare = calculateDynamicFare(fallbackMiles, 15, fareVehicle(selectedVehicle));
         setEstimatedFare(fare);
-        let rFare = calculateDynamicFare(fallbackMiles, 15, returnSelectedVehicle);
+        let rFare = calculateDynamicFare(fallbackMiles, 15, fareVehicle(returnSelectedVehicle));
         setReturnEstimatedFare(rFare);
       } finally {
         setIsCalculatingFare(false);
@@ -329,6 +381,7 @@ export default function AirportBookingScreen({ navigation }: any) {
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsSaving(true);
+    const finalFare = estimatedFare ? Math.max(0, estimatedFare - couponDiscount) : null;
     try {
       const res = await fetch(`${getApiUrl()}/api/later-bookings`, {
         method: 'POST',
@@ -342,7 +395,7 @@ export default function AirportBookingScreen({ navigation }: any) {
           dropoffLatitude: dropoffLocation?.latitude ?? null,
           dropoffLongitude: dropoffLocation?.longitude ?? null,
           pickupAt: scheduledTime.toISOString(),
-          estimatedFare: estimatedFare ?? null,
+          estimatedFare: finalFare,
           vehicleType: selectedVehicle,
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
           durationMinutes: durationMin ?? null,
@@ -351,6 +404,8 @@ export default function AirportBookingScreen({ navigation }: any) {
           bookingType: 'airport',
           passengers,
           luggage,
+          couponCode: isCouponApplied ? couponCode : null,
+          discountAmount: isCouponApplied ? couponDiscount : 0,
         }),
       });
 
@@ -362,17 +417,21 @@ export default function AirportBookingScreen({ navigation }: any) {
       }
 
       if (isReturnJourney && returnScheduledTime) {
+        const rPickup = returnPickup || dropoff;
+        const rDropoff = returnDropoff || pickup;
+        const rPickupLoc = returnPickupLocation || dropoffLocation;
+        const rDropoffLoc = returnDropoffLocation || pickupLocation;
         const returnRes = await fetch(`${getApiUrl()}/api/later-bookings`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             riderId: user?.id,
-            pickupAddress: dropoff, // reversed
-            pickupLatitude: dropoffLocation?.latitude ?? null,
-            pickupLongitude: dropoffLocation?.longitude ?? null,
-            dropoffAddress: pickup, // reversed
-            dropoffLatitude: pickupLocation?.latitude ?? null,
-            dropoffLongitude: pickupLocation?.longitude ?? null,
+            pickupAddress: rPickup,
+            pickupLatitude: rPickupLoc?.latitude ?? null,
+            pickupLongitude: rPickupLoc?.longitude ?? null,
+            dropoffAddress: rDropoff,
+            dropoffLatitude: rDropoffLoc?.latitude ?? null,
+            dropoffLongitude: rDropoffLoc?.longitude ?? null,
             pickupAt: returnScheduledTime.toISOString(),
             estimatedFare: returnEstimatedFare ?? null,
             vehicleType: returnSelectedVehicle,
@@ -383,6 +442,12 @@ export default function AirportBookingScreen({ navigation }: any) {
             bookingType: 'airport',
             passengers,
             luggage,
+            returnPickupAddress: rPickup,
+            returnPickupLatitude: rPickupLoc?.latitude ?? null,
+            returnPickupLongitude: rPickupLoc?.longitude ?? null,
+            returnDropoffAddress: rDropoff,
+            returnDropoffLatitude: rDropoffLoc?.latitude ?? null,
+            returnDropoffLongitude: rDropoffLoc?.longitude ?? null,
           }),
         });
 
@@ -394,9 +459,10 @@ export default function AirportBookingScreen({ navigation }: any) {
         }
       }
 
+      const vName = selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus';
       Alert.alert(
         '✈️ Airport Transfer Booked!',
-        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}\n${passengers} passenger(s), ${luggage} bag(s)${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
+        `Your ${vName}${isReturnJourney ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}\n${passengers} passenger(s), ${luggage} bag(s)${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {
@@ -483,53 +549,9 @@ export default function AirportBookingScreen({ navigation }: any) {
           />
         </View>
 
-        {/* ── Vehicle Selector ── */}
-        <View style={s.vehicleSelector}>
-          <Text style={s.vehicleSelectorTitle}>Vehicle Type</Text>
-          <View style={s.vehicleOptions}>
-            <Pressable
-              style={[s.vehicleOption, selectedVehicle === 'saloon' && s.vehicleOptionActive]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setSelectedVehicle('saloon');
-              }}
-            >
-              <MaterialIcons
-                name="directions-car"
-                size={24}
-                color={selectedVehicle === 'saloon' ? '#000000' : '#6B7280'}
-              />
-              <Text style={[s.vehicleOptionName, selectedVehicle === 'saloon' && s.vehicleOptionNameActive]}>
-                Saloon
-              </Text>
-              <Text style={[s.vehicleOptionDesc, selectedVehicle === 'saloon' && s.vehicleOptionDescActive]}>
-                Up to 4 passengers
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[s.vehicleOption, selectedVehicle === 'minibus' && s.vehicleOptionActive]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setSelectedVehicle('minibus');
-              }}
-            >
-              <MaterialIcons
-                name="airport-shuttle"
-                size={24}
-                color={selectedVehicle === 'minibus' ? '#000000' : '#6B7280'}
-              />
-              <Text style={[s.vehicleOptionName, selectedVehicle === 'minibus' && s.vehicleOptionNameActive]}>
-                Minibus
-              </Text>
-              <Text style={[s.vehicleOptionDesc, selectedVehicle === 'minibus' && s.vehicleOptionDescActive]}>
-                Up to 8 passengers
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* ── Passengers & Luggage ── */}
+        {/* ── Passengers & Luggage (FIRST — determines vehicle options) ── */}
         <View style={s.counterSection}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>Passengers & Luggage</Text>
           <View style={s.counterRow}>
             <View style={s.counterLeft}>
               <MaterialIcons name="person" size={22} color="#374151" />
@@ -563,6 +585,52 @@ export default function AirportBookingScreen({ navigation }: any) {
           </View>
         </View>
 
+        {/* ── Vehicle Selector (filtered by passengers/luggage) ── */}
+        <View style={s.vehicleSelector}>
+          <Text style={s.vehicleSelectorTitle}>Vehicle Type</Text>
+          <View style={{ gap: 10 }}>
+            {isSaloonEligible && (
+              <Pressable
+                style={[s.vehicleOption, selectedVehicle === 'saloon' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('saloon'); }}
+              >
+                <MaterialIcons name="directions-car" size={24} color={selectedVehicle === 'saloon' ? '#000000' : '#6B7280'} />
+                <View style={{ marginLeft: 12, flex: 1 }}>
+                  <Text style={[s.vehicleOptionName, selectedVehicle === 'saloon' && s.vehicleOptionNameActive, { marginTop: 0 }]}>Saloon Car</Text>
+                  <Text style={[s.vehicleOptionDesc, selectedVehicle === 'saloon' && s.vehicleOptionDescActive]}>Up to 3 pax + 3 bags, or 4 pax + hand luggage</Text>
+                </View>
+              </Pressable>
+            )}
+            {isCarrierEligible && (
+              <Pressable
+                style={[s.vehicleOption, selectedVehicle === 'people_carrier' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('people_carrier'); }}
+              >
+                <MaterialIcons name="directions-car" size={24} color={selectedVehicle === 'people_carrier' ? '#000000' : '#6B7280'} />
+                <View style={{ marginLeft: 12, flex: 1 }}>
+                  <Text style={[s.vehicleOptionName, selectedVehicle === 'people_carrier' && s.vehicleOptionNameActive, { marginTop: 0 }]}>People Carrier</Text>
+                  <Text style={[s.vehicleOptionDesc, selectedVehicle === 'people_carrier' && s.vehicleOptionDescActive]}>Up to 5 pax + 5 bags, or 6 pax + hand luggage</Text>
+                </View>
+              </Pressable>
+            )}
+            {isMinibusEligible && (
+              <Pressable
+                style={[s.vehicleOption, selectedVehicle === 'minibus' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('minibus'); }}
+              >
+                <MaterialIcons name="airport-shuttle" size={24} color={selectedVehicle === 'minibus' ? '#000000' : '#6B7280'} />
+                <View style={{ marginLeft: 12, flex: 1 }}>
+                  <Text style={[s.vehicleOptionName, selectedVehicle === 'minibus' && s.vehicleOptionNameActive, { marginTop: 0 }]}>8 Seater Minibus</Text>
+                  <Text style={[s.vehicleOptionDesc, selectedVehicle === 'minibus' && s.vehicleOptionDescActive]}>Up to 8 pax + 8 bags</Text>
+                </View>
+              </Pressable>
+            )}
+            {!isSaloonEligible && !isCarrierEligible && !isMinibusEligible && (
+              <Text style={{ color: '#EF4444', textAlign: 'center', padding: 16 }}>No vehicles available for this combination. Please reduce passengers or luggage.</Text>
+            )}
+          </View>
+        </View>
+
         {/* ── Round Trip Toggle ── */}
         <Pressable
           style={[s.roundTripCard, isReturnJourney && s.roundTripCardActive]}
@@ -572,16 +640,10 @@ export default function AirportBookingScreen({ navigation }: any) {
           }}
         >
           <View style={s.roundTripLeft}>
-            <MaterialIcons
-              name="sync"
-              size={22}
-              color={isReturnJourney ? '#000000' : '#6B7280'}
-            />
+            <MaterialIcons name="sync" size={22} color={isReturnJourney ? '#000000' : '#6B7280'} />
             <View>
               <Text style={[s.roundTripTitle, isReturnJourney && s.roundTripTitleActive]}>Return Journey</Text>
-              <Text style={[s.roundTripSub, isReturnJourney && s.roundTripSubActive]}>
-                Book return journey
-              </Text>
+              <Text style={[s.roundTripSub, isReturnJourney && s.roundTripSubActive]}>Book return journey</Text>
             </View>
           </View>
           <View style={[s.roundTripToggle, isReturnJourney && s.roundTripToggleActive]}>
@@ -592,97 +654,43 @@ export default function AirportBookingScreen({ navigation }: any) {
         {/* ── Schedule section ── */}
         <View style={s.timeCard}>
           <Text style={s.timeSectionTitle}>Schedule</Text>
-
-          {/* Dark date header — tap to open calendar */}
           <TouchableOpacity style={s.dateHeader} onPress={() => setShowCalendar(!showCalendar)} activeOpacity={0.85}>
             <Text style={s.dateHeaderYear}>{selectedDate.getFullYear()}</Text>
             <Text style={s.dateHeaderDate}>{fmtDate(selectedDate)}</Text>
           </TouchableOpacity>
-
-          {/* Calendar */}
           {showCalendar && (
             <View style={s.calBox}>
               <View style={s.calMonthRow}>
-                <Pressable
-                  onPress={() => {
-                    if (!canNavPrev) return;
-                    setCalendarMonth(p => {
-                      let m = p.month - 1, y = p.year;
-                      if (m < 0) { m = 11; y--; }
-                      return { year: y, month: m };
-                    });
-                  }}
-                  style={{ opacity: canNavPrev ? 1 : 0.2 }}
-                >
+                <Pressable onPress={() => { if (!canNavPrev) return; setCalendarMonth(p => { let m = p.month - 1, y = p.year; if (m < 0) { m = 11; y--; } return { year: y, month: m }; }); }} style={{ opacity: canNavPrev ? 1 : 0.2 }}>
                   <MaterialIcons name="chevron-left" size={28} color="#111827" />
                 </Pressable>
-                <Text style={s.calMonthLabel}>
-                  {new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
-                </Text>
-                <Pressable
-                  onPress={() => {
-                    if (!canNavNext) return;
-                    setCalendarMonth(p => {
-                      let m = p.month + 1, y = p.year;
-                      if (m > 11) { m = 0; y++; }
-                      return { year: y, month: m };
-                    });
-                  }}
-                  style={{ opacity: canNavNext ? 1 : 0.2 }}
-                >
+                <Text style={s.calMonthLabel}>{new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</Text>
+                <Pressable onPress={() => { if (!canNavNext) return; setCalendarMonth(p => { let m = p.month + 1, y = p.year; if (m > 11) { m = 0; y++; } return { year: y, month: m }; }); }} style={{ opacity: canNavNext ? 1 : 0.2 }}>
                   <MaterialIcons name="chevron-right" size={28} color="#111827" />
                 </Pressable>
               </View>
-              <View style={s.calDayNames}>
-                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dn, i) => (
-                  <Text key={i} style={s.calDayName}>{dn}</Text>
-                ))}
-              </View>
+              <View style={s.calDayNames}>{['S','M','T','W','T','F','S'].map((dn, i) => <Text key={i} style={s.calDayName}>{dn}</Text>)}</View>
               <View style={s.calGrid}>{renderCalendar()}</View>
               <View style={s.calFooter}>
-                <Pressable onPress={() => setShowCalendar(false)}>
-                  <Text style={s.calCancel}>CANCEL</Text>
-                </Pressable>
-                <Pressable onPress={() => setShowCalendar(false)}>
-                  <Text style={s.calOk}>OK</Text>
-                </Pressable>
+                <Pressable onPress={() => setShowCalendar(false)}><Text style={s.calCancel}>CANCEL</Text></Pressable>
+                <Pressable onPress={() => setShowCalendar(false)}><Text style={s.calOk}>OK</Text></Pressable>
               </View>
             </View>
           )}
 
-          {/* Time spinner */}
+          {/* Time spinner — descending only (down arrow = earlier time) */}
           <Text style={s.timeLabel}>Pickup time</Text>
           <View style={s.spinnerRow}>
-            {/* Hour */}
             <View style={s.spinnerCol}>
-              <Pressable
-                onPress={() => setHourVal(h => (h - 1 + 24) % 24)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
-                <MaterialIcons name="keyboard-arrow-up" size={36} color="#333" />
-              </Pressable>
               <Text style={s.spinnerVal}>{String(hourVal).padStart(2, '0')}</Text>
-              <Pressable
-                onPress={() => setHourVal(h => (h + 1) % 24)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
+              <Pressable onPress={() => setHourVal(h => (h - 1 + 24) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}>
                 <MaterialIcons name="keyboard-arrow-down" size={36} color="#333" />
               </Pressable>
             </View>
             <Text style={s.spinnerColon}>:</Text>
-            {/* Minute */}
             <View style={s.spinnerCol}>
-              <Pressable
-                onPress={() => setMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
-                <MaterialIcons name="keyboard-arrow-up" size={36} color="#333" />
-              </Pressable>
               <Text style={s.spinnerVal}>{String(minuteVal).padStart(2, '0')}</Text>
-              <Pressable
-                onPress={() => setMinuteVal(m => (Math.round(m / 5) * 5 + 5) % 60)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
+              <Pressable onPress={() => setMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}>
                 <MaterialIcons name="keyboard-arrow-down" size={36} color="#333" />
               </Pressable>
             </View>
@@ -694,13 +702,43 @@ export default function AirportBookingScreen({ navigation }: any) {
           <View style={[s.timeCard, { marginTop: -8 }]}>
             <Text style={s.timeSectionTitle}>Return Details</Text>
             
-            {/* Return Locations Display */}
-            <View style={{ paddingHorizontal: 20, paddingBottom: 16 }}>
-              <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '500', marginBottom: 4 }}>Return Pickup</Text>
-              <Text style={{ fontSize: 15, color: '#111827', fontWeight: '600', marginBottom: 12 }}>{dropoff || 'Same as outbound dropoff'}</Text>
-              
-              <Text style={{ fontSize: 13, color: '#6B7280', fontWeight: '500', marginBottom: 4 }}>Return Drop-off</Text>
-              <Text style={{ fontSize: 15, color: '#111827', fontWeight: '600' }}>{pickup || 'Same as outbound pickup'}</Text>
+            {/* Return Locations — manual entry with autocomplete */}
+            <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+              <View style={[s.locationCard, { marginHorizontal: 0, marginTop: 0 }]}>
+                <View style={s.locationRow}>
+                  <View style={s.routeDot} />
+                  <View style={{ flex: 1 }}>
+                    <LocationInputAutocomplete
+                      label="Return Pickup"
+                      value={returnPickup || dropoff}
+                      placeholder="Return pickup location"
+                      onChangeText={setReturnPickup}
+                      onSelectLocation={(place: PlaceSuggestion) => {
+                        setReturnPickup(place.mainText);
+                        if (place.latitude && place.longitude) setReturnPickupLocation({ latitude: place.latitude, longitude: place.longitude });
+                      }}
+                      type="pickup"
+                    />
+                  </View>
+                </View>
+                <View style={s.routeLine} />
+                <View style={s.locationRow}>
+                  <View style={[s.routeDot, { backgroundColor: UTO_YELLOW }]} />
+                  <View style={{ flex: 1 }}>
+                    <LocationInputAutocomplete
+                      label="Return Drop-off"
+                      value={returnDropoff || pickup}
+                      placeholder="Return drop-off location"
+                      onChangeText={setReturnDropoff}
+                      onSelectLocation={(place: PlaceSuggestion) => {
+                        setReturnDropoff(place.mainText);
+                        if (place.latitude && place.longitude) setReturnDropoffLocation({ latitude: place.latitude, longitude: place.longitude });
+                      }}
+                      type="dropoff"
+                    />
+                  </View>
+                </View>
+              </View>
             </View>
 
             {/* Return Flight Number */}
@@ -709,64 +747,32 @@ export default function AirportBookingScreen({ navigation }: any) {
                 <MaterialIcons name="flight-land" size={20} color={UTO_YELLOW} />
                 <Text style={s.flightLabel}>Return Flight Number</Text>
               </View>
-              <TextInput
-                style={s.flightInput}
-                value={returnFlightNumber}
-                onChangeText={setReturnFlightNumber}
-                placeholder="e.g. BA 5678"
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="characters"
-              />
+              <TextInput style={s.flightInput} value={returnFlightNumber} onChangeText={setReturnFlightNumber} placeholder="e.g. BA 5678" placeholderTextColor="#9CA3AF" autoCapitalize="characters" />
             </View>
 
-            {/* Return Vehicle */}
+            {/* Return Vehicle — filtered */}
             <View style={[s.vehicleSelector, { marginHorizontal: 16, marginBottom: 16 }]}>
               <Text style={s.vehicleSelectorTitle}>Return Vehicle</Text>
-              <View style={s.vehicleOptions}>
-                <Pressable
-                  style={[s.vehicleOption, returnSelectedVehicle === 'saloon' && s.vehicleOptionActive]}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('saloon'); }}
-                >
-                  <Text style={[s.vehicleOptionName, returnSelectedVehicle === 'saloon' && s.vehicleOptionNameActive]}>Saloon</Text>
-                </Pressable>
-                <Pressable
-                  style={[s.vehicleOption, returnSelectedVehicle === 'minibus' && s.vehicleOptionActive]}
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('minibus'); }}
-                >
-                  <Text style={[s.vehicleOptionName, returnSelectedVehicle === 'minibus' && s.vehicleOptionNameActive]}>Minibus</Text>
-                </Pressable>
+              <View style={{ gap: 8 }}>
+                {isSaloonEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'saloon' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('saloon'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'saloon' && s.vehicleOptionNameActive]}>Saloon</Text></Pressable>}
+                {isCarrierEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'people_carrier' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('people_carrier'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'people_carrier' && s.vehicleOptionNameActive]}>People Carrier</Text></Pressable>}
+                {isMinibusEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'minibus' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('minibus'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'minibus' && s.vehicleOptionNameActive]}>Minibus</Text></Pressable>}
               </View>
             </View>
 
-            {/* Return Date Header */}
+            {/* Return Date */}
             <TouchableOpacity style={s.dateHeader} onPress={() => setShowReturnCalendar(!showReturnCalendar)} activeOpacity={0.85}>
               <Text style={s.dateHeaderYear}>{returnSelectedDate.getFullYear()}</Text>
               <Text style={s.dateHeaderDate}>{fmtDate(returnSelectedDate)}</Text>
             </TouchableOpacity>
-
-            {/* Return Calendar */}
             {showReturnCalendar && (
               <View style={s.calBox}>
                 <View style={s.calMonthRow}>
-                  <Pressable onPress={() => {
-                    if (!canReturnNavPrev) return;
-                    setReturnCalendarMonth(p => { let m = p.month - 1, y = p.year; if (m < 0) { m = 11; y--; } return { year: y, month: m }; });
-                  }} style={{ opacity: canReturnNavPrev ? 1 : 0.2 }}>
-                    <MaterialIcons name="chevron-left" size={28} color="#111827" />
-                  </Pressable>
-                  <Text style={s.calMonthLabel}>
-                    {new Date(returnCalendarMonth.year, returnCalendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
-                  </Text>
-                  <Pressable onPress={() => {
-                    if (!canReturnNavNext) return;
-                    setReturnCalendarMonth(p => { let m = p.month + 1, y = p.year; if (m > 11) { m = 0; y++; } return { year: y, month: m }; });
-                  }} style={{ opacity: canReturnNavNext ? 1 : 0.2 }}>
-                    <MaterialIcons name="chevron-right" size={28} color="#111827" />
-                  </Pressable>
+                  <Pressable onPress={() => { if (!canReturnNavPrev) return; setReturnCalendarMonth(p => { let m = p.month - 1, y = p.year; if (m < 0) { m = 11; y--; } return { year: y, month: m }; }); }} style={{ opacity: canReturnNavPrev ? 1 : 0.2 }}><MaterialIcons name="chevron-left" size={28} color="#111827" /></Pressable>
+                  <Text style={s.calMonthLabel}>{new Date(returnCalendarMonth.year, returnCalendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</Text>
+                  <Pressable onPress={() => { if (!canReturnNavNext) return; setReturnCalendarMonth(p => { let m = p.month + 1, y = p.year; if (m > 11) { m = 0; y++; } return { year: y, month: m }; }); }} style={{ opacity: canReturnNavNext ? 1 : 0.2 }}><MaterialIcons name="chevron-right" size={28} color="#111827" /></Pressable>
                 </View>
-                <View style={s.calDayNames}>
-                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dn, i) => <Text key={i} style={s.calDayName}>{dn}</Text>)}
-                </View>
+                <View style={s.calDayNames}>{['S','M','T','W','T','F','S'].map((dn, i) => <Text key={i} style={s.calDayName}>{dn}</Text>)}</View>
                 <View style={s.calGrid}>{renderReturnCalendar()}</View>
                 <View style={s.calFooter}>
                   <Pressable onPress={() => setShowReturnCalendar(false)}><Text style={s.calCancel}>CANCEL</Text></Pressable>
@@ -775,41 +781,76 @@ export default function AirportBookingScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* Return Time Spinner */}
+            {/* Return Time — descending only */}
             <Text style={s.timeLabel}>Return Pickup Time</Text>
             <View style={s.spinnerRow}>
               <View style={s.spinnerCol}>
-                <Pressable onPress={() => setReturnHourVal(h => (h - 1 + 24) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-up" size={36} color="#333" /></Pressable>
                 <Text style={s.spinnerVal}>{String(returnHourVal).padStart(2, '0')}</Text>
-                <Pressable onPress={() => setReturnHourVal(h => (h + 1) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
+                <Pressable onPress={() => setReturnHourVal(h => (h - 1 + 24) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
               </View>
               <Text style={s.spinnerColon}>:</Text>
               <View style={s.spinnerCol}>
-                <Pressable onPress={() => setReturnMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-up" size={36} color="#333" /></Pressable>
                 <Text style={s.spinnerVal}>{String(returnMinuteVal).padStart(2, '0')}</Text>
-                <Pressable onPress={() => setReturnMinuteVal(m => (Math.round(m / 5) * 5 + 5) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
+                <Pressable onPress={() => setReturnMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
               </View>
             </View>
           </View>
         )}
+
+        {/* ── Coupon Code Section ── */}
+        <View style={[s.flightCard, { marginTop: 0 }]}>
+          <View style={s.flightHeader}>
+            <MaterialIcons name="local-offer" size={20} color={UTO_YELLOW} />
+            <Text style={s.flightLabel}>Discount Coupon</Text>
+          </View>
+          {isCouponApplied ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12 }}>
+              <View>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#065F46' }}>✓ {couponCode.toUpperCase()}</Text>
+                <Text style={{ fontSize: 13, color: '#059669' }}>{couponDescription} — £{couponDiscount.toFixed(2)} off</Text>
+              </View>
+              <Pressable onPress={handleRemoveCoupon}><Text style={{ fontSize: 13, fontWeight: '600', color: '#EF4444' }}>Remove</Text></Pressable>
+            </View>
+          ) : (
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TextInput
+                style={[s.flightInput, { flex: 1 }]}
+                value={couponCode}
+                onChangeText={(t) => { setCouponCode(t); setCouponError(''); }}
+                placeholder="Enter coupon code"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="characters"
+              />
+              <TouchableOpacity
+                style={{ backgroundColor: UTO_YELLOW, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center', opacity: isValidatingCoupon ? 0.7 : 1 }}
+                onPress={handleValidateCoupon}
+                disabled={isValidatingCoupon}
+              >
+                {isValidatingCoupon ? <ActivityIndicator size="small" color="#000" /> : <Text style={{ fontWeight: '700', color: '#000' }}>Apply</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+          {couponError ? <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 6 }}>{couponError}</Text> : null}
+        </View>
         
         {/* ── Estimated Fare Card ── */}
         {(estimatedFare !== null || isCalculatingFare) && (
           <View style={s.fareCard}>
             <View style={s.fareCardHeader}>
               <MaterialIcons name="receipt" size={20} color={UTO_YELLOW} />
-              <Text style={s.fareCardTitle}>Estimated Fare{isReturnJourney ? ' (Outbound)' : ''}</Text>
+              <Text style={s.fareCardTitle}>Estimated Fare</Text>
             </View>
             {isCalculatingFare ? (
               <ActivityIndicator size="small" color={UTO_YELLOW} style={{ marginTop: 8 }} />
             ) : (
               <>
-                <Text style={s.fareCardPrice}>£{(!isReturnJourney ? estimatedFare! : (estimatedFare! + (returnEstimatedFare || 0))).toFixed(2)}</Text>
+                <Text style={s.fareCardPrice}>£{Math.max(0, (!isReturnJourney ? estimatedFare! : (estimatedFare! + (returnEstimatedFare || 0))) - couponDiscount).toFixed(2)}</Text>
+                {couponDiscount > 0 && <Text style={{ fontSize: 13, color: '#059669', marginBottom: 4 }}>Discount: -£{couponDiscount.toFixed(2)}</Text>}
                 {distanceKm !== null && durationMin !== null && (
                   <Text style={s.fareCardSub}>
                     {isReturnJourney 
                       ? `Outbound: £${estimatedFare!.toFixed(2)} · Return: £${(returnEstimatedFare||0).toFixed(2)}` 
-                      : `${(distanceKm * 0.621371).toFixed(1)} miles · ~${durationMin} min · ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}`}
+                      : `${(distanceKm * 0.621371).toFixed(1)} miles · ~${durationMin} min · ${selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus'}`}
                   </Text>
                 )}
               </>
@@ -842,9 +883,7 @@ export default function AirportBookingScreen({ navigation }: any) {
           {isSaving
             ? <ActivityIndicator color="#000000" />
             : <Text style={s.continueBtnText}>
-                {estimatedFare
-                  ? `Book ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' + Return' : ''} · £${(!isReturnJourney ? estimatedFare : (estimatedFare + (returnEstimatedFare||0))).toFixed(2)}`
-                  : `Book ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}${isReturnJourney ? ' + Return' : ''} Transfer`}
+                {(() => { const vn = selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus'; const total = estimatedFare ? Math.max(0, (!isReturnJourney ? estimatedFare : (estimatedFare + (returnEstimatedFare||0))) - couponDiscount) : null; return total ? `Book ${vn}${isReturnJourney ? ' + Return' : ''} · £${total.toFixed(2)}` : `Book ${vn}${isReturnJourney ? ' + Return' : ''} Transfer`; })()}
               </Text>
           }
         </TouchableOpacity>

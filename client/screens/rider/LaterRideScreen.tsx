@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
+import { TextInput } from 'react-native';
+
 import { LocationInputAutocomplete } from '@/components/LocationInputAutocomplete';
 import { useAuth } from '@/context/AuthContext';
 import { useRide } from '@/context/RideContext';
@@ -25,6 +27,7 @@ const UTO_YELLOW = '#FFD000';
 // ── Types ──────────────────────────────────────────────────────────
 type LatLng = { latitude: number; longitude: number };
 type Tab = 'pickup' | 'dropoff';
+type VehicleType = 'saloon' | 'people_carrier' | 'minibus';
 
 interface PlaceSuggestion {
   id: string;
@@ -55,6 +58,11 @@ export default function LaterRideScreen({ navigation }: any) {
   const [passengers, setPassengers] = useState(1);
   const [luggage, setLuggage] = useState(0);
 
+  // Vehicle eligibility based on passengers & luggage
+  const isSaloonEligible = (passengers <= 3 && luggage <= 3) || (passengers <= 4 && luggage === 0);
+  const isCarrierEligible = (passengers <= 5 && luggage <= 5) || (passengers <= 6 && luggage === 0);
+  const isMinibusEligible = passengers <= 8 && luggage <= 8;
+
   // Locations
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
@@ -66,7 +74,24 @@ export default function LaterRideScreen({ navigation }: any) {
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [durationMin, setDurationMin] = useState<number | null>(null);
   const [isCalculatingFare, setIsCalculatingFare] = useState(false);
-  const [selectedVehicle, setSelectedVehicle] = useState<'saloon' | 'minibus'>('saloon');
+  const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>('saloon');
+
+  // Coupon
+  const [couponCode, setCouponCode] = useState('');
+  const [couponDiscount, setCouponDiscount] = useState<number>(0);
+  const [couponDescription, setCouponDescription] = useState('');
+  const [isCouponApplied, setIsCouponApplied] = useState(false);
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState('');
+
+  // Auto-select eligible vehicle when passengers/luggage change
+  useEffect(() => {
+    if (!isSaloonEligible && selectedVehicle === 'saloon') {
+      setSelectedVehicle(isCarrierEligible ? 'people_carrier' : 'minibus');
+    } else if (!isCarrierEligible && selectedVehicle === 'people_carrier') {
+      setSelectedVehicle(isMinibusEligible ? 'minibus' : 'saloon');
+    }
+  }, [passengers, luggage]);
 
   // Schedule — ref-based so they never go stale during session
   const openedAt = React.useRef(new Date()).current;
@@ -108,6 +133,22 @@ export default function LaterRideScreen({ navigation }: any) {
   const canNavNext = calendarMonth.year < maxMonth.year ||
     (calendarMonth.year === maxMonth.year && calendarMonth.month < maxMonth.month);
 
+  // ── Coupon validation ──
+  const handleValidateCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setIsValidatingCoupon(true); setCouponError('');
+    try {
+      const res = await fetch(`${getApiUrl()}/api/coupons/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: couponCode.trim(), fareAmount: estimatedFare ?? 0 }) });
+      const data = await res.json();
+      if (!res.ok) { setCouponError(data.error || 'Invalid coupon'); setIsCouponApplied(false); setCouponDiscount(0); return; }
+      setCouponDiscount(data.coupon.discountAmount); setCouponDescription(data.coupon.description); setIsCouponApplied(true);
+    } catch { setCouponError('Failed to validate coupon'); }
+    finally { setIsValidatingCoupon(false); }
+  };
+  const handleRemoveCoupon = () => { setCouponCode(''); setCouponDiscount(0); setCouponDescription(''); setIsCouponApplied(false); setCouponError(''); };
+
+  const fareVehicle = (v: VehicleType) => v === 'people_carrier' ? 'minibus' : v;
+
   // ── Calculate fare when both locations are set or vehicle changes ──
   useEffect(() => {
     if (!pickupLocation || !dropoffLocation) {
@@ -124,8 +165,8 @@ export default function LaterRideScreen({ navigation }: any) {
         const res = await fetch(`${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`);
         const data = await res.json();
 
-        let dist = 5.5; // fallback km
-        let dur = 15; // fallback min
+        let dist = 5.5;
+        let dur = 15;
 
         if (data.status === 'OK' && data.routes?.[0]?.legs?.[0]) {
           const leg = data.routes[0].legs[0];
@@ -136,15 +177,13 @@ export default function LaterRideScreen({ navigation }: any) {
         setDistanceKm(dist);
         setDurationMin(dur);
 
-        // Convert km to miles for fare calculation
         const distanceMiles = dist * 0.621371;
-        const fare = calculateDynamicFare(distanceMiles, dur, selectedVehicle);
+        const fare = calculateDynamicFare(distanceMiles, dur, fareVehicle(selectedVehicle));
         setEstimatedFare(fare);
       } catch (err) {
         console.warn('Failed to calculate fare:', err);
-        // Fallback calculation
         const fallbackMiles = 3.5;
-        const fare = calculateDynamicFare(fallbackMiles, 15, selectedVehicle);
+        const fare = calculateDynamicFare(fallbackMiles, 15, fareVehicle(selectedVehicle));
         setEstimatedFare(fare);
       } finally {
         setIsCalculatingFare(false);
@@ -175,6 +214,7 @@ export default function LaterRideScreen({ navigation }: any) {
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsSaving(true);
+    const finalFare = estimatedFare ? Math.max(0, estimatedFare - couponDiscount) : null;
     try {
       const res = await fetch(`${getApiUrl()}/api/later-bookings`, {
         method: 'POST',
@@ -188,12 +228,14 @@ export default function LaterRideScreen({ navigation }: any) {
           dropoffLatitude: dropoffLocation?.latitude ?? null,
           dropoffLongitude: dropoffLocation?.longitude ?? null,
           pickupAt: finalPickup.toISOString(),
-          estimatedFare: estimatedFare ?? null,
+          estimatedFare: finalFare,
           vehicleType: selectedVehicle,
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
           durationMinutes: durationMin ?? null,
           passengers,
           luggage,
+          couponCode: isCouponApplied ? couponCode : null,
+          discountAmount: isCouponApplied ? couponDiscount : 0,
         }),
       });
 
@@ -204,9 +246,10 @@ export default function LaterRideScreen({ navigation }: any) {
         throw new Error(resBody.error || `Server error ${res.status}`);
       }
 
+      const vName = selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus';
       Alert.alert(
         '🗓 Ride Scheduled!',
-        `Your ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\n${passengers} passenger(s), ${luggage} bag(s)${estimatedFare ? `\nEstimated Fare: £${estimatedFare.toFixed(2)}` : ''}`,
+        `Your ${vName} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\n${passengers} passenger(s), ${luggage} bag(s)${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {
@@ -325,202 +368,122 @@ export default function LaterRideScreen({ navigation }: any) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Vehicle Selector ── */}
-        <View style={s.vehicleSelector}>
-          <Text style={s.vehicleSelectorTitle}>Vehicle Type</Text>
-          <View style={s.vehicleOptions}>
-            <Pressable
-              style={[s.vehicleOption, selectedVehicle === 'saloon' && s.vehicleOptionActive]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setSelectedVehicle('saloon');
-              }}
-            >
-              <MaterialIcons
-                name="directions-car"
-                size={24}
-                color={selectedVehicle === 'saloon' ? '#000000' : '#6B7280'}
-              />
-              <Text style={[s.vehicleOptionName, selectedVehicle === 'saloon' && s.vehicleOptionNameActive]}>
-                Saloon
-              </Text>
-              <Text style={[s.vehicleOptionDesc, selectedVehicle === 'saloon' && s.vehicleOptionDescActive]}>
-                Up to 4 passengers
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[s.vehicleOption, selectedVehicle === 'minibus' && s.vehicleOptionActive]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setSelectedVehicle('minibus');
-              }}
-            >
-              <MaterialIcons
-                name="airport-shuttle"
-                size={24}
-                color={selectedVehicle === 'minibus' ? '#000000' : '#6B7280'}
-              />
-              <Text style={[s.vehicleOptionName, selectedVehicle === 'minibus' && s.vehicleOptionNameActive]}>
-                Minibus
-              </Text>
-              <Text style={[s.vehicleOptionDesc, selectedVehicle === 'minibus' && s.vehicleOptionDescActive]}>
-                Up to 8 passengers
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* ── Passengers & Luggage ── */}
+        {/* ── Passengers & Luggage (FIRST) ── */}
         <View style={s.counterSection}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>Passengers & Luggage</Text>
           <View style={s.counterRow}>
-            <View style={s.counterLeft}>
-              <MaterialIcons name="person" size={22} color="#374151" />
-              <Text style={s.counterLabel}>Passengers</Text>
-            </View>
+            <View style={s.counterLeft}><MaterialIcons name="person" size={22} color="#374151" /><Text style={s.counterLabel}>Passengers</Text></View>
             <View style={s.counterControls}>
-              <Pressable style={[s.counterBtn, passengers <= 1 && s.counterBtnDisabled]} onPress={() => { if (passengers > 1) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p - 1); } }}>
-                <MaterialIcons name="remove" size={20} color={passengers <= 1 ? '#D1D5DB' : '#374151'} />
-              </Pressable>
+              <Pressable style={[s.counterBtn, passengers <= 1 && s.counterBtnDisabled]} onPress={() => { if (passengers > 1) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p - 1); } }}><MaterialIcons name="remove" size={20} color={passengers <= 1 ? '#D1D5DB' : '#374151'} /></Pressable>
               <Text style={s.counterValue}>{passengers}</Text>
-              <Pressable style={[s.counterBtn, passengers >= 8 && s.counterBtnDisabled]} onPress={() => { if (passengers < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p + 1); } }}>
-                <MaterialIcons name="add" size={20} color={passengers >= 8 ? '#D1D5DB' : '#374151'} />
-              </Pressable>
+              <Pressable style={[s.counterBtn, passengers >= 8 && s.counterBtnDisabled]} onPress={() => { if (passengers < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setPassengers(p => p + 1); } }}><MaterialIcons name="add" size={20} color={passengers >= 8 ? '#D1D5DB' : '#374151'} /></Pressable>
             </View>
           </View>
           <View style={s.counterDivider} />
           <View style={s.counterRow}>
-            <View style={s.counterLeft}>
-              <MaterialIcons name="luggage" size={22} color="#374151" />
-              <Text style={s.counterLabel}>Luggage</Text>
-            </View>
+            <View style={s.counterLeft}><MaterialIcons name="luggage" size={22} color="#374151" /><Text style={s.counterLabel}>Luggage</Text></View>
             <View style={s.counterControls}>
-              <Pressable style={[s.counterBtn, luggage <= 0 && s.counterBtnDisabled]} onPress={() => { if (luggage > 0) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l - 1); } }}>
-                <MaterialIcons name="remove" size={20} color={luggage <= 0 ? '#D1D5DB' : '#374151'} />
-              </Pressable>
+              <Pressable style={[s.counterBtn, luggage <= 0 && s.counterBtnDisabled]} onPress={() => { if (luggage > 0) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l - 1); } }}><MaterialIcons name="remove" size={20} color={luggage <= 0 ? '#D1D5DB' : '#374151'} /></Pressable>
               <Text style={s.counterValue}>{luggage}</Text>
-              <Pressable style={[s.counterBtn, luggage >= 8 && s.counterBtnDisabled]} onPress={() => { if (luggage < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l + 1); } }}>
-                <MaterialIcons name="add" size={20} color={luggage >= 8 ? '#D1D5DB' : '#374151'} />
-              </Pressable>
+              <Pressable style={[s.counterBtn, luggage >= 8 && s.counterBtnDisabled]} onPress={() => { if (luggage < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setLuggage(l => l + 1); } }}><MaterialIcons name="add" size={20} color={luggage >= 8 ? '#D1D5DB' : '#374151'} /></Pressable>
             </View>
+          </View>
+        </View>
+
+        {/* ── Vehicle Selector (filtered) ── */}
+        <View style={s.vehicleSelector}>
+          <Text style={s.vehicleSelectorTitle}>Vehicle Type</Text>
+          <View style={{ gap: 10 }}>
+            {isSaloonEligible && (
+              <Pressable style={[s.vehicleOption, selectedVehicle === 'saloon' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('saloon'); }}>
+                <MaterialIcons name="directions-car" size={24} color={selectedVehicle === 'saloon' ? '#000000' : '#6B7280'} />
+                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'saloon' && s.vehicleOptionNameActive, { marginTop: 0 }]}>Saloon Car</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'saloon' && s.vehicleOptionDescActive]}>Up to 3 pax + 3 bags, or 4 pax + hand luggage</Text></View>
+              </Pressable>
+            )}
+            {isCarrierEligible && (
+              <Pressable style={[s.vehicleOption, selectedVehicle === 'people_carrier' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('people_carrier'); }}>
+                <MaterialIcons name="directions-car" size={24} color={selectedVehicle === 'people_carrier' ? '#000000' : '#6B7280'} />
+                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'people_carrier' && s.vehicleOptionNameActive, { marginTop: 0 }]}>People Carrier</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'people_carrier' && s.vehicleOptionDescActive]}>Up to 5 pax + 5 bags, or 6 pax + hand luggage</Text></View>
+              </Pressable>
+            )}
+            {isMinibusEligible && (
+              <Pressable style={[s.vehicleOption, selectedVehicle === 'minibus' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('minibus'); }}>
+                <MaterialIcons name="airport-shuttle" size={24} color={selectedVehicle === 'minibus' ? '#000000' : '#6B7280'} />
+                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'minibus' && s.vehicleOptionNameActive, { marginTop: 0 }]}>8 Seater Minibus</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'minibus' && s.vehicleOptionDescActive]}>Up to 8 pax + 8 bags</Text></View>
+              </Pressable>
+            )}
           </View>
         </View>
 
         {/* ── Pickup time section ── */}
         <View style={s.timeCard}>
           <Text style={s.timeSectionTitle}>Pickup Time</Text>
-
-          {/* Dark date header — tap to open calendar */}
           <TouchableOpacity style={s.dateHeader} onPress={() => setShowCalendar(!showCalendar)} activeOpacity={0.85}>
             <Text style={s.dateHeaderYear}>{selectedDate.getFullYear()}</Text>
             <Text style={s.dateHeaderDate}>{fmtDate(selectedDate)}</Text>
           </TouchableOpacity>
-
-          {/* Calendar */}
           {showCalendar && (
             <View style={s.calBox}>
               <View style={s.calMonthRow}>
-                <Pressable
-                  onPress={() => {
-                    if (!canNavPrev) return;
-                    setCalendarMonth(p => {
-                      let m = p.month - 1, y = p.year;
-                      if (m < 0) { m = 11; y--; }
-                      return { year: y, month: m };
-                    });
-                  }}
-                  style={{ opacity: canNavPrev ? 1 : 0.2 }}
-                >
-                  <MaterialIcons name="chevron-left" size={28} color="#111827" />
-                </Pressable>
-                <Text style={s.calMonthLabel}>
-                  {new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
-                </Text>
-                <Pressable
-                  onPress={() => {
-                    if (!canNavNext) return;
-                    setCalendarMonth(p => {
-                      let m = p.month + 1, y = p.year;
-                      if (m > 11) { m = 0; y++; }
-                      return { year: y, month: m };
-                    });
-                  }}
-                  style={{ opacity: canNavNext ? 1 : 0.2 }}
-                >
-                  <MaterialIcons name="chevron-right" size={28} color="#111827" />
-                </Pressable>
+                <Pressable onPress={() => { if (!canNavPrev) return; setCalendarMonth(p => { let m = p.month - 1, y = p.year; if (m < 0) { m = 11; y--; } return { year: y, month: m }; }); }} style={{ opacity: canNavPrev ? 1 : 0.2 }}><MaterialIcons name="chevron-left" size={28} color="#111827" /></Pressable>
+                <Text style={s.calMonthLabel}>{new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</Text>
+                <Pressable onPress={() => { if (!canNavNext) return; setCalendarMonth(p => { let m = p.month + 1, y = p.year; if (m > 11) { m = 0; y++; } return { year: y, month: m }; }); }} style={{ opacity: canNavNext ? 1 : 0.2 }}><MaterialIcons name="chevron-right" size={28} color="#111827" /></Pressable>
               </View>
-              <View style={s.calDayNames}>
-                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((dn, i) => (
-                  <Text key={i} style={s.calDayName}>{dn}</Text>
-                ))}
-              </View>
+              <View style={s.calDayNames}>{['S','M','T','W','T','F','S'].map((dn, i) => <Text key={i} style={s.calDayName}>{dn}</Text>)}</View>
               <View style={s.calGrid}>{renderCalendar()}</View>
               <View style={s.calFooter}>
-                <Pressable onPress={() => setShowCalendar(false)}>
-                  <Text style={s.calCancel}>CANCEL</Text>
-                </Pressable>
-                <Pressable onPress={() => setShowCalendar(false)}>
-                  <Text style={s.calOk}>OK</Text>
-                </Pressable>
+                <Pressable onPress={() => setShowCalendar(false)}><Text style={s.calCancel}>CANCEL</Text></Pressable>
+                <Pressable onPress={() => setShowCalendar(false)}><Text style={s.calOk}>OK</Text></Pressable>
               </View>
             </View>
           )}
 
-          {/* Time spinner */}
+          {/* Time spinner — descending only */}
           <Text style={s.timeLabel}>Pickup time</Text>
           <View style={s.spinnerRow}>
-            {/* Hour */}
             <View style={s.spinnerCol}>
-              <Pressable
-                onPress={() => setHourVal(h => (h - 1 + 24) % 24)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
-                <MaterialIcons name="keyboard-arrow-up" size={36} color="#333" />
-              </Pressable>
               <Text style={s.spinnerVal}>{String(hourVal).padStart(2, '0')}</Text>
-              <Pressable
-                onPress={() => setHourVal(h => (h + 1) % 24)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
-                <MaterialIcons name="keyboard-arrow-down" size={36} color="#333" />
-              </Pressable>
+              <Pressable onPress={() => setHourVal(h => (h - 1 + 24) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
             </View>
             <Text style={s.spinnerColon}>:</Text>
-            {/* Minute */}
             <View style={s.spinnerCol}>
-              <Pressable
-                onPress={() => setMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
-                <MaterialIcons name="keyboard-arrow-up" size={36} color="#333" />
-              </Pressable>
               <Text style={s.spinnerVal}>{String(minuteVal).padStart(2, '0')}</Text>
-              <Pressable
-                onPress={() => setMinuteVal(m => (Math.round(m / 5) * 5 + 5) % 60)}
-                hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
-              >
-                <MaterialIcons name="keyboard-arrow-down" size={36} color="#333" />
-              </Pressable>
+              <Pressable onPress={() => setMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
             </View>
           </View>
+        </View>
+
+        {/* ── Coupon Code ── */}
+        <View style={s.fareCard}>
+          <View style={s.fareCardHeader}><MaterialIcons name="local-offer" size={20} color={UTO_YELLOW} /><Text style={s.fareCardTitle}>Discount Coupon</Text></View>
+          {isCouponApplied ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12 }}>
+              <View><Text style={{ fontSize: 15, fontWeight: '700', color: '#065F46' }}>✓ {couponCode.toUpperCase()}</Text><Text style={{ fontSize: 13, color: '#059669' }}>{couponDescription} — £{couponDiscount.toFixed(2)} off</Text></View>
+              <Pressable onPress={handleRemoveCoupon}><Text style={{ fontSize: 13, fontWeight: '600', color: '#EF4444' }}>Remove</Text></Pressable>
+            </View>
+          ) : (
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TextInput style={{ flex: 1, backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, fontWeight: '600', color: '#111827', borderWidth: 1, borderColor: '#E5E7EB' }} value={couponCode} onChangeText={(t) => { setCouponCode(t); setCouponError(''); }} placeholder="Enter coupon code" placeholderTextColor="#9CA3AF" autoCapitalize="characters" />
+              <TouchableOpacity style={{ backgroundColor: UTO_YELLOW, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center', opacity: isValidatingCoupon ? 0.7 : 1 }} onPress={handleValidateCoupon} disabled={isValidatingCoupon}>
+                {isValidatingCoupon ? <ActivityIndicator size="small" color="#000" /> : <Text style={{ fontWeight: '700', color: '#000' }}>Apply</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+          {couponError ? <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 6 }}>{couponError}</Text> : null}
         </View>
 
         {/* ── Estimated Fare Card ── */}
         {(estimatedFare !== null || isCalculatingFare) && (
           <View style={s.fareCard}>
-            <View style={s.fareCardHeader}>
-              <MaterialIcons name="receipt" size={20} color={UTO_YELLOW} />
-              <Text style={s.fareCardTitle}>Estimated Fare</Text>
-            </View>
+            <View style={s.fareCardHeader}><MaterialIcons name="receipt" size={20} color={UTO_YELLOW} /><Text style={s.fareCardTitle}>Estimated Fare</Text></View>
             {isCalculatingFare ? (
               <ActivityIndicator size="small" color={UTO_YELLOW} style={{ marginTop: 8 }} />
             ) : (
               <>
-                <Text style={s.fareCardPrice}>£{estimatedFare!.toFixed(2)}</Text>
+                <Text style={s.fareCardPrice}>£{Math.max(0, estimatedFare! - couponDiscount).toFixed(2)}</Text>
+                {couponDiscount > 0 && <Text style={{ fontSize: 13, color: '#059669', marginBottom: 4 }}>Discount: -£{couponDiscount.toFixed(2)}</Text>}
                 {distanceKm !== null && durationMin !== null && (
-                  <Text style={s.fareCardSub}>
-                    {(distanceKm * 0.621371).toFixed(1)} miles · ~{durationMin} min · {selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'}
-                  </Text>
+                  <Text style={s.fareCardSub}>{(distanceKm * 0.621371).toFixed(1)} miles · ~{durationMin} min · {selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus'}</Text>
                 )}
               </>
             )}
@@ -529,10 +492,7 @@ export default function LaterRideScreen({ navigation }: any) {
 
         {/* Cancellation Policy */}
         <View style={s.policyCard}>
-          <View style={s.policyHeader}>
-            <MaterialIcons name="info-outline" size={16} color="#92610A" />
-            <Text style={s.policyTitle}>Cancellation Policy</Text>
-          </View>
+          <View style={s.policyHeader}><MaterialIcons name="info-outline" size={16} color="#92610A" /><Text style={s.policyTitle}>Cancellation Policy</Text></View>
           <Text style={s.policyText}>
             {"\u2022 Free cancellation up to 3 hours before pickup \u2014 full refund will be issued\n\u2022 Cancellations within 3 hours of scheduled pickup \u2014 full journey fare will be charged\n\u2022 This applies to all bookings including future and ASAP rides\n\u2022 By confirming, you agree to this cancellation policy"}
           </Text>
@@ -543,18 +503,11 @@ export default function LaterRideScreen({ navigation }: any) {
 
       {/* Footer CTA */}
       <View style={[s.footer, { paddingBottom: insets.bottom + 16 }]}>
-        <TouchableOpacity
-          style={[s.continueBtn, isSaving && { opacity: 0.7 }]}
-          onPress={handleContinue}
-          activeOpacity={0.85}
-          disabled={isSaving}
-        >
+        <TouchableOpacity style={[s.continueBtn, isSaving && { opacity: 0.7 }]} onPress={handleContinue} activeOpacity={0.85} disabled={isSaving}>
           {isSaving
             ? <ActivityIndicator color="#000000" />
             : <Text style={s.continueBtnText}>
-                {estimatedFare
-                  ? `Confirm ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'} · £${estimatedFare.toFixed(2)}`
-                  : `Confirm ${selectedVehicle === 'saloon' ? 'Saloon' : 'Minibus'} Booking`}
+                {(() => { const vn = selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus'; const total = estimatedFare ? Math.max(0, estimatedFare - couponDiscount) : null; return total ? `Confirm ${vn} · £${total.toFixed(2)}` : `Confirm ${vn} Booking`; })()}
               </Text>
           }
         </TouchableOpacity>

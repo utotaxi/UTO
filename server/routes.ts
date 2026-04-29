@@ -2086,13 +2086,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Import supabase directly (db.ts exports `supabase`, not `db`)
   const { supabase: sb } = await import("./db");
 
+  // ── Coupon Validation ───────────────────────────────────────────────
+  app.post("/api/coupons/validate", async (req: Request, res: Response) => {
+    try {
+      const { code, fareAmount } = req.body;
+      if (!code) return res.status(400).json({ error: "Coupon code is required" });
+
+      const { data: coupon, error } = await sb
+        .from("discount_coupons")
+        .select("*")
+        .eq("code", code.toUpperCase().trim())
+        .eq("is_active", true)
+        .single();
+
+      if (error || !coupon) {
+        return res.status(404).json({ error: "Invalid or expired coupon code" });
+      }
+
+      // Check expiry
+      if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+        return res.status(400).json({ error: "This coupon has expired" });
+      }
+
+      // Check usage limit
+      if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
+        return res.status(400).json({ error: "This coupon has reached its maximum usage limit" });
+      }
+
+      // Check minimum fare
+      if (coupon.min_fare && fareAmount && fareAmount < coupon.min_fare) {
+        return res.status(400).json({ error: `Minimum fare of £${coupon.min_fare} required for this coupon` });
+      }
+
+      // Calculate discount
+      let discountAmount = 0;
+      if (coupon.discount_type === 'percentage') {
+        discountAmount = fareAmount ? (fareAmount * coupon.discount_amount / 100) : 0;
+      } else {
+        discountAmount = coupon.discount_amount;
+      }
+
+      // Don't let discount exceed fare
+      if (fareAmount && discountAmount > fareAmount) {
+        discountAmount = fareAmount;
+      }
+
+      res.json({
+        valid: true,
+        coupon: {
+          code: coupon.code,
+          discountType: coupon.discount_type,
+          discountValue: coupon.discount_amount,
+          discountAmount: parseFloat(discountAmount.toFixed(2)),
+          description: coupon.discount_type === 'percentage'
+            ? `${coupon.discount_amount}% off`
+            : `£${coupon.discount_amount} off`,
+        },
+      });
+    } catch (err: any) {
+      console.error("Coupon validation error:", err);
+      res.status(500).json({ error: "Failed to validate coupon" });
+    }
+  });
+
   app.post("/api/later-bookings", async (req: Request, res: Response) => {
     try {
       const {
         riderId, pickupAddress, pickupLatitude, pickupLongitude,
         dropoffAddress, dropoffLatitude, dropoffLongitude, pickupAt, dropoffBy,
         vehicleType, estimatedFare, distanceMiles: clientDistanceMiles, durationMinutes: clientDurationMinutes,
-        flightNumber, isRoundTrip, bookingType, passengers, luggage
+        flightNumber, isRoundTrip, bookingType, passengers, luggage,
+        couponCode, discountAmount,
+        returnPickupAddress, returnPickupLatitude, returnPickupLongitude,
+        returnDropoffAddress, returnDropoffLatitude, returnDropoffLongitude,
       } = req.body;
 
       if (!riderId || !pickupAddress || !dropoffAddress || !pickupAt) {
@@ -2121,6 +2187,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const gapMs = dropoffTime.getTime() - pickupTime.getTime();
         if (gapMs < 30 * 60 * 1000) {
           return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs/60000)} min)` });
+        }
+      }
+
+      // If a coupon was applied, increment its used_count
+      if (couponCode) {
+        await sb.rpc('increment_coupon_usage', { coupon_code: couponCode.toUpperCase().trim() }).catch(() => {
+          // Fallback: direct update if RPC doesn't exist
+          sb.from("discount_coupons")
+            .update({ used_count: sb.raw ? undefined : 0 })
+            .eq("code", couponCode.toUpperCase().trim())
+            .then(() => {});
+        });
+        // Simple fallback increment
+        const { data: couponData } = await sb
+          .from("discount_coupons")
+          .select("used_count")
+          .eq("code", couponCode.toUpperCase().trim())
+          .single();
+        if (couponData) {
+          await sb
+            .from("discount_coupons")
+            .update({ used_count: (couponData.used_count || 0) + 1 })
+            .eq("code", couponCode.toUpperCase().trim());
         }
       }
 
@@ -2207,6 +2296,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           booking_type: bookingType || 'standard',
           passengers: passengers ?? 1,
           luggage: luggage ?? 0,
+          coupon_code: couponCode ?? null,
+          discount_amount: discountAmount ?? 0,
+          return_pickup_address: returnPickupAddress ?? null,
+          return_pickup_latitude: returnPickupLatitude ?? null,
+          return_pickup_longitude: returnPickupLongitude ?? null,
+          return_dropoff_address: returnDropoffAddress ?? null,
+          return_dropoff_latitude: returnDropoffLatitude ?? null,
+          return_dropoff_longitude: returnDropoffLongitude ?? null,
       };
 
       let { data, error } = await sb
