@@ -71,6 +71,10 @@ export default function AirportBookingScreen({ navigation }: any) {
   const [returnPickupLocation, setReturnPickupLocation] = useState<LatLng | null>(null);
   const [returnDropoffLocation, setReturnDropoffLocation] = useState<LatLng | null>(null);
 
+  // Return passengers & luggage (independent from outbound)
+  const [returnPassengers, setReturnPassengers] = useState(1);
+  const [returnLuggage, setReturnLuggage] = useState(0);
+
   // Vehicle type — now supports 3 types
   type VehicleType = 'saloon' | 'people_carrier' | 'minibus';
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleType>('saloon');
@@ -87,6 +91,11 @@ export default function AirportBookingScreen({ navigation }: any) {
   const isSaloonEligible = (passengers <= 3 && luggage <= 3) || (passengers <= 4 && luggage === 0);
   const isCarrierEligible = (passengers <= 5 && luggage <= 5) || (passengers <= 6 && luggage === 0);
   const isMinibusEligible = passengers <= 8 && luggage <= 8;
+
+  // Return vehicle eligibility (based on return passengers & luggage)
+  const isReturnSaloonEligible = (returnPassengers <= 3 && returnLuggage <= 3) || (returnPassengers <= 4 && returnLuggage === 0);
+  const isReturnCarrierEligible = (returnPassengers <= 5 && returnLuggage <= 5) || (returnPassengers <= 6 && returnLuggage === 0);
+  const isReturnMinibusEligible = returnPassengers <= 8 && returnLuggage <= 8;
 
   // Pricing
   const [estimatedFare, setEstimatedFare] = useState<number | null>(null);
@@ -141,6 +150,14 @@ export default function AirportBookingScreen({ navigation }: any) {
     else if (isCarrierEligible) { if (selectedVehicle === 'saloon') setSelectedVehicle('people_carrier'); }
     else if (isMinibusEligible) { setSelectedVehicle('minibus'); }
   }, [passengers, luggage]);
+
+  // Auto-select eligible return vehicle when return passengers/luggage change
+  useEffect(() => {
+    if (isReturnSaloonEligible) { /* keep current if eligible */ }
+    else if (isReturnCarrierEligible) { if (returnSelectedVehicle === 'saloon') setReturnSelectedVehicle('people_carrier'); }
+    else if (isReturnMinibusEligible) { setReturnSelectedVehicle('minibus'); }
+  }, [returnPassengers, returnLuggage]);
+
   const [returnFlightNumber, setReturnFlightNumber] = useState('');
   const [returnEstimatedFare, setReturnEstimatedFare] = useState<number | null>(null);
 
@@ -440,8 +457,8 @@ export default function AirportBookingScreen({ navigation }: any) {
             flightNumber: returnFlightNumber || null,
             isReturnJourney: true,
             bookingType: 'airport',
-            passengers,
-            luggage,
+            passengers: returnPassengers,
+            luggage: returnLuggage,
             returnPickupAddress: rPickup,
             returnPickupLatitude: rPickupLoc?.latitude ?? null,
             returnPickupLongitude: rPickupLoc?.longitude ?? null,
@@ -748,13 +765,49 @@ export default function AirportBookingScreen({ navigation }: any) {
               <TextInput style={s.flightInput} value={returnFlightNumber} onChangeText={setReturnFlightNumber} placeholder="e.g. BA 5678" placeholderTextColor="#9CA3AF" autoCapitalize="characters" />
             </View>
 
-            {/* Return Vehicle — filtered */}
+            {/* Return Passengers & Luggage */}
+            <View style={[s.counterSection, { marginHorizontal: 16, marginBottom: 16 }]}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>Return Passengers & Luggage</Text>
+              <View style={s.counterRow}>
+                <View style={s.counterLeft}>
+                  <MaterialIcons name="person" size={22} color="#374151" />
+                  <Text style={s.counterLabel}>Passengers</Text>
+                </View>
+                <View style={s.counterControls}>
+                  <Pressable style={[s.counterBtn, returnPassengers <= 1 && s.counterBtnDisabled]} onPress={() => { if (returnPassengers > 1) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnPassengers(p => p - 1); } }}>
+                    <MaterialIcons name="remove" size={20} color={returnPassengers <= 1 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                  <Text style={s.counterValue}>{returnPassengers}</Text>
+                  <Pressable style={[s.counterBtn, returnPassengers >= 8 && s.counterBtnDisabled]} onPress={() => { if (returnPassengers < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnPassengers(p => p + 1); } }}>
+                    <MaterialIcons name="add" size={20} color={returnPassengers >= 8 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                </View>
+              </View>
+              <View style={s.counterDivider} />
+              <View style={s.counterRow}>
+                <View style={s.counterLeft}>
+                  <MaterialIcons name="luggage" size={22} color="#374151" />
+                  <Text style={s.counterLabel}>Luggage</Text>
+                </View>
+                <View style={s.counterControls}>
+                  <Pressable style={[s.counterBtn, returnLuggage <= 0 && s.counterBtnDisabled]} onPress={() => { if (returnLuggage > 0) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnLuggage(l => l - 1); } }}>
+                    <MaterialIcons name="remove" size={20} color={returnLuggage <= 0 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                  <Text style={s.counterValue}>{returnLuggage}</Text>
+                  <Pressable style={[s.counterBtn, returnLuggage >= 8 && s.counterBtnDisabled]} onPress={() => { if (returnLuggage < 8) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnLuggage(l => l + 1); } }}>
+                    <MaterialIcons name="add" size={20} color={returnLuggage >= 8 ? '#D1D5DB' : '#374151'} />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            {/* Return Vehicle — filtered by RETURN passengers/luggage */}
             <View style={[s.vehicleSelector, { marginHorizontal: 16, marginBottom: 16 }]}>
               <Text style={s.vehicleSelectorTitle}>Return Vehicle</Text>
               <View style={{ gap: 8 }}>
-                {isSaloonEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'saloon' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('saloon'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'saloon' && s.vehicleOptionNameActive]}>Saloon</Text></Pressable>}
-                {isCarrierEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'people_carrier' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('people_carrier'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'people_carrier' && s.vehicleOptionNameActive]}>People Carrier</Text></Pressable>}
-                {isMinibusEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'minibus' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('minibus'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'minibus' && s.vehicleOptionNameActive]}>Minibus</Text></Pressable>}
+                {isReturnSaloonEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'saloon' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('saloon'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'saloon' && s.vehicleOptionNameActive]}>Saloon</Text></Pressable>}
+                {isReturnCarrierEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'people_carrier' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('people_carrier'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'people_carrier' && s.vehicleOptionNameActive]}>People Carrier</Text></Pressable>}
+                {isReturnMinibusEligible && <Pressable style={[s.vehicleOption, returnSelectedVehicle === 'minibus' && s.vehicleOptionActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setReturnSelectedVehicle('minibus'); }}><Text style={[s.vehicleOptionName, returnSelectedVehicle === 'minibus' && s.vehicleOptionNameActive]}>Minibus</Text></Pressable>}
               </View>
             </View>
 
