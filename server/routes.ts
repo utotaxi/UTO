@@ -1117,7 +1117,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS booking_type TEXT DEFAULT 'standard';`
     });
-    console.log('✅ Ensured later_bookings columns exist');
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS passengers INTEGER DEFAULT 1;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS luggage INTEGER DEFAULT 0;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS coupon_code TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS discount_amount NUMERIC DEFAULT 0;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS distance_miles NUMERIC DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS duration_minutes NUMERIC DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS return_pickup_address TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS return_pickup_latitude NUMERIC DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS return_pickup_longitude NUMERIC DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS return_dropoff_address TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS return_dropoff_latitude NUMERIC DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS return_dropoff_longitude NUMERIC DEFAULT NULL;`
+    });
+    console.log('✅ Ensured later_bookings columns exist (including coupon_code, discount_amount, return fields)');
   } catch (e) {
     console.log('ℹ️ later_bookings migration skipped:', (e as Error).message);
   }
@@ -2324,6 +2360,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         delete insertData.booking_type;
         delete insertData.passengers;
         delete insertData.luggage;
+        delete insertData.coupon_code;
+        delete insertData.discount_amount;
+        delete insertData.return_pickup_address;
+        delete insertData.return_pickup_latitude;
+        delete insertData.return_pickup_longitude;
+        delete insertData.return_dropoff_address;
+        delete insertData.return_dropoff_latitude;
+        delete insertData.return_dropoff_longitude;
         const retry = await sb
           .from("later_bookings")
           .insert(insertData)

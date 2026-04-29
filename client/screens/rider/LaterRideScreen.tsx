@@ -438,15 +438,17 @@ export default function LaterRideScreen({ navigation }: any) {
             </View>
           )}
 
-          {/* Time spinner — descending only */}
+          {/* Time spinner — scrollable up and down */}
           <Text style={s.timeLabel}>Pickup time</Text>
           <View style={s.spinnerRow}>
             <View style={s.spinnerCol}>
+              <Pressable onPress={() => setHourVal(h => (h + 1) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-up" size={36} color="#333" /></Pressable>
               <Text style={s.spinnerVal}>{String(hourVal).padStart(2, '0')}</Text>
               <Pressable onPress={() => setHourVal(h => (h - 1 + 24) % 24)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
             </View>
             <Text style={s.spinnerColon}>:</Text>
             <View style={s.spinnerCol}>
+              <Pressable onPress={() => setMinuteVal(m => (Math.round(m / 5) * 5 + 5) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-up" size={36} color="#333" /></Pressable>
               <Text style={s.spinnerVal}>{String(minuteVal).padStart(2, '0')}</Text>
               <Pressable onPress={() => setMinuteVal(m => ((Math.round(m / 5) * 5) - 5 + 60) % 60)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}><MaterialIcons name="keyboard-arrow-down" size={36} color="#333" /></Pressable>
             </View>

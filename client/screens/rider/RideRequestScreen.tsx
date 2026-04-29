@@ -2463,6 +2463,7 @@ import {
   Dimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -2568,6 +2569,14 @@ export default function RideRequestScreen({ navigation, route }: any) {
   const [durationMin, setDurationMin] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "card">("cash");
   const [useWalletBalance, setUseWalletBalance] = useState(false);
+
+  // ── Coupon state ──
+  const [couponCode, setCouponCode] = useState('');
+  const [couponDiscount, setCouponDiscount] = useState<number>(0);
+  const [couponDescription, setCouponDescription] = useState('');
+  const [isCouponApplied, setIsCouponApplied] = useState(false);
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState('');
 
   // ── Saved card state ──
   const [savedCards, setSavedCards] = useState<any[]>([]);
@@ -2700,6 +2709,21 @@ export default function RideRequestScreen({ navigation, route }: any) {
       setIsSavingCard(false);
     }
   };
+
+  // ── Coupon validation ──
+  const handleValidateCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setIsValidatingCoupon(true); setCouponError('');
+    try {
+      const fareAmount = calculatePrice(selectedVehicle);
+      const res = await fetch(`${getApiUrl()}/api/coupons/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: couponCode.trim(), fareAmount }) });
+      const data = await res.json();
+      if (!res.ok) { setCouponError(data.error || 'Invalid coupon'); setIsCouponApplied(false); setCouponDiscount(0); return; }
+      setCouponDiscount(data.coupon.discountAmount); setCouponDescription(data.coupon.description); setIsCouponApplied(true);
+    } catch { setCouponError('Failed to validate coupon'); }
+    finally { setIsValidatingCoupon(false); }
+  };
+  const handleRemoveCoupon = () => { setCouponCode(''); setCouponDiscount(0); setCouponDescription(''); setIsCouponApplied(false); setCouponError(''); };
 
   const buttonScale = useSharedValue(1);
 
@@ -3289,6 +3313,42 @@ export default function RideRequestScreen({ navigation, route }: any) {
               </Pressable>
             ) : null}
 
+            {/* ── Coupon Code Section ── */}
+            <View style={{ paddingVertical: 12, borderBottomWidth: 1, borderColor: '#333333', marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <MaterialIcons name="local-offer" size={18} color={UTOColors.primary} style={{ marginRight: 6 }} />
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#FFFFFF' }}>Discount Coupon</Text>
+              </View>
+              {isCouponApplied ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0D3320', borderRadius: 10, padding: 12 }}>
+                  <View>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#34D399' }}>✓ {couponCode.toUpperCase()}</Text>
+                    <Text style={{ fontSize: 12, color: '#6EE7B7' }}>{couponDescription} — £{couponDiscount.toFixed(2)} off</Text>
+                  </View>
+                  <Pressable onPress={handleRemoveCoupon}><Text style={{ fontSize: 13, fontWeight: '600', color: '#EF4444' }}>Remove</Text></Pressable>
+                </View>
+              ) : (
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    style={{ flex: 1, backgroundColor: '#1A1A1A', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, fontWeight: '600', color: '#FFFFFF', borderWidth: 1, borderColor: '#333333' }}
+                    value={couponCode}
+                    onChangeText={(t) => { setCouponCode(t); setCouponError(''); }}
+                    placeholder="Enter coupon code"
+                    placeholderTextColor="#666666"
+                    autoCapitalize="characters"
+                  />
+                  <TouchableOpacity
+                    style={{ backgroundColor: UTOColors.primary, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center', opacity: isValidatingCoupon ? 0.7 : 1 }}
+                    onPress={handleValidateCoupon}
+                    disabled={isValidatingCoupon}
+                  >
+                    {isValidatingCoupon ? <ActivityIndicator size="small" color="#000" /> : <Text style={{ fontWeight: '700', color: '#000' }}>Apply</Text>}
+                  </TouchableOpacity>
+                </View>
+              )}
+              {couponError ? <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 6 }}>{couponError}</Text> : null}
+            </View>
+
             <AnimatedPressable
               onPress={handleRequestRide}
               onPressIn={() => (buttonScale.value = withSpring(0.98))}
@@ -3310,7 +3370,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                       : `Request ${VEHICLE_OPTIONS.find((v) => v.type === selectedVehicle)?.name}`}
                   </ThemedText>
                   <ThemedText style={styles.requestButtonPrice}>
-                    {formatPrice(calculatePrice(selectedVehicle))}
+                    {formatPrice(Math.max(0, calculatePrice(selectedVehicle) - couponDiscount))}
                   </ThemedText>
                 </>
               )}
