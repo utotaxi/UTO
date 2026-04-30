@@ -375,6 +375,14 @@ export default function AirportBookingScreen({ navigation }: any) {
 
     let returnScheduledTime;
     if (isReturnJourney) {
+      if (!returnPickup || returnPickup.trim() === '') {
+        Alert.alert('Missing return pickup', 'Please enter a pickup location for your return journey.');
+        return;
+      }
+      if (!returnDropoff || returnDropoff.trim() === '') {
+        Alert.alert('Missing return drop-off', 'Please enter a drop-off location for your return journey.');
+        return;
+      }
       if (!returnFlightNumber || returnFlightNumber.trim() === '') {
         Alert.alert('Missing return flight number', 'Please enter your return flight number before booking your airport transfer.');
         return;
@@ -434,10 +442,10 @@ export default function AirportBookingScreen({ navigation }: any) {
       }
 
       if (isReturnJourney && returnScheduledTime) {
-        const rPickup = returnPickup || dropoff;
-        const rDropoff = returnDropoff || pickup;
-        const rPickupLoc = returnPickupLocation || dropoffLocation;
-        const rDropoffLoc = returnDropoffLocation || pickupLocation;
+        const rPickup = returnPickup;
+        const rDropoff = returnDropoff;
+        const rPickupLoc = returnPickupLocation;
+        const rDropoffLoc = returnDropoffLocation;
         const returnRes = await fetch(`${getApiUrl()}/api/later-bookings`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -725,7 +733,7 @@ export default function AirportBookingScreen({ navigation }: any) {
                   <View style={{ flex: 1 }}>
                     <LocationInputAutocomplete
                       label="Return Pickup"
-                      value={returnPickup || dropoff}
+                      value={returnPickup}
                       placeholder="Return pickup location"
                       onChangeText={setReturnPickup}
                       onSelectLocation={(place: PlaceSuggestion) => {
@@ -742,7 +750,7 @@ export default function AirportBookingScreen({ navigation }: any) {
                   <View style={{ flex: 1 }}>
                     <LocationInputAutocomplete
                       label="Return Drop-off"
-                      value={returnDropoff || pickup}
+                      value={returnDropoff}
                       placeholder="Return drop-off location"
                       onChangeText={setReturnDropoff}
                       onSelectLocation={(place: PlaceSuggestion) => {
