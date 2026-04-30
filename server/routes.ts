@@ -2357,15 +2357,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If columns don't exist in Supabase yet, the first insert will fail.
       if (error) {
         console.warn('⚠️ later_bookings insert failed (likely missing columns), retrying without extended fields. Original error:', error.message);
-        delete insertData.vehicle_type;
-        delete insertData.estimated_fare;
-        delete insertData.distance_miles;
-        delete insertData.duration_minutes;
-        delete insertData.flight_number;
-        delete insertData.is_round_trip;
-        delete insertData.booking_type;
-        delete insertData.passengers;
-        delete insertData.luggage;
+        // Note: vehicle_type, estimated_fare, distance_miles, duration_minutes, flight_number,
+        // is_round_trip, booking_type, passengers, and luggage ALREADY EXIST in production DB.
+        // We only delete the coupon and return columns which are currently missing in production.
         delete insertData.coupon_code;
         delete insertData.discount_amount;
         delete insertData.return_pickup_address;
