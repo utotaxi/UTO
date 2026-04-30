@@ -32,9 +32,16 @@ interface LaterBooking {
   driver_id?: string | null;
   passengers?: number;
   luggage?: number;
+  booking_type?: string;
+  is_round_trip?: boolean;
+  vehicle_type?: string;
+  flight_number?: string;
+  distance_miles?: number;
+  duration_minutes?: number;
 }
 
-function fmtDateTime(iso: string) {
+function fmtDateTimeFull(iso: string | null | undefined) {
+  if (!iso) return 'N/A';
   const d = new Date(iso);
   return d.toLocaleString('en-GB', {
     weekday: 'short',
@@ -63,6 +70,18 @@ function BookingCard({
   const isLateCancelWindow = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
   const driverOwnsThis = item.driver_id === driverId || item.driver_id === driverId;
 
+  let jobType = 'Scheduled';
+  if (item.booking_type === 'airport') jobType = 'Airport';
+  if (item.is_round_trip) jobType = 'Return Journey';
+
+  const formatVehicle = (v?: string) => {
+    if (!v) return 'Saloon';
+    if (v === 'people_carrier') return 'Minibus / People Carrier';
+    return v.charAt(0).toUpperCase() + v.slice(1);
+  };
+
+  const fareStr = item.estimated_fare ? `£${parseFloat(String(item.estimated_fare)).toFixed(2)}` : 'N/A';
+
   return (
     <View style={s.card}>
       <View style={s.cardHeader}>
@@ -71,52 +90,92 @@ function BookingCard({
             {item.status.toUpperCase().replace('_', ' ')}
           </Text>
         </View>
-        <Text style={s.cardTime}>{fmtDateTime(item.pickup_at)}</Text>
       </View>
 
-      {/* Route */}
-      <View style={s.routeRow}>
-        <View style={s.routeIcons}>
-          <View style={s.dotGreen} />
-          <View style={s.routeLineV} />
-          <View style={s.dotYellow} />
+      <View style={s.detailsContainer}>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Job Type:</Text>
+          <Text style={s.detailValue}>{jobType}</Text>
         </View>
-        <View style={s.routeTexts}>
-          <Text style={s.routeAddr} numberOfLines={1}>{item.pickup_address}</Text>
-          <View style={{ height: 12 }} />
-          <Text style={s.routeAddr} numberOfLines={1}>{item.dropoff_address}</Text>
+        <View style={s.detailRowStack}>
+          <Text style={s.detailLabel}>Pickup:</Text>
+          <Text style={s.detailValue}>{item.pickup_address}</Text>
+        </View>
+        <View style={s.detailRowStack}>
+          <Text style={s.detailLabel}>Drop-off:</Text>
+          <Text style={s.detailValue}>{item.dropoff_address}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Pickup Date & Time:</Text>
+          <Text style={s.detailValue}>{fmtDateTimeFull(item.pickup_at)}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Estimated Drop-off:</Text>
+          <Text style={s.detailValue}>{fmtDateTimeFull(item.dropoff_by)}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Vehicle Required:</Text>
+          <Text style={s.detailValue}>{formatVehicle(item.vehicle_type)}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Passengers:</Text>
+          <Text style={s.detailValue}>{item.passengers || 1}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Luggage:</Text>
+          <Text style={s.detailValue}>{item.luggage || 0} suitcases</Text>
+        </View>
+        {item.flight_number && (
+          <View style={s.detailRow}>
+            <Text style={s.detailLabel}>Flight Number:</Text>
+            <Text style={s.detailValue}>{item.flight_number}</Text>
+          </View>
+        )}
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Estimated Fare:</Text>
+          <Text style={s.detailValue}>{fareStr}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Payment Method:</Text>
+          <Text style={s.detailValue}>Card / App</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Distance to pickup:</Text>
+          <Text style={s.detailValue}>Calculating...</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Trip distance:</Text>
+          <Text style={s.detailValue}>{item.distance_miles ? `${item.distance_miles.toFixed(1)} miles` : 'N/A'}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Estimated duration:</Text>
+          <Text style={s.detailValue}>{item.duration_minutes ? `${item.duration_minutes} minutes` : 'N/A'}</Text>
         </View>
       </View>
 
-      {/* Fare */}
-      {item.estimated_fare ? (
-        <View style={s.fareRow}>
-          <Text style={s.fareLabel}>Estimated Fare</Text>
-          <Text style={s.fareValue}>£{parseFloat(String(item.estimated_fare)).toFixed(2)}</Text>
-        </View>
-      ) : null}
-
-      <View style={s.cardFooter}>
-        <View style={s.dropoffRow}>
-          <MaterialIcons name="person" size={13} color="#6B7280" />
-          <Text style={s.dropoffText}>{item.passengers || 1} pax</Text>
-          <MaterialIcons name="luggage" size={13} color="#6B7280" style={{ marginLeft: 8 }} />
-          <Text style={s.dropoffText}>{item.luggage || 0} bags</Text>
-        </View>
+      <View style={s.actionRow}>
         {item.status === 'scheduled' && (
-          <Pressable
-            style={s.acceptBtn}
-            onPress={() => onAccept(item.id)}
-          >
-            <Text style={s.acceptBtnText}>Accept</Text>
-          </Pressable>
+          <>
+            <Pressable
+              style={[s.actionBtn, s.declineBtn]}
+              onPress={() => onCancel(item)}
+            >
+              <Text style={s.declineBtnText}>Decline</Text>
+            </Pressable>
+            <Pressable
+              style={[s.actionBtn, s.acceptJobBtn]}
+              onPress={() => onAccept(item.id)}
+            >
+              <Text style={s.acceptJobBtnText}>Accept Job</Text>
+            </Pressable>
+          </>
         )}
         {item.status === 'driver_accepted' && driverOwnsThis && (
           <Pressable
-            style={[s.acceptBtn, s.cancelBtn]}
+            style={[s.actionBtn, s.declineBtn, { flex: 1 }]}
             onPress={() => onCancel(item)}
           >
-            <Text style={[s.acceptBtnText, { color: '#EF4444' }]}>Cancel</Text>
+            <Text style={s.declineBtnText}>Cancel Job</Text>
           </Pressable>
         )}
       </View>
@@ -197,15 +256,22 @@ export default function DriverMarketplaceScreen() {
       : 'You are cancelling this booking. No penalty applies as it is more than 3 hours before pickup.';
 
     Alert.alert(
-      withinThreeHours ? 'Cancellation Penalty' : 'Cancel Booking',
+      withinThreeHours ? 'Cancellation Penalty' : (item.status === 'scheduled' ? 'Decline Booking' : 'Cancel Booking'),
       message,
       [
         { text: 'Keep It', style: 'cancel' },
         {
-          text: withinThreeHours ? 'Cancel & Accept Penalty' : 'Cancel Booking',
+          text: item.status === 'scheduled' ? 'Decline' : (withinThreeHours ? 'Cancel & Accept Penalty' : 'Cancel Booking'),
           style: 'destructive',
           onPress: async () => {
             try {
+              if (item.status === 'scheduled') {
+                // If it's scheduled and hasn't been accepted yet, declining just hides it or we can't really decline a global pool ride unless we store driver rejections. 
+                // For now, if they click decline, we just alert them that they ignored it. Or we can just ignore it locally.
+                Alert.alert("Declined", "You have declined this job.");
+                return;
+              }
+
               const res = await fetch(`${getApiUrl()}/api/later-bookings/${item.id}/cancel`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -323,29 +389,18 @@ const s = StyleSheet.create({
   statusTextCancelled: { color: '#DC2626' },
   cardTime: { fontSize: 13, fontWeight: '600', color: '#374151' },
 
-  routeRow: { flexDirection: 'row', gap: 12, marginBottom: 14 },
-  routeIcons: { alignItems: 'center', paddingTop: 2 },
-  dotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#10B981' },
-  routeLineV: { width: 2, flex: 1, backgroundColor: '#E5E7EB', marginVertical: 3 },
-  dotYellow: { width: 10, height: 10, borderRadius: 5, backgroundColor: UTO_YELLOW },
-  routeTexts: { flex: 1, justifyContent: 'space-between' },
-  routeAddr: { fontSize: 14, color: '#111827', fontWeight: '500' },
+  detailsContainer: { marginTop: 4 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  detailRowStack: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  detailLabel: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
+  detailValue: { fontSize: 14, color: '#111827', fontWeight: '600', marginTop: 2, textAlign: 'right', flex: 1 },
 
-  fareRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6', marginBottom: 8 },
-  fareLabel: { fontSize: 13, color: '#6B7280' },
-  fareValue: { fontSize: 15, fontWeight: '700', color: '#111827' },
-
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dropoffRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  dropoffText: { fontSize: 12, color: '#6B7280' },
-  acceptBtn: {
-    backgroundColor: UTO_YELLOW,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  cancelBtn: { backgroundColor: '#FEE2E2' },
-  acceptBtnText: { fontSize: 14, fontWeight: '700', color: '#000000' },
+  actionRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  actionBtn: { flex: 1, paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
+  declineBtn: { backgroundColor: '#FEE2E2' },
+  declineBtnText: { color: '#DC2626', fontWeight: '700', fontSize: 15 },
+  acceptJobBtn: { backgroundColor: UTO_YELLOW },
+  acceptJobBtnText: { color: '#000000', fontWeight: '700', fontSize: 15 },
 
   lateCancelWarning: {
     backgroundColor: '#FFF1F2',
