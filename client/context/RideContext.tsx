@@ -1052,6 +1052,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
               );
             }
             console.log(`❌ [RideContext] No-show cancellation: £${noShowFare} charged via ${chargedVia}`);
+
+            // 🔔 Push notification for no-show so rider sees it even when app is backgrounded
+            sendLocalNotification(
+              "❌ No Show — Fare Charged",
+              `Your driver waited at the pickup but you did not arrive. The full fare amount of £${noShowFare > 0 ? noShowFare.toFixed(2) : '0.00'} will be deducted from your account as per our No Show Policy.`,
+              { type: "no_show", rideId: update.rideId }
+            );
           }
 
           setActiveRide((current) => {
@@ -1151,9 +1158,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
               );
             } else if (update.status === "arrived") {
               sendLocalNotification(
-                "📍 Driver Arrived",
-                "Your driver has arrived at the pickup location.",
-                { type: "driver_arriving", rideId: current.id }
+                "📍 Driver Has Arrived",
+                "Your driver has arrived at the pickup point. Please go to the pick up point now. You have 10 minutes of free waiting time.",
+                { type: "driver_arrived", rideId: current.id }
               );
             } else if (update.status === "in_progress") {
               sendLocalNotification(

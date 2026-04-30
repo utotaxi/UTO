@@ -180,6 +180,23 @@ export function setupSocketIO(httpServer: HTTPServer) {
       _dispatchedTo: entry.driverId, // private marker
     };
 
+    // Ensure rider phone is present — look up from DB if not in ride data
+    if (!enrichedRide.riderPhone && enrichedRide.riderId) {
+      try {
+        const { data: riderUser } = await supabase
+          .from("users")
+          .select("phone")
+          .eq("id", enrichedRide.riderId)
+          .single();
+        if (riderUser?.phone) {
+          enrichedRide.riderPhone = riderUser.phone;
+          console.log(`📞 Looked up rider phone for dispatch: ${riderUser.phone}`);
+        }
+      } catch (_) {
+        // Non-critical — driver can still use the app without phone
+      }
+    }
+
     console.log(`📡 Dispatching ride ${rideId} to nearest driver ${entry.driverId} (${entry.distance.toFixed(2)} mi away)`);
     io.to(`driver:${entry.driverId}`).emit("ride:new", enrichedRide);
 

@@ -246,13 +246,21 @@ export default function DriverHomeScreen({ navigation }: any) {
     }
   }, [rideState]);
 
-  // Track elapsed waiting time when at pickup
+  // Track elapsed waiting time when at pickup using a persistent ref
+  const arrivedAtRef = React.useRef<number | null>(null);
   useEffect(() => {
     if (rideState !== "at_pickup") {
       setWaitingElapsedSec(0);
+      arrivedAtRef.current = null;
       return;
     }
-    const start = Date.now();
+    // Only set the start time ONCE when entering at_pickup
+    if (!arrivedAtRef.current) {
+      arrivedAtRef.current = Date.now();
+    }
+    const start = arrivedAtRef.current;
+    // Immediately compute elapsed so there's no 1s gap
+    setWaitingElapsedSec(Math.floor((Date.now() - start) / 1000));
     const interval = setInterval(() => {
       setWaitingElapsedSec(Math.floor((Date.now() - start) / 1000));
     }, 1000);

@@ -2886,6 +2886,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           setActiveRideRequest({
             id: ride.id,
             riderName: ride.riderName || ride.rider_name || "Rider",
+            riderPhone: ride.riderPhone || ride.rider_phone || ride.phone || "",
             pickupAddress: ride.pickupAddress || ride.pickup_address || ride.pickupLocation?.address || "Pickup location",
             dropoffAddress: ride.dropoffAddress || ride.dropoff_address || ride.dropoffLocation?.address || "Dropoff location",
             pickupLatitude: ride.pickupLatitude || ride.pickup_latitude || ride.pickupLocation?.latitude || 0,
