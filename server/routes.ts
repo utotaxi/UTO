@@ -2312,6 +2312,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(201).json({ booking: { id: rideId, status: "pending" } });
       }
 
+      let finalDropoffTime = dropoffTime;
+      if (!finalDropoffTime) {
+        const mins = clientDurationMinutes || 30;
+        finalDropoffTime = new Date(pickupTime.getTime() + mins * 60000);
+      }
+
       const insertData: any = {
           rider_id: riderId,
           pickup_address: pickupAddress,
@@ -2321,7 +2327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           dropoff_latitude: dropoffLatitude ?? null,
           dropoff_longitude: dropoffLongitude ?? null,
           pickup_at: pickupTime.toISOString(),
-          dropoff_by: dropoffTime ? dropoffTime.toISOString() : null,
+          dropoff_by: finalDropoffTime.toISOString(),
           status: "scheduled",
           vehicle_type: vehicleType || 'saloon',
           estimated_fare: estimatedFare ?? null,
