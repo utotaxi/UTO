@@ -1159,8 +1159,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
             } else if (update.status === "arrived") {
               sendLocalNotification(
                 "📍 Driver Has Arrived",
-                "Your driver has arrived at the pickup point. Please go to the pick up point now. You have 10 minutes of free waiting time.",
-                { type: "driver_arrived", rideId: current.id }
+                "Your driver has arrived. Please provide your PIN to start the ride.",
+                { type: "driver_arriving", rideId: current.id }
               );
             } else if (update.status === "in_progress") {
               sendLocalNotification(
