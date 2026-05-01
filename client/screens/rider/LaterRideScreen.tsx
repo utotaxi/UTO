@@ -249,7 +249,7 @@ export default function LaterRideScreen({ navigation }: any) {
       const vName = selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus';
       Alert.alert(
         '🗓 Ride Scheduled!',
-        `Your ${vName} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\n${passengers} passenger(s), ${luggage} bag(s)${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}`,
+        `Your ${vName} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\n${passengers} passenger(s), ${luggage} baggage${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {
@@ -397,19 +397,19 @@ export default function LaterRideScreen({ navigation }: any) {
             {isSaloonEligible && (
               <Pressable style={[s.vehicleOption, selectedVehicle === 'saloon' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('saloon'); }}>
                 <MaterialIcons name="directions-car" size={24} color={selectedVehicle === 'saloon' ? '#000000' : '#6B7280'} />
-                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'saloon' && s.vehicleOptionNameActive, { marginTop: 0 }]}>Saloon Car</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'saloon' && s.vehicleOptionDescActive]}>Up to 3 pax + 3 bags, or 4 pax + hand luggage</Text></View>
+                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'saloon' && s.vehicleOptionNameActive, { marginTop: 0 }]}>Saloon Car</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'saloon' && s.vehicleOptionDescActive]}>Up to 3 passengers + 3 baggage, or 4 passengers + hand luggage</Text></View>
               </Pressable>
             )}
             {isCarrierEligible && (
               <Pressable style={[s.vehicleOption, selectedVehicle === 'people_carrier' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('people_carrier'); }}>
                 <MaterialIcons name="directions-car" size={24} color={selectedVehicle === 'people_carrier' ? '#000000' : '#6B7280'} />
-                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'people_carrier' && s.vehicleOptionNameActive, { marginTop: 0 }]}>People Carrier</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'people_carrier' && s.vehicleOptionDescActive]}>Up to 5 pax + 5 bags, or 6 pax + hand luggage</Text></View>
+                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'people_carrier' && s.vehicleOptionNameActive, { marginTop: 0 }]}>People Carrier</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'people_carrier' && s.vehicleOptionDescActive]}>Up to 5 passengers + 5 baggage, or 6 passengers + hand luggage</Text></View>
               </Pressable>
             )}
             {isMinibusEligible && (
               <Pressable style={[s.vehicleOption, selectedVehicle === 'minibus' && s.vehicleOptionActive, { flexDirection: 'row', paddingHorizontal: 16 }]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedVehicle('minibus'); }}>
                 <MaterialIcons name="airport-shuttle" size={24} color={selectedVehicle === 'minibus' ? '#000000' : '#6B7280'} />
-                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'minibus' && s.vehicleOptionNameActive, { marginTop: 0 }]}>8 Seater Minibus</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'minibus' && s.vehicleOptionDescActive]}>Up to 8 pax + 8 bags</Text></View>
+                <View style={{ marginLeft: 12, flex: 1 }}><Text style={[s.vehicleOptionName, selectedVehicle === 'minibus' && s.vehicleOptionNameActive, { marginTop: 0 }]}>8 Seater Minibus</Text><Text style={[s.vehicleOptionDesc, selectedVehicle === 'minibus' && s.vehicleOptionDescActive]}>Up to 8 passengers + 8 baggage</Text></View>
               </Pressable>
             )}
           </View>

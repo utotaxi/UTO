@@ -106,7 +106,7 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
               <MaterialIcons name="person" size={14} color="#9CA3AF" />
               <Text style={cs.infoText}>{ride.passengers || 1} passenger(s)</Text>
               <MaterialIcons name="luggage" size={14} color="#9CA3AF" style={{ marginLeft: 10 }} />
-              <Text style={cs.infoText}>{ride.luggage || 0} bag(s)</Text>
+              <Text style={cs.infoText}>{ride.luggage || 0} baggage</Text>
             </View>
           ) : null}
         </View>
