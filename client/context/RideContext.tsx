@@ -1015,7 +1015,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
         if (update.status === "completed" || update.status === "payment_collected" || update.status === "cancelled" || update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") {
 
           // ✅ Handle wallet update for payment_collected BEFORE touching activeRide
-          // This ensures it runs even if activeRide was already cleared by a prior "completed" event
+          // The server already updated the DB wallet balance; we just update the local display
           if (update.status === "payment_collected" && (update as any).extraAmount) {
             const extra = parseFloat((update as any).extraAmount);
             if (extra > 0) {
@@ -1031,7 +1031,6 @@ export function RideProvider({ children }: { children: ReactNode }) {
             const noShowFare = (update as any).noShowFare || 0;
             const chargedVia = (update as any).chargedVia || "wallet";
 
-            // Only deduct from local wallet if charged via wallet (not card)
             if (chargedVia === "wallet" && noShowFare > 0) {
               const currentBalance = userRef.current?.walletBalance || 0;
               updateProfile({ walletBalance: Math.max(0, currentBalance - noShowFare) });
@@ -1053,7 +1052,6 @@ export function RideProvider({ children }: { children: ReactNode }) {
             }
             console.log(`❌ [RideContext] No-show cancellation: £${noShowFare} charged via ${chargedVia}`);
 
-            // 🔔 Push notification for no-show so rider sees it even when app is backgrounded
             sendLocalNotification(
               "❌ No Show — Fare Charged",
               `Your driver waited at the pickup but you did not arrive. The full fare amount of £${noShowFare > 0 ? noShowFare.toFixed(2) : '0.00'} will be deducted from your account as per our No Show Policy.`,
@@ -1061,33 +1059,15 @@ export function RideProvider({ children }: { children: ReactNode }) {
             );
           }
 
+          // ✅ Capture ride data BEFORE clearing activeRide
+          // We read the current activeRide synchronously, then perform all side effects outside the updater
+          let capturedRide: Ride | null = null;
           setActiveRide((current) => {
             if (!current) return null;
-
-            const isMatch = current.id === update.rideId || !update.rideId;
-            if (!isMatch) {
-              console.log(`[RideContext] rideId mismatch: local=${current.id}, server=${update.rideId} – completing anyway`);
-            }
-
-            // If the dispatch queue ran out of drivers
-            if (update.status === "cancelled_no_drivers") {
-              Alert.alert(
-                "No Drivers Available",
-                "We're sorry, but there are no drivers available within range right now. Please try again later.",
-                [{ text: "OK" }]
-              );
-            }
-
-            // Refund wallet deduction if cancelled (but NOT for no-show — that's a penalty)
-            if ((update.status === "cancelled" || update.status === "cancelled_no_drivers") && current.walletDeduction && current.walletDeduction > 0) {
-              const currentBalance = userRef.current?.walletBalance || 0;
-              updateProfile({ walletBalance: currentBalance + current.walletDeduction });
-              console.log(`✅ [RideContext] Refunded £${current.walletDeduction} for cancelled ride ${current.id}`);
-            }
+            capturedRide = current; // capture for side effects below
 
             const finalRide: Ride = {
               ...current,
-              // Normalize status: cancelled_no_drivers/cancelled_no_show → cancelled, payment_collected → completed
               status: (update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") ? "cancelled"
                 : update.status === "payment_collected" ? "completed"
                   : (update.status as RideStatus),
@@ -1100,16 +1080,37 @@ export function RideProvider({ children }: { children: ReactNode }) {
             });
             AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
 
-            // 🔔 Notify rider + trigger rating on completion
+            return null;
+          });
+
+          // ✅ All side effects run OUTSIDE the state updater (prevents crashes)
+          if (capturedRide) {
+            const ride = capturedRide as Ride;
+
+            if (update.status === "cancelled_no_drivers") {
+              Alert.alert(
+                "No Drivers Available",
+                "We're sorry, but there are no drivers available within range right now. Please try again later.",
+                [{ text: "OK" }]
+              );
+            }
+
+            // Refund wallet deduction if cancelled (but NOT for no-show)
+            if ((update.status === "cancelled" || update.status === "cancelled_no_drivers") && ride.walletDeduction && ride.walletDeduction > 0) {
+              const currentBalance = userRef.current?.walletBalance || 0;
+              updateProfile({ walletBalance: currentBalance + ride.walletDeduction });
+              console.log(`✅ [RideContext] Refunded £${ride.walletDeduction} for cancelled ride ${ride.id}`);
+            }
+
             if (update.status === "completed" || update.status === "payment_collected") {
               sendLocalNotification(
                 "✅ Trip Completed",
-                `Your ride has been completed. Fare: £${current.farePrice?.toFixed(2) || '0.00'}`,
-                { type: "ride_completed", rideId: current.id }
+                `Your ride has been completed. Fare: £${ride.farePrice?.toFixed(2) || '0.00'}`,
+                { type: "ride_completed", rideId: ride.id }
               );
               // Trigger rating prompt after a short delay
-              const dName = current.driverName || "Your Driver";
-              const rId = current.id;
+              const dName = ride.driverName || "Your Driver";
+              const rId = ride.id;
               setTimeout(() => {
                 setPendingRating({ rideId: rId, driverName: dName });
               }, 1500);
@@ -1119,12 +1120,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 update.status === "cancelled_no_drivers"
                   ? "No drivers available right now. Please try again later."
                   : "Your ride has been cancelled.",
-                { type: "ride_cancelled", rideId: current.id }
+                { type: "ride_cancelled", rideId: ride.id }
               );
             }
-
-            return null;
-          });
+          }
           return;
         }
         setActiveRide((current) => {
