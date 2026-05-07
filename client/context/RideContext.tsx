@@ -1059,15 +1059,21 @@ export function RideProvider({ children }: { children: ReactNode }) {
             );
           }
 
-          // ✅ Capture ride data BEFORE clearing activeRide
-          // We read the current activeRide synchronously, then perform all side effects outside the updater
+          // ✅ Capture ride data BEFORE clearing activeRide (pure — no side effects inside updater)
           let capturedRide: Ride | null = null;
           setActiveRide((current) => {
             if (!current) return null;
-            capturedRide = current; // capture for side effects below
+            capturedRide = current; // capture synchronously for side effects below
+            return null;           // clear the active ride — nothing else in here
+          });
 
+          // ✅ All history/storage/notifications run OUTSIDE the state updater
+          if (capturedRide) {
+            const ride = capturedRide as Ride;
+
+            // Persist final ride to history
             const finalRide: Ride = {
-              ...current,
+              ...ride,
               status: (update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") ? "cancelled"
                 : update.status === "payment_collected" ? "completed"
                   : (update.status as RideStatus),
@@ -1079,13 +1085,6 @@ export function RideProvider({ children }: { children: ReactNode }) {
               return newHistory;
             });
             AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
-
-            return null;
-          });
-
-          // ✅ All side effects run OUTSIDE the state updater (prevents crashes)
-          if (capturedRide) {
-            const ride = capturedRide as Ride;
 
             if (update.status === "cancelled_no_drivers") {
               Alert.alert(
@@ -1103,17 +1102,19 @@ export function RideProvider({ children }: { children: ReactNode }) {
             }
 
             if (update.status === "completed" || update.status === "payment_collected") {
+              // ✅ Use Number() to safely call toFixed — farePrice can be a string after AsyncStorage round-trip
+              const fareStr = `£${Number(ride.farePrice || 0).toFixed(2)}`;
               sendLocalNotification(
                 "✅ Trip Completed",
-                `Your ride has been completed. Fare: £${ride.farePrice?.toFixed(2) || '0.00'}`,
+                `Your ride has been completed. Fare: ${fareStr}`,
                 { type: "ride_completed", rideId: ride.id }
               );
-              // Trigger rating prompt after a short delay
+              // Trigger rating prompt after a short delay so navigation can settle
               const dName = ride.driverName || "Your Driver";
               const rId = ride.id;
               setTimeout(() => {
                 setPendingRating({ rideId: rId, driverName: dName });
-              }, 1500);
+              }, 2000);
             } else if (update.status === "cancelled" || update.status === "cancelled_no_drivers") {
               sendLocalNotification(
                 "❌ Ride Cancelled",
