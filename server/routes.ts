@@ -2628,10 +2628,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (ratedBy === "driver") {
         if (riderRating !== undefined) updateData.rider_rating = riderRating;
-        if (riderComment !== undefined) updateData.rider_comment = riderComment;
+        // if (riderComment !== undefined) updateData.rider_comment = riderComment; // Column doesn't exist
       } else if (ratedBy === "rider") {
         if (driverRating !== undefined) updateData.driver_rating = driverRating;
-        if (driverComment !== undefined) updateData.driver_comment = driverComment;
+        // if (driverComment !== undefined) updateData.driver_comment = driverComment; // Column doesn't exist
       }
 
       const { data, error } = await supabase

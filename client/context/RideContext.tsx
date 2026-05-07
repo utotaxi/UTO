@@ -1217,6 +1217,16 @@ export function RideProvider({ children }: { children: ReactNode }) {
                  setRideHistory(newHistory);
                  await AsyncStorage.setItem(RIDE_HISTORY_KEY, JSON.stringify(newHistory));
                }
+               
+               // Trigger rating prompt if it was successfully completed and not yet rated
+               const isSuccessfulComplete = serverRide.status === 'completed' || serverRide.paymentStatus === 'paid' || serverRide.paymentStatus === 'completed';
+               if (isSuccessfulComplete && serverRide.driverRating === null) {
+                 const dName = serverRide.driverName || localActive.driverName || "Your Driver";
+                 const rId = serverRide.id;
+                 setTimeout(() => {
+                   setPendingRating({ rideId: rId, driverName: dName });
+                 }, 1500);
+               }
             } else {
                setActiveRide({ ...localActive, status: serverRide.status as RideStatus });
             }
