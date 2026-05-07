@@ -2508,6 +2508,12 @@ const VEHICLE_OPTIONS = [
     passengers: 4,
   },
   {
+    type: "people_carrier" as RideType,
+    name: "People Carrier",
+    description: "Spacious vehicles for families (up to 6 passengers)",
+    passengers: 6,
+  },
+  {
     type: "minibus" as RideType,
     name: "Minibus",
     description: "Larger vehicles for groups (up to 8 passengers)",
@@ -3183,7 +3189,9 @@ export default function RideRequestScreen({ navigation, route }: any) {
                         source={
                           vehicle.type === 'saloon'
                             ? require('../../../assets/images/car-economy.png')
-                            : require('../../../assets/images/car-van.png')
+                            : vehicle.type === 'people_carrier'
+                              ? require('../../../assets/images/car-premium.png')
+                              : require('../../../assets/images/car-van.png')
                         }
                         style={styles.sliderCarImage}
                         resizeMode="contain"

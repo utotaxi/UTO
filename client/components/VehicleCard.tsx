@@ -28,6 +28,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 const VEHICLE_IMAGES: Record<RideType, any> = {
   saloon: require("../../assets/images/car-economy.png"),
+  people_carrier: require("../../assets/images/car-premium.png"),
   minibus: require("../../assets/images/car-van.png"),
 };
 

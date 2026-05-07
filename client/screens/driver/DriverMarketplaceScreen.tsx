@@ -53,15 +53,19 @@ function fmtDateTimeFull(iso: string | null | undefined) {
   });
 }
 
+function fmtTime(iso: string | null | undefined) {
+  if (!iso) return 'N/A';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
 function BookingCard({
   item,
-  onAccept,
-  onCancel,
+  onPress,
   driverId,
 }: {
-  item: LaterBooking;
-  onAccept: (id: string) => void;
-  onCancel: (item: LaterBooking) => void;
+  item: LaterBooking & { isUrgentScheduled?: boolean };
+  onPress: (item: LaterBooking) => void;
   driverId?: string;
 }) {
   const now = Date.now();
@@ -76,20 +80,24 @@ function BookingCard({
 
   const formatVehicle = (v?: string) => {
     if (!v) return 'Saloon';
-    if (v === 'people_carrier') return 'Minibus / People Carrier';
+    if (v === 'people_carrier') return 'People Carrier';
     return v.charAt(0).toUpperCase() + v.slice(1);
   };
 
   const fareStr = item.estimated_fare ? `£${parseFloat(String(item.estimated_fare)).toFixed(2)}` : 'N/A';
 
+  const deadlineDate = new Date(new Date(item.pickup_at).getTime() - THREE_HOURS_MS);
+  const deadlineStr = fmtTime(deadlineDate.toISOString());
+
   return (
-    <View style={s.card}>
+    <Pressable style={s.card} onPress={() => onPress(item)}>
       <View style={s.cardHeader}>
         <View style={[s.statusBadge, item.status === 'cancelled' && s.statusBadgeCancelled]}>
           <Text style={[s.statusText, item.status === 'cancelled' && s.statusTextCancelled]}>
-            {item.status.toUpperCase().replace('_', ' ')}
+            {item.isUrgentScheduled ? 'URGENT SCHEDULED RIDE' : item.status.toUpperCase().replace('_', ' ')}
           </Text>
         </View>
+        <Feather name="chevron-right" size={20} color="#9CA3AF" />
       </View>
 
       <View style={s.detailsContainer}>
@@ -153,31 +161,9 @@ function BookingCard({
         </View>
       </View>
 
-      <View style={s.actionRow}>
-        {item.status === 'scheduled' && (
-          <>
-            <Pressable
-              style={[s.actionBtn, s.declineBtn]}
-              onPress={() => onCancel(item)}
-            >
-              <Text style={s.declineBtnText}>Decline</Text>
-            </Pressable>
-            <Pressable
-              style={[s.actionBtn, s.acceptJobBtn]}
-              onPress={() => onAccept(item.id)}
-            >
-              <Text style={s.acceptJobBtnText}>Accept Job</Text>
-            </Pressable>
-          </>
-        )}
-        {item.status === 'driver_accepted' && driverOwnsThis && (
-          <Pressable
-            style={[s.actionBtn, s.declineBtn, { flex: 1 }]}
-            onPress={() => onCancel(item)}
-          >
-            <Text style={s.declineBtnText}>Cancel Job</Text>
-          </Pressable>
-        )}
+      <View style={s.cancellationPolicyBox}>
+        <Text style={s.deadlineText}>Free cancellation until: {deadlineStr}</Text>
+        <Text style={s.lateText}>Late cancellation fee applies after: {deadlineStr}</Text>
       </View>
 
       {/* Late cancel warning for driver */}
@@ -188,7 +174,7 @@ function BookingCard({
           </Text>
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
 
@@ -332,8 +318,9 @@ export default function DriverMarketplaceScreen() {
           renderItem={({ item }) => (
             <BookingCard
               item={item}
-              onAccept={handleAccept}
-              onCancel={handleCancel}
+              onPress={(selectedItem) => {
+                (navigation as any).navigate("ScheduledJobDetails", { booking: selectedItem });
+              }}
               driverId={user?.id}
             />
           )}
@@ -411,4 +398,15 @@ const s = StyleSheet.create({
     borderLeftColor: '#EF4444',
   },
   lateCancelText: { fontSize: 12, color: '#DC2626', fontWeight: '600' },
+  
+  cancellationPolicyBox: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#92610A',
+  },
+  deadlineText: { fontSize: 12, color: '#4B5563', fontWeight: '500', marginBottom: 4 },
+  lateText: { fontSize: 12, color: '#DC2626', fontWeight: '600' },
 });

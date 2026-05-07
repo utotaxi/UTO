@@ -910,7 +910,7 @@ import { getApiUrl } from "@/lib/query-client";
 import { useAuth } from "./AuthContext";
 import { sendLocalNotification } from "@/hooks/useNotifications";
 
-export type RideType = "saloon" | "minibus";
+export type RideType = "saloon" | "people_carrier" | "minibus";
 export type RideStatus = "pending" | "accepted" | "arrived" | "in_progress" | "completed" | "cancelled";
 
 export interface Location {
@@ -1315,9 +1315,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
     
     if (!pricingRules || !vehiclePricing || !vehiclePricing[formattedType] || !vehiclePricing[formattedType].enabled) {
       // Fallback
-      const baseFares: any = { saloon: 4.0, minibus: 6.0 };
-      const perKm: any = { saloon: 1.5, minibus: 2.2 };
-      const perMin: any = { saloon: 0.35, minibus: 0.5 };
+      const baseFares: any = { saloon: 4.0, people_carrier: 5.0, minibus: 6.0 };
+      const perKm: any = { saloon: 1.5, people_carrier: 1.85, minibus: 2.2 };
+      const perMin: any = { saloon: 0.35, people_carrier: 0.42, minibus: 0.5 };
   
       const distanceKm = distanceMiles / 0.621371;
       const base = baseFares[rideType] || 4.0;

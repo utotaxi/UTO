@@ -21,7 +21,7 @@
 
 
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, doublePrecision, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, doublePrecision, serial, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -50,7 +50,9 @@ export const drivers = pgTable("drivers", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
-  vehicleType: text("vehicle_type").notNull(),
+  vehicleType: text("vehicle_type").default("standard"),
+  councilLicence: text("council_licence"),
+  taxSettings: jsonb("tax_settings"),
   vehicleMake: text("vehicle_make").notNull(),
   vehicleModel: text("vehicle_model").notNull(),
   vehicleYear: integer("vehicle_year"),

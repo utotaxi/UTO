@@ -29,6 +29,8 @@ export interface Driver {
   currentLatitude?: number;
   currentLongitude?: number;
   totalEarnings?: number;
+  councilLicence?: string;
+  taxSettings?: any;
 }
 
 export interface DriverDeduction {

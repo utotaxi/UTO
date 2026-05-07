@@ -67,7 +67,7 @@ export default function SignUpScreen({ navigation, route }: any) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [vehicleType, setVehicleType] = useState("");
+  const [councilLicence, setCouncilLicence] = useState("");
   const [vehicleMake, setVehicleMake] = useState("");
   const [vehicleModel, setVehicleModel] = useState("");
   const [licensePlate, setLicensePlate] = useState("");
@@ -92,8 +92,8 @@ export default function SignUpScreen({ navigation, route }: any) {
       return;
     }
 
-    if (isDriver && (!vehicleType || !vehicleMake || !vehicleModel || !licensePlate)) {
-      setError("Please fill in all vehicle details");
+    if (isDriver && (!councilLicence || !vehicleMake || !vehicleModel || !licensePlate)) {
+      setError("Please fill in all council and vehicle details");
       return;
     }
 
@@ -108,7 +108,7 @@ export default function SignUpScreen({ navigation, route }: any) {
 
     try {
       const driverDetails = isDriver
-        ? { vehicleType, vehicleMake, vehicleModel, licensePlate }
+        ? { councilLicence, vehicleMake, vehicleModel, licensePlate }
         : undefined;
 
       await signUp(fullName, email, password, selectedRole, driverDetails);
@@ -285,15 +285,15 @@ export default function SignUpScreen({ navigation, route }: any) {
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <ThemedText style={styles.inputLabel}>Vehicle Type</ThemedText>
+                  <ThemedText style={styles.inputLabel}>Council Licence <ThemedText style={{ color: "#EF4444" }}>*</ThemedText></ThemedText>
                   <View style={styles.inputWrapper}>
-                    <Feather name="box" size={20} color="#6B7280" style={styles.inputIcon} />
+                    <Feather name="file-text" size={20} color="#6B7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder="e.g. Economy, XL"
+                      placeholder="e.g. Gloucester City Council"
                       placeholderTextColor="#6B7280"
-                      value={vehicleType}
-                      onChangeText={setVehicleType}
+                      value={councilLicence}
+                      onChangeText={setCouncilLicence}
                     />
                   </View>
                 </View>

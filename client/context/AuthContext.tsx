@@ -16,7 +16,7 @@ interface User {
 }
 
 export interface DriverDetails {
-  vehicleType: string;
+  councilLicence: string;
   vehicleMake: string;
   vehicleModel: string;
   licensePlate: string;
@@ -132,7 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await api.drivers.create({
           userId: userData.id,
-          vehicleType: driverDetails.vehicleType,
+          vehicleType: "standard", // default fallback since it's required by schema
+          councilLicence: driverDetails.councilLicence,
           vehicleMake: driverDetails.vehicleMake,
           vehicleModel: driverDetails.vehicleModel,
           licensePlate: driverDetails.licensePlate,

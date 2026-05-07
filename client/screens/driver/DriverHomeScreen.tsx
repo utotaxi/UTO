@@ -87,6 +87,27 @@ export default function DriverHomeScreen({ navigation }: any) {
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
   const [paidWaitingElapsedSec, setPaidWaitingElapsedSec] = useState(0);
 
+  // Early completion modal state
+  const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
+  const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(null);
+  const [earlyCompleteOtherText, setEarlyCompleteOtherText] = useState("");
+
+  // Cash payment flow state
+  const [cashChangeMode, setCashChangeMode] = useState<'input' | 'noChange' | 'changeGiven' | null>(null);
+
+  // Haversine distance calculation (returns meters)
+  const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
   useEffect(() => {
     if (completedRidePayment) {
       setCollectedAmountStr((completedRidePayment.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment.fareAmount || 0)).toString());
@@ -349,6 +370,14 @@ export default function DriverHomeScreen({ navigation }: any) {
     }
   };
 
+  // Auto-submit OTP when 4 digits are entered
+  useEffect(() => {
+    if (otpValue.length === 4) {
+      handleStartRide();
+    }
+  }, [otpValue, activeRideRequest?.otp]);
+
+
   const hasActiveRide = activeRideRequest && rideState !== "none";
 
   const mapRegion = useMemo(() => {
@@ -507,6 +536,8 @@ export default function DriverHomeScreen({ navigation }: any) {
             dropoffAddress={activeRideRequest.dropoffAddress}
             estimatedFare={activeRideRequest.estimatedFare}
             pickupDistance={activeRideRequest.pickupDistance}
+            distanceMiles={activeRideRequest.distanceMiles}
+            durationMinutes={activeRideRequest.durationMinutes}
             onAccept={handleAccept}
             onDecline={handleDecline}
           />
@@ -726,12 +757,8 @@ export default function DriverHomeScreen({ navigation }: any) {
                   <ThemedText style={styles.numBtnText}>{num}</ThemedText>
                 </Pressable>
               ))}
-              <Pressable
-                onPress={() => setOtpValue(prev => prev.slice(0, -1))}
-                style={[styles.numBtn, { backgroundColor: theme.backgroundSecondary }]}
-              >
-                <Feather name="delete" size={18} color={theme.text} />
-              </Pressable>
+              {/* Empty placeholder to keep the grid aligned */}
+              <View style={[styles.numBtn, { backgroundColor: "transparent" }]} />
               <Pressable
                 onPress={() => otpValue.length < 4 && setOtpValue(prev => prev + "0")}
                 style={[styles.numBtn, { backgroundColor: theme.backgroundSecondary }]}
@@ -739,10 +766,10 @@ export default function DriverHomeScreen({ navigation }: any) {
                 <ThemedText style={styles.numBtnText}>0</ThemedText>
               </Pressable>
               <Pressable
-                onPress={() => { setOtpValue(""); }}
+                onPress={() => setOtpValue(prev => prev.slice(0, -1))}
                 style={[styles.numBtn, { backgroundColor: theme.backgroundSecondary }]}
               >
-                <Feather name="x" size={18} color={UTOColors.error} />
+                <Feather name="delete" size={20} color={theme.text} />
               </Pressable>
             </View>
 
@@ -798,10 +825,10 @@ export default function DriverHomeScreen({ navigation }: any) {
                 <Pressable onPress={handleOpenNavigation} style={styles.circleBtn}>
                   <MaterialIcons name="navigation" size={18} color={UTOColors.driver.primary} />
                 </Pressable>
-                <Pressable onPress={() => Linking.openURL("tel:+4407596266901")} style={styles.circleBtn}>
+                <Pressable onPress={handleCallRider} style={styles.circleBtn}>
                   <Feather name="phone" size={18} color={UTOColors.driver.primary} />
                 </Pressable>
-                <Pressable onPress={() => Linking.openURL("sms:+4407596266901")} style={styles.circleBtn}>
+                <Pressable onPress={() => activeRideRequest?.riderPhone ? Linking.openURL(`sms:${activeRideRequest.riderPhone}`) : Alert.alert("No Phone", "Rider phone not available.")} style={styles.circleBtn}>
                   <Feather name="message-square" size={18} color={UTOColors.driver.primary} />
                 </Pressable>
               </View>
@@ -831,7 +858,27 @@ export default function DriverHomeScreen({ navigation }: any) {
             </View>
 
             <Pressable
-              onPress={() => completeTrip()}
+              onPress={() => {
+                // GPS validation: check if driver is near dropoff
+                if (location && activeRideRequest.dropoffLatitude && activeRideRequest.dropoffLongitude) {
+                  const distToDropoff = getDistanceMeters(
+                    location.coords.latitude,
+                    location.coords.longitude,
+                    activeRideRequest.dropoffLatitude,
+                    activeRideRequest.dropoffLongitude
+                  );
+                  if (distToDropoff <= 200) {
+                    // Within 200m of dropoff — allow completion
+                    completeTrip();
+                  } else {
+                    // Too far — show early completion modal
+                    setShowEarlyCompleteModal(true);
+                  }
+                } else {
+                  // No GPS data available — allow completion with warning
+                  completeTrip();
+                }
+              }}
               style={[styles.arrivedBtn, { backgroundColor: UTOColors.success }]}
             >
               <MaterialIcons name="check-circle" size={20} color="#FFFFFF" />
@@ -1005,23 +1052,199 @@ export default function DriverHomeScreen({ navigation }: any) {
               </View>
             </View>
 
+            {/* Cash change summary for cash payments */}
+            {completedRidePayment?.paymentMethod === 'cash' && Number(collectedAmountStr) > 0 && (() => {
+              const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
+              const collected = Number(collectedAmountStr);
+              const change = collected - expected;
+              if (change > 0) {
+                return (
+                  <View style={{ backgroundColor: '#1E1E1E', borderRadius: 16, padding: 20, marginHorizontal: 0, marginBottom: 16, borderWidth: 1, borderColor: '#2A2A2A' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <Text style={{ color: '#9CA3AF', fontSize: 14 }}>Trip total</Text>
+                      <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>£{expected.toFixed(2)}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <Text style={{ color: '#9CA3AF', fontSize: 14 }}>Cash received</Text>
+                      <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>£{collected.toFixed(2)}</Text>
+                    </View>
+                    <View style={{ height: 1, backgroundColor: '#333', marginVertical: 8 }} />
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ color: '#10B981', fontSize: 16, fontWeight: '700' }}>Change</Text>
+                      <Text style={{ color: '#10B981', fontSize: 16, fontWeight: '700' }}>£{change.toFixed(2)}</Text>
+                    </View>
+                  </View>
+                );
+              }
+              return null;
+            })()}
+
           </ScrollView>
 
-          {/* Sticky bottom button */}
+          {/* Sticky bottom buttons */}
           <View style={[styles.paymentBottomBar, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
-            <Pressable
-              onPress={() => {
-                const expectedAmount = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
-                const collected = Number(collectedAmountStr) || expectedAmount;
-                const extraAmount = Math.max(0, collected - expectedAmount);
-                dismissPaymentCollection(collected, extraAmount);
-              }}
-              style={styles.paymentCollectBtn}
-            >
-              <MaterialIcons name="check-circle" size={22} color="#000000" />
-              <Text style={styles.paymentCollectBtnText}>Payment Collected</Text>
-            </Pressable>
+            {completedRidePayment?.paymentMethod === 'cash' && Number(collectedAmountStr) > (completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0)) ? (
+              <View style={{ width: '100%', gap: 10 }}>
+                <Pressable
+                  onPress={() => {
+                    const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
+                    const collected = Number(collectedAmountStr);
+                    const extra = Math.max(0, collected - expected);
+                    dismissPaymentCollection(collected, extra);
+                  }}
+                  style={[styles.paymentCollectBtn, { backgroundColor: '#10B981' }]}
+                >
+                  <MaterialIcons name="account-balance-wallet" size={20} color="#FFFFFF" />
+                  <Text style={[styles.paymentCollectBtnText, { color: '#FFFFFF' }]}>No change given – add £{(Number(collectedAmountStr) - (completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0))).toFixed(2)} as credit</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
+                    dismissPaymentCollection(expected, 0);
+                  }}
+                  style={styles.paymentCollectBtn}
+                >
+                  <MaterialIcons name="check-circle" size={22} color="#000000" />
+                  <Text style={styles.paymentCollectBtnText}>Change given in cash</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable
+                onPress={() => {
+                  const expectedAmount = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
+                  const collected = Number(collectedAmountStr) || expectedAmount;
+                  const extraAmount = Math.max(0, collected - expectedAmount);
+                  dismissPaymentCollection(collected, extraAmount);
+                }}
+                style={styles.paymentCollectBtn}
+              >
+                <MaterialIcons name="check-circle" size={22} color="#000000" />
+                <Text style={styles.paymentCollectBtnText}>Payment Collected</Text>
+              </Pressable>
+            )}
           </View>
+        </View>
+      </Modal>
+
+      {/* Early Completion Modal — GPS validation failed */}
+      <Modal
+        visible={showEarlyCompleteModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={styles.cancelModalOverlay}>
+          <ScrollView style={{ maxHeight: '80%', width: '100%' }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} showsVerticalScrollIndicator={false}>
+          <View style={[styles.cancelModalCard, { backgroundColor: theme.backgroundDefault }]}>
+            <View style={[styles.cancelModalIconCircle, { backgroundColor: '#FEF3C7' }]}>
+              <MaterialIcons name="warning" size={40} color="#F59E0B" />
+            </View>
+            <ThemedText style={styles.cancelModalTitle}>End Trip Early?</ThemedText>
+            <ThemedText style={[styles.cancelModalMsg, { color: theme.textSecondary }]}>
+              You are not near the drop-off location. Please select a reason for ending this trip early.
+            </ThemedText>
+
+            <View style={{ width: '100%', gap: 8, marginTop: 8 }}>
+              {[
+                'Passenger requested early drop-off',
+                'Wrong destination',
+                'Emergency situation',
+                'Rider no-show during trip',
+                'Other',
+              ].map((reason) => (
+                <Pressable
+                  key={reason}
+                  onPress={() => setEarlyCompleteReason(reason)}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 10,
+                    padding: 14, borderRadius: 12,
+                    backgroundColor: earlyCompleteReason === reason ? UTOColors.driver.primary + '20' : theme.backgroundSecondary,
+                    borderWidth: 1.5,
+                    borderColor: earlyCompleteReason === reason ? UTOColors.driver.primary : 'transparent',
+                  }}
+                >
+                  <View style={{
+                    width: 20, height: 20, borderRadius: 10,
+                    borderWidth: 2,
+                    borderColor: earlyCompleteReason === reason ? UTOColors.driver.primary : theme.textSecondary,
+                    backgroundColor: earlyCompleteReason === reason ? UTOColors.driver.primary : 'transparent',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {earlyCompleteReason === reason && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#000' }} />}
+                  </View>
+                  <ThemedText style={{ fontSize: 14, fontWeight: earlyCompleteReason === reason ? '600' : '400' }}>{reason}</ThemedText>
+                </Pressable>
+              ))}
+
+              {earlyCompleteReason === 'Other' && (
+                <TextInput
+                  placeholder="Please describe the reason..."
+                  placeholderTextColor={theme.textSecondary}
+                  value={earlyCompleteOtherText}
+                  onChangeText={setEarlyCompleteOtherText}
+                  multiline
+                  style={{
+                    backgroundColor: theme.backgroundSecondary,
+                    color: theme.text,
+                    padding: 14, borderRadius: 12, fontSize: 14,
+                    minHeight: 80, textAlignVertical: 'top',
+                    borderWidth: 1, borderColor: theme.border,
+                  }}
+                />
+              )}
+            </View>
+
+            <View style={{ width: '100%', backgroundColor: '#FEF3C7', padding: 12, borderRadius: 10, marginTop: 8 }}>
+              <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 17, textAlign: 'center' }}>
+                ⚠️ Ending a trip early may affect your account and may be reviewed by UTO. Please ensure this is correct.
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginTop: 12 }}>
+              <Pressable
+                onPress={() => {
+                  setShowEarlyCompleteModal(false);
+                  setEarlyCompleteReason(null);
+                  setEarlyCompleteOtherText("");
+                }}
+                style={{
+                  flex: 1, padding: 14, borderRadius: 12,
+                  backgroundColor: theme.backgroundSecondary,
+                  alignItems: 'center',
+                }}
+              >
+                <ThemedText style={{ fontWeight: '600', fontSize: 14 }}>Go Back</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (!earlyCompleteReason) {
+                    Alert.alert('Reason Required', 'Please select a reason for ending the trip early.');
+                    return;
+                  }
+                  if (earlyCompleteReason === 'Other' && !earlyCompleteOtherText.trim()) {
+                    Alert.alert('Details Required', 'Please describe the reason for ending the trip early.');
+                    return;
+                  }
+                  // Log the reason and complete the trip
+                  const reason = earlyCompleteReason === 'Other' ? earlyCompleteOtherText.trim() : earlyCompleteReason;
+                  console.log('⚠️ Early trip completion reason:', reason);
+                  setShowEarlyCompleteModal(false);
+                  setEarlyCompleteReason(null);
+                  setEarlyCompleteOtherText("");
+                  completeTrip();
+                }}
+                style={{
+                  flex: 1, padding: 14, borderRadius: 12,
+                  backgroundColor: '#EF4444',
+                  alignItems: 'center',
+                  opacity: earlyCompleteReason ? 1 : 0.5,
+                }}
+              >
+                <ThemedText style={{ fontWeight: '700', fontSize: 14, color: '#FFFFFF' }}>End Trip</ThemedText>
+              </Pressable>
+            </View>
+          </View>
+          </ScrollView>
         </View>
       </Modal>
 

@@ -179,6 +179,7 @@ import DriverMarketplaceScreen from "@/screens/driver/DriverMarketplaceScreen";
 import DriverDocumentsScreen from "@/screens/driver/DriverDocumentsScreen";
 import DriverSafetyScreen from "@/screens/driver/DriverSafetyScreen";
 import DriverNotificationsScreen from "@/screens/driver/DriverNotificationsScreen";
+import ScheduledJobDetailsScreen from "@/screens/driver/ScheduledJobDetailsScreen";
 import { HeaderTitle } from "@/components/HeaderTitle";
 import { ModeBadge } from "@/components/ModeBadge";
 import { useTheme } from "@/hooks/useTheme";
@@ -267,6 +268,11 @@ function AccountStackNavigator({ navigation }: any) {
       <AccountStack.Screen
         name="Marketplace"
         component={DriverMarketplaceScreen}
+        options={{ headerShown: false }}
+      />
+      <AccountStack.Screen
+        name="ScheduledJobDetails"
+        component={ScheduledJobDetailsScreen}
         options={{ headerShown: false }}
       />
       <AccountStack.Screen

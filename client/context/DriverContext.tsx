@@ -2670,12 +2670,14 @@ import { sendLocalNotification } from "@/hooks/useNotifications";
 
 export interface DriverProfile {
   id?: string;
-  vehicleType: "saloon" | "minibus";
+  vehicleType: "saloon" | "people_carrier" | "minibus";
   vehicleMake: string;
   vehicleModel: string;
   vehicleYear: number;
   vehicleColor: string;
   licensePlate: string;
+  councilLicence?: string;
+  taxSettings?: any;
   isVerified: boolean;
   documentPhvlUrl?: string | null;
   documentPhvlStatus?: string | null;

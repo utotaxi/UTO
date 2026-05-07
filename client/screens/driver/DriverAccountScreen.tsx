@@ -93,13 +93,14 @@ function VehicleInfoModal({
   const [year, setYear] = useState(currentProfile?.vehicleYear?.toString() || "");
   const [color, setColor] = useState(currentProfile?.vehicleColor || "");
   const [plate, setPlate] = useState(currentProfile?.licensePlate || "");
-  const [vType, setVType] = useState<"saloon" | "minibus">(
+  const [vType, setVType] = useState<"saloon" | "people_carrier" | "minibus">(
     currentProfile?.vehicleType || "saloon"
   );
   const [saving, setSaving] = useState(false);
 
-  const vehicleTypes: Array<{ key: "saloon" | "minibus"; label: string }> = [
+  const vehicleTypes: Array<{ key: "saloon" | "people_carrier" | "minibus"; label: string }> = [
     { key: "saloon", label: "Saloon" },
+    { key: "people_carrier", label: "People Carrier" },
     { key: "minibus", label: "Minibus" },
   ];
 

@@ -1,6 +1,6 @@
 import React from "react";
 import { StyleSheet, View, Pressable } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialIcons } from "@expo/vector-icons";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -58,11 +58,11 @@ export function ModeBadge({ onPress }: ModeBadgeProps) {
       ]}
     >
       <View style={styles.content}>
-        <Feather
-          name={isRiderMode ? "navigation" : "truck"}
-          size={12}
-          color="#000000"
-        />
+        {isRiderMode ? (
+          <Feather name="navigation" size={12} color="#000000" />
+        ) : (
+          <MaterialIcons name="local-taxi" size={14} color="#000000" />
+        )}
         <ThemedText style={styles.text}>
           {isRiderMode ? "RIDER" : "DRIVER"}
         </ThemedText>

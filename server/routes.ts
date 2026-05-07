@@ -1153,7 +1153,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS return_dropoff_longitude NUMERIC DEFAULT NULL;`
     });
-    console.log('✅ Ensured later_bookings columns exist (including coupon_code, discount_amount, return fields)');
+    // New fields for cancellation penalty & tracking
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS scheduled_pickup_time TIMESTAMP WITH TIME ZONE DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS accepted_by_driver_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS driver_cancelled_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS driver_cancel_reason TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS driver_cancel_type TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS late_cancellation_fee NUMERIC DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS driver_penalty_applied BOOLEAN DEFAULT FALSE;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS fare NUMERIC DEFAULT NULL;`
+    });
+    console.log('✅ Ensured later_bookings columns exist (including penalty & tracking fields)');
   } catch (e) {
     console.log('ℹ️ later_bookings migration skipped:', (e as Error).message);
   }
@@ -2405,8 +2430,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .order("pickup_at", { ascending: true });
 
       if (driverId) {
-        // Driver sees unassigned scheduled rides OR rides that they previously accepted (which includes cancelled by user)
-        query = query.or(`status.eq.scheduled,and(status.eq.driver_accepted,driver_id.eq.${driverId}),and(status.eq.cancelled,driver_id.eq.${driverId})`);
+        const nowIso = new Date().toISOString();
+        // Driver sees unassigned scheduled rides (in the future) OR rides that they previously accepted
+        query = query.or(`and(status.eq.scheduled,pickup_at.gte.${nowIso}),and(status.eq.driver_accepted,driver_id.eq.${driverId}),and(status.eq.cancelled,driver_id.eq.${driverId})`);
       } else {
         query = query.in("status", ["scheduled", "driver_accepted"]);
       }
@@ -2438,7 +2464,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) => {
     try {
       const { driverId } = req.body;
-      const updateData: any = { status: "driver_accepted", updated_at: new Date().toISOString() };
+      const updateData: any = { 
+        status: "driver_accepted", 
+        updated_at: new Date().toISOString(),
+        accepted_by_driver_at: new Date().toISOString()
+      };
       
       if (driverId) {
         updateData.driver_id = driverId;
@@ -2460,7 +2490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) => {
     try {
-      const { cancelledBy } = req.body || {}; // 'rider' | 'driver'
+      const { cancelledBy, reason } = req.body || {}; // 'rider' | 'driver'
 
       // ── Fetch current booking ──
       const { data: booking, error: fetchErr } = await sb
@@ -2473,7 +2503,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Booking not found" });
       }
 
-      if (booking.status === 'cancelled') {
+      if (booking.status === 'cancelled' || booking.status === 'driver_cancelled' || booking.status === 'driver_cancelled_late') {
         return res.status(400).json({ error: "Booking already cancelled" });
       }
 
@@ -2488,6 +2518,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let cancellationFee = 0;
       let refundAmount = 0;
       let penaltyNote = '';
+      
+      // Tracking fields
+      let statusToSet = 'cancelled';
+      let driverCancelType = null;
+      let driverPenaltyApplied = false;
+      let lateCancellationFee = 0;
 
       if (cancelledBy === 'rider') {
         if (withinThreeHours || pastPickup) {
@@ -2527,6 +2563,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (withinThreeHours || pastPickup) {
           const driverPenalty = estimatedFare * 0.5;
           penaltyNote = `Driver late cancellation — 50% penalty of £${driverPenalty.toFixed(2)} applies.`;
+          statusToSet = 'driver_cancelled_late';
+          driverCancelType = 'late_cancellation';
+          driverPenaltyApplied = true;
+          lateCancellationFee = driverPenalty;
 
           if (booking.driver_id && driverPenalty > 0) {
             try {
@@ -2544,18 +2584,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else {
           penaltyNote = 'Driver cancelled more than 3 hours before pickup — no penalty.';
+          statusToSet = 'driver_cancelled';
+          driverCancelType = 'free_cancellation';
         }
+      }
+
+      const updatePayload: any = {
+        status: statusToSet,
+        updated_at: now.toISOString(),
+        cancellation_fee: cancellationFee,
+        cancellation_note: penaltyNote,
+        cancelled_by: cancelledBy || 'rider',
+      };
+      
+      if (cancelledBy === 'driver') {
+        updatePayload.driver_cancelled_at = now.toISOString();
+        updatePayload.driver_cancel_reason = reason || null;
+        updatePayload.driver_cancel_type = driverCancelType;
+        updatePayload.late_cancellation_fee = lateCancellationFee;
+        updatePayload.driver_penalty_applied = driverPenaltyApplied;
       }
 
       const { data, error } = await sb
         .from("later_bookings")
-        .update({
-          status: "cancelled",
-          updated_at: now.toISOString(),
-          cancellation_fee: cancellationFee,
-          cancellation_note: penaltyNote,
-          cancelled_by: cancelledBy || 'rider',
-        })
+        .update(updatePayload)
         .eq("id", req.params.id as string)
         .select()
         .single();
@@ -2600,6 +2652,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: error?.message || "Failed to save rating" });
     }
   });
+
+  // ─── Scheduled Bookings Escalation Engine ───
+  // Runs every minute to evaluate scheduled bookings that haven't been accepted yet.
+  setInterval(async () => {
+    try {
+      const { data: scheduledRides, error } = await supabase
+        .from('later_bookings')
+        .select('*')
+        .eq('status', 'scheduled')
+        .gte('pickup_at', new Date().toISOString());
+
+      if (error || !scheduledRides) return;
+
+      const now = new Date().getTime();
+
+      for (const ride of scheduledRides) {
+        const pickupTime = new Date(ride.pickup_at).getTime();
+        const minsUntilPickup = (pickupTime - now) / 60000;
+
+        // 15 Minutes -> URGENT ASAP Priority Job
+        if (minsUntilPickup <= 15) {
+          // Broadcast to all online drivers as an urgent ride
+          io.emit('ride:urgent_scheduled', {
+            ...ride,
+            id: `urgent_sched_${ride.id}`, // prefix to avoid UI clashes if needed, or pass as is
+            isUrgentScheduled: true,
+            title: 'URGENT SCHEDULED RIDE',
+            subtitle: 'Pickup soon',
+          });
+          continue;
+        }
+
+        // 30 Minutes -> Urgent Push
+        if (minsUntilPickup <= 30 && minsUntilPickup > 29) { // Run once when crossing 30
+          // (In a real scenario, this uses Expo Push Notifications to available drivers)
+          console.log(`[ESCALATION] Urgent Push for scheduled ride ${ride.id} (30 mins until pickup)`);
+        }
+
+        // 60 Minutes -> Standard Push
+        if (minsUntilPickup <= 60 && minsUntilPickup > 59) { // Run once when crossing 60
+          console.log(`[ESCALATION] Push for scheduled ride ${ride.id} (60 mins until pickup)`);
+        }
+      }
+    } catch (err) {
+      console.error('Escalation engine error:', err);
+    }
+  }, 60000); // 1 minute interval
 
   return httpServer;
 
