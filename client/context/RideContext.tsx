@@ -977,6 +977,12 @@ export function RideProvider({ children }: { children: ReactNode }) {
   const userRef = React.useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
 
+  // Keep a ref to the latest activeRide so socket callbacks always see the current ride
+  // This prevents the race condition where the functional updater in setActiveRide
+  // finds current === null because a prior handler already cleared it
+  const activeRideRef = React.useRef(activeRide);
+  useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
+
   useEffect(() => {
     loadStoredRides();
     loadPricingRules();
@@ -1015,14 +1021,36 @@ export function RideProvider({ children }: { children: ReactNode }) {
         if (update.status === "completed" || update.status === "payment_collected" || update.status === "cancelled" || update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") {
 
           // ✅ Handle wallet update for payment_collected BEFORE touching activeRide
-          // The server already updated the DB wallet balance; we just update the local display
+          // The server already updated the DB wallet balance; we refresh from server to stay in sync
           if (update.status === "payment_collected" && (update as any).extraAmount) {
             const extra = parseFloat((update as any).extraAmount);
             if (extra > 0) {
+              // 1. Optimistic local update so UI updates immediately
               const currentBalance = userRef.current?.walletBalance || 0;
               updateProfile({ walletBalance: currentBalance + extra });
               Alert.alert("Wallet Updated", `£${extra.toFixed(2)} has been added to your wallet by the driver.`);
-              console.log(`✅ [RideContext] Wallet updated: £${currentBalance} + £${extra} = £${currentBalance + extra}`);
+              console.log(`✅ [RideContext] Wallet updated (optimistic): £${currentBalance} + £${extra} = £${currentBalance + extra}`);
+
+              // 2. Fetch the confirmed balance from server to guarantee accuracy
+              // (runs async, doesn't block the UI)
+              (async () => {
+                try {
+                  const userId = userRef.current?.id;
+                  if (!userId) return;
+                  const baseUrl = getApiUrl();
+                  const res = await fetch(`${baseUrl}/api/users/${userId}`);
+                  if (res.ok) {
+                    const data = await res.json();
+                    const serverBalance = data?.user?.wallet_balance ?? data?.user?.walletBalance;
+                    if (typeof serverBalance === 'number') {
+                      updateProfile({ walletBalance: serverBalance });
+                      console.log(`✅ [RideContext] Wallet synced from server: £${serverBalance}`);
+                    }
+                  }
+                } catch (syncErr) {
+                  console.warn('⚠️ [RideContext] Could not sync wallet from server:', syncErr);
+                }
+              })();
             }
           }
 
@@ -1059,17 +1087,19 @@ export function RideProvider({ children }: { children: ReactNode }) {
             );
           }
 
-          // ✅ Capture ride data BEFORE clearing activeRide (pure — no side effects inside updater)
-          let capturedRide: Ride | null = null;
-          setActiveRide((current) => {
-            if (!current) return null;
-            capturedRide = current; // capture synchronously for side effects below
-            return null;           // clear the active ride — nothing else in here
-          });
+          // ✅ Capture ride data from the ref BEFORE clearing activeRide.
+          // Using the ref is reliable because it always holds the latest value,
+          // unlike the functional updater capture which can find current === null
+          // when React batches updates or another handler already cleared it.
+          const capturedRide: Ride | null = activeRideRef.current;
 
-          // ✅ All history/storage/notifications run OUTSIDE the state updater
+          // Clear activeRide state
+          setActiveRide(null);
+          activeRideRef.current = null;
+
+          // ✅ All history/storage/notifications run AFTER clearing the ride
           if (capturedRide) {
-            const ride = capturedRide as Ride;
+            const ride = capturedRide;
 
             // Persist final ride to history
             const finalRide: Ride = {
@@ -1109,12 +1139,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 `Your ride has been completed. Fare: ${fareStr}`,
                 { type: "ride_completed", rideId: ride.id }
               );
-              // Trigger rating prompt after a short delay so navigation can settle
+              // Trigger rating prompt — set immediately so it's ready when
+              // RideTrackingScreen navigates to Home (1.5s delay gives us time)
               const dName = ride.driverName || "Your Driver";
               const rId = ride.id;
-              setTimeout(() => {
-                setPendingRating({ rideId: rId, driverName: dName });
-              }, 2000);
+              setPendingRating({ rideId: rId, driverName: dName });
             } else if (update.status === "cancelled" || update.status === "cancelled_no_drivers") {
               sendLocalNotification(
                 "❌ Ride Cancelled",
@@ -1124,6 +1153,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 { type: "ride_cancelled", rideId: ride.id }
               );
             }
+          } else {
+            console.warn(`⚠️ [RideContext] ride:update ${update.status} received but no active ride found in ref — possible duplicate event`);
           }
           return;
         }

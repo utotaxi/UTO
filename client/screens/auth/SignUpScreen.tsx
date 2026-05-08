@@ -68,9 +68,7 @@ export default function SignUpScreen({ navigation, route }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [councilLicence, setCouncilLicence] = useState("");
-  const [vehicleMake, setVehicleMake] = useState("");
-  const [vehicleModel, setVehicleModel] = useState("");
-  const [licensePlate, setLicensePlate] = useState("");
+  const [badgeNo, setBadgeNo] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -92,8 +90,8 @@ export default function SignUpScreen({ navigation, route }: any) {
       return;
     }
 
-    if (isDriver && (!councilLicence || !vehicleMake || !vehicleModel || !licensePlate)) {
-      setError("Please fill in all council and vehicle details");
+    if (isDriver && (!councilLicence || !badgeNo)) {
+      setError("Please fill in the council and badge number");
       return;
     }
 
@@ -108,7 +106,7 @@ export default function SignUpScreen({ navigation, route }: any) {
 
     try {
       const driverDetails = isDriver
-        ? { councilLicence, vehicleMake, vehicleModel, licensePlate }
+        ? { councilLicence, badgeNo }
         : undefined;
 
       await signUp(fullName, email, password, selectedRole, driverDetails);
@@ -253,62 +251,36 @@ export default function SignUpScreen({ navigation, route }: any) {
               </View>
             </View>
 
-            {/* Vehicle Details (Drivers Only) */}
+            {/* Driver Details (Drivers Only) */}
             {isDriver && (
               <Animated.View entering={FadeInDown.delay(300).duration(400)} style={{ gap: Spacing.lg }}>
                 <View style={styles.inputContainer}>
-                  <ThemedText style={styles.inputLabel}>Vehicle Make</ThemedText>
+                  <ThemedText style={styles.inputLabel}>Which Council are you registered? <ThemedText style={{ color: "#EF4444" }}>*</ThemedText></ThemedText>
                   <View style={styles.inputWrapper}>
-                    <Feather name="truck" size={20} color="#6B7280" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.input}
-                      placeholder="e.g. Toyota"
-                      placeholderTextColor="#6B7280"
-                      value={vehicleMake}
-                      onChangeText={setVehicleMake}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <ThemedText style={styles.inputLabel}>Vehicle Model</ThemedText>
-                  <View style={styles.inputWrapper}>
-                    <Feather name="disc" size={20} color="#6B7280" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.input}
-                      placeholder="e.g. Prius"
-                      placeholderTextColor="#6B7280"
-                      value={vehicleModel}
-                      onChangeText={setVehicleModel}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <ThemedText style={styles.inputLabel}>Council Licence <ThemedText style={{ color: "#EF4444" }}>*</ThemedText></ThemedText>
-                  <View style={styles.inputWrapper}>
-                    <Feather name="file-text" size={20} color="#6B7280" style={styles.inputIcon} />
+                    <Feather name="map-pin" size={20} color="#6B7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
                       placeholder="e.g. Gloucester City Council"
                       placeholderTextColor="#6B7280"
                       value={councilLicence}
                       onChangeText={setCouncilLicence}
+                      testID="input-council"
                     />
                   </View>
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <ThemedText style={styles.inputLabel}>License Plate</ThemedText>
+                  <ThemedText style={styles.inputLabel}>Badge No <ThemedText style={{ color: "#EF4444" }}>*</ThemedText></ThemedText>
                   <View style={styles.inputWrapper}>
-                    <Feather name="hash" size={20} color="#6B7280" style={styles.inputIcon} />
+                    <Feather name="credit-card" size={20} color="#6B7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder="e.g. XXX-123"
+                      placeholder="Enter your badge number"
                       placeholderTextColor="#6B7280"
-                      value={licensePlate}
-                      onChangeText={setLicensePlate}
+                      value={badgeNo}
+                      onChangeText={setBadgeNo}
                       autoCapitalize="characters"
+                      testID="input-badge-no"
                     />
                   </View>
                 </View>

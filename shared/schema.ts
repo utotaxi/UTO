@@ -52,6 +52,7 @@ export const drivers = pgTable("drivers", {
   userId: varchar("user_id").notNull().references(() => users.id),
   vehicleType: text("vehicle_type").default("standard"),
   councilLicence: text("council_licence"),
+  badgeNo: text("badge_no"),
   taxSettings: jsonb("tax_settings"),
   vehicleMake: text("vehicle_make").notNull(),
   vehicleModel: text("vehicle_model").notNull(),

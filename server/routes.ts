@@ -1183,6 +1183,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log('ℹ️ later_bookings migration skipped:', (e as Error).message);
   }
 
+  // ─── Safe migration: ensure badge_no column exists on drivers table ───
+  try {
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE drivers ADD COLUMN IF NOT EXISTS badge_no TEXT DEFAULT NULL;`
+    });
+    console.log('✅ Ensured drivers.badge_no column exists');
+  } catch (e) {
+    console.log('ℹ️ drivers.badge_no migration skipped:', (e as Error).message);
+  }
+
   app.get("/api/pricing-rules/active", async (req: Request, res: Response) => {
     try {
       const { data, error } = await supabase
@@ -1408,25 +1418,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/drivers", async (req: Request, res: Response) => {
     try {
-      const { userId, vehicleType, vehicleMake, vehicleModel, licensePlate, isOnline, isAvailable, vehicleYear, vehicleColor } = req.body;
+      const { userId, vehicleType, vehicleMake, vehicleModel, licensePlate, isOnline, isAvailable, vehicleYear, vehicleColor, councilLicence, badgeNo } = req.body;
 
-      // Manual validation — avoids drizzle-zod camelCase issues
-      if (!userId || !vehicleType || !vehicleMake || !vehicleModel || !licensePlate) {
+      // Manual validation — userId is always required
+      if (!userId) {
         return res.status(400).json({
-          error: "userId, vehicleType, vehicleMake, vehicleModel, and licensePlate are required"
+          error: "userId is required"
         });
       }
 
-      console.log(`🚗 Creating driver record: userId=${userId}, plate=${licensePlate}`);
+      console.log(`🚗 Creating driver record: userId=${userId}, council=${councilLicence || 'N/A'}, badge=${badgeNo || 'N/A'}, plate=${licensePlate || 'N/A'}`);
 
       const driver = await storage.createDriver({
         userId,
-        vehicleType,
-        vehicleMake,
-        vehicleModel,
+        vehicleType: vehicleType || "standard",
+        vehicleMake: vehicleMake || "Pending",
+        vehicleModel: vehicleModel || "Pending",
         vehicleYear: vehicleYear || null,
         vehicleColor: vehicleColor || null,
-        licensePlate,
+        licensePlate: licensePlate || "PENDING",
+        councilLicence: councilLicence || null,
+        badgeNo: badgeNo || null,
         isOnline: isOnline ?? false,
         isAvailable: isAvailable ?? true,
       });

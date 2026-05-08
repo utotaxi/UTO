@@ -2660,8 +2660,9 @@
 // }
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from "react";
-import { Alert } from "react-native";
+import { Alert, Platform, Vibration } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Audio } from "expo-av";
 import { getSocket, connectAsDriver, onNewRide, onRideUpdate, onRideExpired } from "@/lib/socket";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
@@ -2804,6 +2805,55 @@ const ONLINE_STATUS_KEY = "@uto_online_status";
 
 // Trip history is always loaded from AsyncStorage cache + refreshed from Supabase
 
+// 🔊 Play a LOUD alert sound + strong vibration when a new ride request arrives
+// The sound loops 3 times so drivers never miss an incoming ride
+const playRideAlert = async () => {
+  try {
+    // Configure audio to play at MAXIMUM volume even in silent mode
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: false,
+    });
+
+    // Play the ride alert sound — loop 3 times for a longer, more noticeable alert
+    let playCount = 0;
+    const MAX_PLAYS = 3;
+
+    const { sound } = await Audio.Sound.createAsync(
+      require('../../assets/ride_alert.wav'),
+      { shouldPlay: true, volume: 1.0, isLooping: false }
+    );
+
+    // Replay the sound multiple times so the alert is longer and louder
+    sound.setOnPlaybackStatusUpdate(async (status) => {
+      if ('didJustFinish' in status && status.didJustFinish) {
+        playCount++;
+        if (playCount < MAX_PLAYS) {
+          // Replay from the beginning for the next iteration
+          try {
+            await sound.replayAsync();
+          } catch (_) {
+            sound.unloadAsync().catch(() => {});
+          }
+        } else {
+          // All iterations done — unload to free resources
+          sound.unloadAsync().catch(() => {});
+        }
+      }
+    });
+
+    // Heavy vibration pattern: ~6 seconds of strong pulses
+    // Pattern: [wait, vibrate, pause, vibrate, pause, vibrate, pause, vibrate, pause, vibrate]
+    Vibration.vibrate([0, 800, 200, 800, 200, 800, 200, 800, 200, 800], false);
+  } catch (err) {
+    console.warn('🔇 Could not play ride alert sound:', err);
+    // Fallback: at least vibrate strongly even if sound fails
+    Vibration.vibrate([0, 800, 200, 800, 200, 800, 200, 800, 200, 800], false);
+  }
+};
+
 export function DriverProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [isOnline, setIsOnlineState] = useState(false);
@@ -2905,6 +2955,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || ride.farePrice || 0),
           });
           setRideState("incoming");
+
+          // 🔊 Play loud beep sound + vibration for incoming ride
+          playRideAlert();
 
           // 🔔 Notify driver of new ride request
           sendLocalNotification(

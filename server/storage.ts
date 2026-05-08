@@ -28,6 +28,7 @@ export interface Driver {
   vehicle_year: number | null;
   vehicle_color: string | null;
   license_plate: string;
+  badge_no: string | null;
   is_online: boolean | null;
   is_available: boolean | null;
   current_latitude: number | null;
@@ -168,6 +169,7 @@ function toCamelDriver(row: Driver) {
     vehicleYear: row.vehicle_year,
     vehicleColor: row.vehicle_color,
     licensePlate: row.license_plate,
+    badgeNo: row.badge_no,
     isOnline: row.is_online,
     isAvailable: row.is_available,
     currentLatitude: row.current_latitude,
@@ -403,6 +405,8 @@ export class SupabaseStorage implements IStorage {
     if (driver.id) insertData.id = driver.id;
     if (driver.vehicleYear) insertData.vehicle_year = driver.vehicleYear;
     if (driver.vehicleColor) insertData.vehicle_color = driver.vehicleColor;
+    if (driver.councilLicence) insertData.council_licence = driver.councilLicence;
+    if (driver.badgeNo) insertData.badge_no = driver.badgeNo;
 
     const { data, error } = await supabase
       .from("drivers")
@@ -426,6 +430,8 @@ export class SupabaseStorage implements IStorage {
     if (updates.licensePlate !== undefined) snakeData.license_plate = updates.licensePlate;
     if (updates.vehicleYear !== undefined) snakeData.vehicle_year = updates.vehicleYear;
     if (updates.vehicleColor !== undefined) snakeData.vehicle_color = updates.vehicleColor;
+    if (updates.councilLicence !== undefined) snakeData.council_licence = updates.councilLicence;
+    if (updates.badgeNo !== undefined) snakeData.badge_no = updates.badgeNo;
     if (updates.documentPhvlUrl !== undefined) snakeData.document_phvl_url = updates.documentPhvlUrl;
     if (updates.documentPhvlStatus !== undefined) snakeData.document_phvl_status = updates.documentPhvlStatus;
     if (updates.documentLogbookUrl !== undefined) snakeData.document_logbook_url = updates.documentLogbookUrl;

@@ -17,9 +17,7 @@ interface User {
 
 export interface DriverDetails {
   councilLicence: string;
-  vehicleMake: string;
-  vehicleModel: string;
-  licensePlate: string;
+  badgeNo: string;
 }
 
 interface AuthContextType {
@@ -134,9 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           userId: userData.id,
           vehicleType: "standard", // default fallback since it's required by schema
           councilLicence: driverDetails.councilLicence,
-          vehicleMake: driverDetails.vehicleMake,
-          vehicleModel: driverDetails.vehicleModel,
-          licensePlate: driverDetails.licensePlate,
+          badgeNo: driverDetails.badgeNo,
+          vehicleMake: "Pending",  // placeholder — collected later during onboarding
+          vehicleModel: "Pending",
+          licensePlate: "PENDING",
           isOnline: false,
           isAvailable: true,
         });
@@ -144,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (driverError: any) {
         console.error("⚠️ User created but driver record failed:", driverError);
         // Re-throw so the UI knows driver profile wasn't saved
-        throw new Error("Account created but failed to save vehicle details. Please contact support.");
+        throw new Error("Account created but failed to save driver details. Please contact support.");
       }
     }
 

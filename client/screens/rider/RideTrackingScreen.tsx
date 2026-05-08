@@ -7640,23 +7640,33 @@ export default function RideTrackingScreen({ navigation }: any) {
     }
   }, [navigation]);
 
-  // When activeRide becomes null (completed OR cancelled), always reset to Home.
-  // Using navigation.reset() prevents landing back on any previous screen (e.g. share-PIN).
+  // When activeRide becomes null due to cancellation, navigate home.
+  // For completions, the rideStatus effect below handles navigation with a longer
+  // delay to ensure pendingRating is set before the Home screen mounts.
   useEffect(() => {
     if (!activeRide && hasInitialized.current && !hasNavigatedAway.current) {
-      // Small delay to allow any pending state updates to settle
+      // If this is a completion, let the rideStatus effect handle navigation
+      if (rideStatus === "completed" || rideStatus === "payment_collected") {
+        return;
+      }
+      // For cancellations and other cases, navigate after a short delay
       const timer = setTimeout(() => {
         navigateHome();
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [activeRide, navigateHome]);
+  }, [activeRide, rideStatus, navigateHome]);
 
-  // When the driver marks the trip as complete via socket, also navigate immediately.
-  // This fires before activeRide is cleared by RideContext, so we get the fastest response.
+  // When the driver marks the trip as complete via socket, delay navigation slightly
+  // so RideContext has time to set pendingRating before the Home screen mounts.
+  // pendingRating is now set synchronously in RideContext, so 800ms is plenty.
   useEffect(() => {
     if ((rideStatus === "completed" || rideStatus === "payment_collected") && !hasNavigatedAway.current) {
-      navigateHome();
+      // Wait 800ms to allow wallet updates and state to settle
+      const timer = setTimeout(() => {
+        navigateHome();
+      }, 800);
+      return () => clearTimeout(timer);
     }
     // Show rebook screen when no drivers available
     if (rideStatus === "cancelled_no_drivers") {

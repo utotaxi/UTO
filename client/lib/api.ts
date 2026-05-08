@@ -30,6 +30,7 @@ export interface Driver {
   currentLongitude?: number;
   totalEarnings?: number;
   councilLicence?: string;
+  badgeNo?: string;
   taxSettings?: any;
 }
 
