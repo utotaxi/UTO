@@ -3007,45 +3007,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           if (currentRide && (currentRide.id === update.rideId || !update.rideId)) {
             console.log('🚫 Ride cancelled:', update.rideId, 'reason:', update.status);
 
-            // ─── Handle no-show: add earnings + show alert ────────────────────
+            // ─── Handle no-show from server ────────────────────
             if (update.status === "cancelled_no_show") {
-              const noShowFare = update.noShowFare || update.earningsAdded || currentRide.estimatedFare || 0;
-
-              if (noShowFare > 0) {
-                // Add a trip entry so it appears in earnings calculations
-                const noShowTrip: Trip = {
-                  id: `noshow_${update.rideId || Date.now()}`,
-                  riderName: currentRide.riderName || "Rider",
-                  pickupAddress: currentRide.pickupAddress || "Pickup",
-                  dropoffAddress: currentRide.dropoffAddress || "Dropoff",
-                  farePrice: noShowFare,
-                  distanceMiles: currentRide.distanceMiles || 0,
-                  durationMinutes: currentRide.durationMinutes || 0,
-                  completedAt: new Date().toISOString(),
-                };
-
-                setTripHistory((prev) => {
-                  const updated = [noShowTrip, ...prev];
-                  AsyncStorage.setItem(TRIP_HISTORY_KEY, JSON.stringify(updated)).catch(console.error);
-                  return updated;
-                });
-
-                console.log(`✅ No-show trip added to earnings: £${noShowFare}`);
-              }
-
-              // Show driver alert about the no-show earnings
-              setTimeout(() => {
-                Alert.alert(
-                  "Ride Cancelled — No Show",
-                  `The rider did not show up within 10 minutes. A no-show fee of £${noShowFare > 0 ? noShowFare.toFixed(2) : '0.00'} has been charged and added to your earnings.`,
-                  [{ text: "OK" }]
-                );
-              }, 500);
-
-              // Refresh data from Supabase to sync earnings
+              // noShowRide() already handled the immediate feedback (cleared ride, added earnings, showed alert).
+              // We just need to clear state here and refresh data — no duplicate earnings or alerts.
+              console.log('ℹ️ Server confirmed no-show for ride', update.rideId, '— refreshing data');
+              setActiveRideRequest(null);
+              setRideState("none");
+              // Refresh data from Supabase to sync server-confirmed earnings
               setTimeout(() => {
                 refreshData().catch((err: any) => console.warn("⚠️ Post no-show refreshData failed:", err));
-              }, 3000);
+              }, 2000);
             } else {
               // Normal rider-initiated cancellation
               setRideCancelledByRider(true);
@@ -3056,10 +3028,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                 `${currentRide.riderName || "The rider"} has cancelled the ride.`,
                 { type: "ride_cancelled", rideId: update.rideId }
               );
-            }
 
-            setActiveRideRequest(null);
-            setRideState("none");
+              setActiveRideRequest(null);
+              setRideState("none");
+            }
+          } else if (!currentRide && update.status === "cancelled_no_show") {
+            // Ride already cleared by noShowRide() — just log and refresh
+            console.log('ℹ️ No-show server confirmation received but ride already cleared locally');
+            setTimeout(() => {
+              refreshData().catch((err: any) => console.warn("⚠️ Post no-show refreshData failed:", err));
+            }, 2000);
           }
         }
       });
@@ -3369,19 +3347,59 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   // Driver-initiated No Show (after 10 min free waiting)
   const noShowRide = () => {
     if (!activeRideRequest) return;
-    console.log('🚫 Driver initiated No Show for ride:', activeRideRequest.id);
+    const rideId = activeRideRequest.id;
+    const riderName = activeRideRequest.riderName || "Rider";
+    const fare = activeRideRequest.estimatedFare || 0;
+    console.log('🚫 Driver initiated No Show for ride:', rideId);
 
     try {
       const socket = getSocket();
       socket.emit("ride:no_show", {
-        rideId: activeRideRequest.id,
+        rideId,
         driverId: driverProfile?.id || user?.id || undefined,
       });
     } catch (err) {
       console.warn("Socket emit failed:", err);
     }
-    // The server will handle the cancellation + charging
-    // and emit cancelled_no_show back which our existing listener handles
+
+    // Immediately clear the ride and show feedback — don't wait for server roundtrip
+    setActiveRideRequest(null);
+    setRideState("none");
+    setPaidWaitingStartedAt(null);
+
+    // Add a no-show trip to earnings immediately for instant feedback
+    if (fare > 0) {
+      const noShowTrip: Trip = {
+        id: `noshow_${rideId}`,
+        riderName,
+        pickupAddress: activeRideRequest.pickupAddress || "Pickup",
+        dropoffAddress: activeRideRequest.dropoffAddress || "Dropoff",
+        farePrice: fare,
+        distanceMiles: activeRideRequest.distanceMiles || 0,
+        durationMinutes: activeRideRequest.durationMinutes || 0,
+        completedAt: new Date().toISOString(),
+      };
+
+      setTripHistory((prev) => {
+        const updated = [noShowTrip, ...prev];
+        AsyncStorage.setItem(TRIP_HISTORY_KEY, JSON.stringify(updated)).catch(console.error);
+        return updated;
+      });
+    }
+
+    // Show immediate alert to the driver
+    setTimeout(() => {
+      Alert.alert(
+        "Ride Cancelled — No Show",
+        `The rider did not show up within 10 minutes. A no-show fee of £${fare > 0 ? fare.toFixed(2) : '0.00'} has been charged and added to your earnings.`,
+        [{ text: "OK" }]
+      );
+    }, 300);
+
+    // Refresh data from Supabase to sync earnings after server processes
+    setTimeout(() => {
+      refreshData().catch((err: any) => console.warn("⚠️ Post no-show refreshData failed:", err));
+    }, 3000);
   };
 
   // Driver agrees to continue waiting (paid waiting starts)

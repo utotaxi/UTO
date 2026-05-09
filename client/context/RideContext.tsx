@@ -1056,7 +1056,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
           // ✅ Handle no-show cancellation — rider didn't board within 10 minutes
           if (update.status === "cancelled_no_show") {
-            const noShowFare = (update as any).noShowFare || 0;
+            const noShowFare = Number((update as any).noShowFare || 0);
             const chargedVia = (update as any).chargedVia || "wallet";
 
             if (chargedVia === "wallet" && noShowFare > 0) {
@@ -1065,19 +1065,22 @@ export function RideProvider({ children }: { children: ReactNode }) {
               console.log(`❌ [RideContext] No-show penalty: £${noShowFare} debited from wallet (clamped to £0 min)`);
             }
 
-            if (chargedVia === "card") {
-              Alert.alert(
-                "Ride Cancelled — No Show",
-                `Your driver waited 10 minutes at pickup. A cancellation fee of £${noShowFare.toFixed(2)} has been charged to your saved card.`,
-                [{ text: "OK" }]
-              );
-            } else {
-              Alert.alert(
-                "Ride Cancelled — No Show",
-                `Your driver waited 10 minutes at pickup. A cancellation fee of £${noShowFare.toFixed(2)} has been deducted from your wallet.`,
-                [{ text: "OK" }]
-              );
-            }
+            // Show alert to rider about no-show policy
+            setTimeout(() => {
+              if (chargedVia === "card") {
+                Alert.alert(
+                  "Ride Cancelled — No Show",
+                  `Your driver waited 10 minutes at pickup. A cancellation fee of £${noShowFare.toFixed(2)} has been charged to your saved card as per our No Show Policy.`,
+                  [{ text: "OK" }]
+                );
+              } else {
+                Alert.alert(
+                  "Ride Cancelled — No Show",
+                  `Your driver waited 10 minutes at pickup. A cancellation fee of £${noShowFare.toFixed(2)} has been deducted from your wallet as per our No Show Policy.`,
+                  [{ text: "OK" }]
+                );
+              }
+            }, 300);
             console.log(`❌ [RideContext] No-show cancellation: £${noShowFare} charged via ${chargedVia}`);
 
             sendLocalNotification(
@@ -1101,9 +1104,15 @@ export function RideProvider({ children }: { children: ReactNode }) {
           if (capturedRide) {
             const ride = capturedRide;
 
+            // Update farePrice if the server sent a totalFare (includes waiting charges)
+            const serverTotalFare = Number((update as any).totalFare || 0);
+            const waitingCharge = Number((update as any).waitingCharge || 0);
+            const finalFarePrice = serverTotalFare > 0 ? serverTotalFare : ride.farePrice;
+
             // Persist final ride to history
             const finalRide: Ride = {
               ...ride,
+              farePrice: finalFarePrice,
               status: (update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") ? "cancelled"
                 : update.status === "payment_collected" ? "completed"
                   : (update.status as RideStatus),

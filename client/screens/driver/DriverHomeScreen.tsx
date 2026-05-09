@@ -800,6 +800,16 @@ export default function DriverHomeScreen({ navigation }: any) {
                 Start Ride
               </ThemedText>
             </Pressable>
+
+            {/* Cancel Trip Button */}
+            <Pressable
+              onPress={() => {
+                declineRide();
+              }}
+              style={[styles.cancelTripBtn, { backgroundColor: UTOColors.error + '10', marginTop: 8 }]}
+            >
+              <ThemedText style={[styles.cancelTripText, { color: UTOColors.error }]}>Cancel Trip</ThemedText>
+            </Pressable>
           </ScrollView>
         </Animated.View>
       ) : null}

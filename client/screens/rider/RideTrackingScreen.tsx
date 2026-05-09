@@ -7594,15 +7594,7 @@ export default function RideTrackingScreen({ navigation }: any) {
 
     // Update every second
     const interval = setInterval(() => {
-      const remaining = updateTimer();
-      if (remaining <= 0) {
-        clearInterval(interval);
-        // Add auto cancellation with penalty when timer hits 00:00
-        if (activeRide?.id) {
-          console.log(`⏱️ Auto-cancelling ride ${activeRide.id} due to wait timer expiration`);
-          cancelRide(activeRide.id, true);
-        }
-      }
+      updateTimer();
     }, 1000);
 
     return () => clearInterval(interval);
@@ -7662,15 +7654,22 @@ export default function RideTrackingScreen({ navigation }: any) {
   // pendingRating is now set synchronously in RideContext, so 800ms is plenty.
   useEffect(() => {
     if ((rideStatus === "completed" || rideStatus === "payment_collected") && !hasNavigatedAway.current) {
-      // Wait 800ms to allow wallet updates and state to settle
+      // Wait 2000ms to allow wallet updates and rating modal state to settle
       const timer = setTimeout(() => {
         navigateHome();
-      }, 800);
+      }, 2000);
       return () => clearTimeout(timer);
     }
     // Show rebook screen when no drivers available
     if (rideStatus === "cancelled_no_drivers") {
       setNoDriversAvailable(true);
+    }
+    // Handle no-show cancellation — navigate home after showing alert
+    if (rideStatus === "cancelled_no_show" && !hasNavigatedAway.current) {
+      const timer = setTimeout(() => {
+        navigateHome();
+      }, 1500);
+      return () => clearTimeout(timer);
     }
   }, [rideStatus, navigateHome]);
 

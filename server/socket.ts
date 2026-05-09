@@ -648,6 +648,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
             // Ensure driver_id is ALWAYS set on completion
             if (resolvedDriverId) updateData.driver_id = resolvedDriverId;
 
+            // Store waiting charge and final price if sent by the driver client
+            const waitingCharge = (update as any).waitingCharge || 0;
+            const clientTotalFare = (update as any).totalFare || 0;
+            if (clientTotalFare > 0) {
+              updateData.final_price = clientTotalFare;
+              console.log(`💰 Completion includes waiting charge: £${waitingCharge}, totalFare: £${clientTotalFare}`);
+            }
             // (arrived timer clear logic removed as it's now client-side)
 
             // ─── Charge saved card if payment_method is 'card' ──────────────
@@ -758,11 +765,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
         if (rideInfo) {
           // Always notify the rider — include driverInfo if present (populated on accept)
-          io.to(rideInfo.riderSocketId).emit("ride:update", update);
+          // Also include totalFare and waitingCharge if this is a completion event
+          const riderPayload = { ...update };
+          if (update.status === "completed") {
+            (riderPayload as any).totalFare = (update as any).totalFare || 0;
+            (riderPayload as any).waitingCharge = (update as any).waitingCharge || 0;
+          }
+          io.to(rideInfo.riderSocketId).emit("ride:update", riderPayload);
           
           // ALSO broadcast to the rider room in case they disconnected and reconnected with a new socket
           if (rideInfo.riderId) {
-            io.to(`rider:${rideInfo.riderId}`).emit("ride:update", update);
+            io.to(`rider:${rideInfo.riderId}`).emit("ride:update", riderPayload);
           }
 
           if (rideInfo.driverSocketId && rideInfo.driverSocketId !== socket.id) {
