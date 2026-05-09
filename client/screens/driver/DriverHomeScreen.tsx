@@ -628,9 +628,13 @@ export default function DriverHomeScreen({ navigation }: any) {
           exiting={FadeOut.duration(200)}
           style={[styles.rideRequestContainer, { bottom: insets.bottom + Spacing.lg }]}
         >
-          <ScrollView style={[styles.otpInputContainer, { backgroundColor: theme.backgroundDefault, maxHeight: 520 }]} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={[styles.otpInputContainer, { backgroundColor: theme.backgroundDefault, maxHeight: 560 }]} 
+            contentContainerStyle={{ padding: 24, alignItems: "center" }}
+            showsVerticalScrollIndicator={false}
+          >
             {/* ── Rider Contact Info ── */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, width: '100%' }}>
               <View style={{ flex: 1 }}>
                 <ThemedText style={styles.acceptedRiderName}>{activeRideRequest.riderName}</ThemedText>
                 {activeRideRequest.riderPhone ? (
@@ -719,10 +723,12 @@ export default function DriverHomeScreen({ navigation }: any) {
             ) : null}
 
             {/* ── OTP Entry (always available when rider shows up) ── */}
-            <ThemedText style={styles.otpTitle}>Enter Rider PIN</ThemedText>
-            <ThemedText style={[styles.otpSubtitle, { color: theme.textSecondary }]}>
-              Ask the rider for their 4-digit PIN to start the ride
-            </ThemedText>
+            <View style={{ width: '100%', alignItems: 'center', marginBottom: 16 }}>
+              <ThemedText style={styles.otpTitle}>Enter Rider PIN</ThemedText>
+              <ThemedText style={[styles.otpSubtitle, { color: theme.textSecondary, marginTop: 4 }]}>
+                Ask the rider for their 4-digit PIN to start the ride
+              </ThemedText>
+            </View>
             {otpError ? (
               <ThemedText style={styles.otpErrorText}>
                 Wrong PIN. Please try again.
@@ -1495,10 +1501,7 @@ const styles = StyleSheet.create({
   },
   otpInputContainer: {
     marginHorizontal: Spacing.lg,
-    padding: Spacing.xl,
     borderRadius: BorderRadius.xl,
-    alignItems: "center",
-    gap: Spacing.md,
   },
   otpTitle: {
     fontSize: 18,
