@@ -752,24 +752,33 @@ export default function DriverHomeScreen({ navigation }: any) {
                 <Pressable
                   key={num}
                   onPress={() => otpValue.length < 4 && setOtpValue(prev => prev + num)}
-                  style={[styles.numBtn, { backgroundColor: theme.backgroundSecondary }]}
+                  style={({ pressed }) => [
+                    styles.numBtn,
+                    pressed && { backgroundColor: theme.text + "15" }
+                  ]}
                 >
                   <ThemedText style={styles.numBtnText}>{num}</ThemedText>
                 </Pressable>
               ))}
               {/* Empty placeholder to keep the grid aligned */}
-              <View style={[styles.numBtn, { backgroundColor: "transparent" }]} />
+              <View style={styles.numBtn} />
               <Pressable
                 onPress={() => otpValue.length < 4 && setOtpValue(prev => prev + "0")}
-                style={[styles.numBtn, { backgroundColor: theme.backgroundSecondary }]}
+                style={({ pressed }) => [
+                  styles.numBtn,
+                  pressed && { backgroundColor: theme.text + "15" }
+                ]}
               >
                 <ThemedText style={styles.numBtnText}>0</ThemedText>
               </Pressable>
               <Pressable
                 onPress={() => setOtpValue(prev => prev.slice(0, -1))}
-                style={[styles.numBtn, { backgroundColor: theme.backgroundSecondary }]}
+                style={({ pressed }) => [
+                  styles.numBtn,
+                  pressed && { backgroundColor: theme.text + "15" }
+                ]}
               >
-                <Feather name="delete" size={20} color={theme.text} />
+                <Feather name="delete" size={28} color={theme.text} />
               </Pressable>
             </View>
 
@@ -1520,19 +1529,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-    gap: Spacing.sm,
+    columnGap: 40,
+    rowGap: 24,
     width: "100%",
+    paddingVertical: 16,
   },
   numBtn: {
-    width: 64,
-    height: 56,
-    borderRadius: BorderRadius.lg,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     alignItems: "center",
     justifyContent: "center",
   },
   numBtnText: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontSize: 36,
+    fontWeight: "400",
   },
   startBtn: {
     width: "100%",
