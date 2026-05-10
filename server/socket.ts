@@ -919,8 +919,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
           return;
         }
 
-        // Only proceed if ride is still in "arrived" status
-        if (rideRow.status !== "arrived") {
+        // Only proceed if ride is still in "arrived" or "at_pickup" status
+        if (rideRow.status !== "arrived" && rideRow.status !== "at_pickup") {
           console.log(`ℹ️ No-show fired but ride ${data.rideId} is now ${rideRow.status} — skipping`);
           return;
         }

@@ -7372,6 +7372,7 @@ import {
   Image,
   ScrollView,
   Dimensions,
+  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -7713,7 +7714,20 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   const handleCancel = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    if (activeRide) cancelRide(activeRide.id);
+    Alert.alert(
+      "Cancel Ride",
+      "Are you sure you want to cancel this ride? No cancellation fee will be charged.",
+      [
+        { text: "No", style: "cancel" },
+        { 
+          text: "Yes, Cancel", 
+          style: "destructive",
+          onPress: () => {
+            if (activeRide) cancelRide(activeRide.id, false);
+          }
+        }
+      ]
+    );
   };
 
   const handleCall = () => {
@@ -8222,7 +8236,7 @@ export default function RideTrackingScreen({ navigation }: any) {
           )}
         </View>
 
-        {(currentStatus === "pending" || currentStatus === "accepted") && !noDriversAvailable && (
+        {(currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "at_pickup" || currentStatus === "arrived") && !noDriversAvailable && (
           <AnimatedPressable
             onPress={handleCancel}
             onPressIn={() => (cancelScale.value = withSpring(0.98))}
