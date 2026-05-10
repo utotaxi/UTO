@@ -7396,6 +7396,7 @@ import { useRide } from "@/context/RideContext";
 import { useRiderTracking } from "@/hooks/useRealTimeTracking";
 import { useAuth } from "@/context/AuthContext";
 import { getApiUrl } from "@/lib/query-client";
+import { RatingModal } from "@/components/RatingModal";
 import {
   UTOColors,
   Spacing,
@@ -7433,7 +7434,7 @@ interface RoutePoint {
 export default function RideTrackingScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
-  const { activeRide, cancelRide, completeRide, updateRidePaymentMethod } = useRide();
+  const { activeRide, cancelRide, completeRide, updateRidePaymentMethod, pendingRating, submitRiderRating, dismissRiderRating } = useRide();
   const { user } = useAuth();
 
   const { driverLocation, rideStatus } = useRiderTracking({
@@ -7654,11 +7655,9 @@ export default function RideTrackingScreen({ navigation }: any) {
   // pendingRating is now set synchronously in RideContext, so 800ms is plenty.
   useEffect(() => {
     if ((rideStatus === "completed" || rideStatus === "payment_collected") && !hasNavigatedAway.current) {
-      // Wait 2000ms to allow wallet updates and rating modal state to settle
-      const timer = setTimeout(() => {
-        navigateHome();
-      }, 2000);
-      return () => clearTimeout(timer);
+      // DON'T navigate yet — wait for the rating modal to be dismissed.
+      // The pendingRating effect below handles navigation after rating is done.
+      return;
     }
     // Show rebook screen when no drivers available
     if (rideStatus === "cancelled_no_drivers") {
@@ -7672,6 +7671,18 @@ export default function RideTrackingScreen({ navigation }: any) {
       return () => clearTimeout(timer);
     }
   }, [rideStatus, navigateHome]);
+
+  // Navigate home ONLY after the rider has submitted or skipped the rating
+  const rideIsOver = rideStatus === "completed" || rideStatus === "payment_collected";
+  useEffect(() => {
+    if (rideIsOver && !pendingRating && !hasNavigatedAway.current) {
+      // pendingRating is null → user submitted or skipped rating. Navigate home now.
+      const timer = setTimeout(() => {
+        navigateHome();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [rideIsOver, pendingRating, navigateHome]);
 
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
@@ -7731,7 +7742,25 @@ export default function RideTrackingScreen({ navigation }: any) {
     );
   }
 
-  if (!activeRide) return null;
+  // When ride is complete and activeRide is cleared, show Rating Modal
+  // instead of returning null. This ensures the modal stays visible.
+  if (!activeRide) {
+    if (pendingRating) {
+      return (
+        <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]}>
+          <RatingModal
+            visible={true}
+            ratedRole="driver"
+            ratedName={pendingRating.driverName || "Driver"}
+            rideId={pendingRating.rideId || ""}
+            onSubmit={submitRiderRating}
+            onDismiss={dismissRiderRating}
+          />
+        </View>
+      );
+    }
+    return null;
+  }
 
   const getStatusMessage = () => {
     const status = rideStatus || activeRide.status;

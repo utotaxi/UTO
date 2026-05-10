@@ -1791,4 +1791,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignSelf: "center" as const,
   },
+  cancelTripBtn: {
+    width: "100%" as const,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginTop: 8,
+  },
+  cancelTripText: {
+    fontSize: 15,
+    fontWeight: "600" as const,
+  },
 });
