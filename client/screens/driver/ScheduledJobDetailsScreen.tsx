@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { getApiUrl } from '@/lib/query-client';
 import { useAuth } from '@/context/AuthContext';
 import { UTOColors } from '@/constants/theme';
@@ -33,6 +34,7 @@ export default function ScheduledJobDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { user } = useAuth();
+  const tabBarHeight = useBottomTabBarHeight();
   
   const [booking, setBooking] = useState<any>((route.params as any)?.booking);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -195,7 +197,7 @@ export default function ScheduledJobDetailsScreen() {
       </ScrollView>
 
       {/* Fixed Bottom Action Bar */}
-      <View style={[s.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View style={[s.bottomBar, { paddingBottom: tabBarHeight > 0 ? tabBarHeight + 16 : Math.max(insets.bottom, 16) }]}>
         {booking.status === 'scheduled' && (
           <Pressable style={s.acceptBtn} onPress={handleAccept}>
             <Text style={s.acceptBtnText}>Accept Booking</Text>

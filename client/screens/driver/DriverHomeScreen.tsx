@@ -15,6 +15,7 @@ import {
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Location from "expo-location";
 import { Feather, MaterialIcons } from "@expo/vector-icons";
 import Animated, {
@@ -49,6 +50,16 @@ const darkMapStyle = [
 export default function DriverHomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
+  
+  // Conditionally use the tab bar height. If outside tab context, default to 0.
+  let rawTabBarHeight = 0;
+  try {
+    rawTabBarHeight = useBottomTabBarHeight();
+  } catch (e) {
+    // If not wrapped in a TabNavigator (e.g. testing standalone)
+  }
+  const tabBarHeight = rawTabBarHeight > 0 ? rawTabBarHeight : 0;
+
   const {
     isOnline,
     setIsOnline,
@@ -1107,7 +1118,7 @@ export default function DriverHomeScreen({ navigation }: any) {
           </ScrollView>
 
           {/* Sticky bottom buttons */}
-          <View style={[styles.paymentBottomBar, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+          <View style={[styles.paymentBottomBar, { paddingBottom: tabBarHeight > 0 ? tabBarHeight + 8 : Math.max(insets.bottom, 16) + 8 }]}>
             {completedRidePayment?.paymentMethod === 'cash' && Number(collectedAmountStr) > (completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0)) ? (
               <View style={{ width: '100%', gap: 10 }}>
                 <Pressable
