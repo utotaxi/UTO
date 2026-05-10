@@ -1220,11 +1220,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(`✅ Ride ${data.rideId} marked as payment completed in Supabase, driver_id=${rideRow?.driver_id}`);
 
           // Calculate the expected fare and any overpayment
-          const collectedAmount = data.amount || rideRow?.estimated_price || 0;
-          const expectedFare = rideRow?.final_price || rideRow?.estimated_price || 0;
+          const collectedAmount = Number(data.amount) || Number(rideRow?.estimated_price) || 0;
+          const expectedFare = Number(rideRow?.final_price) || Number(rideRow?.estimated_price) || 0;
           // Trust client-provided extraAmount (already calculated correctly) with server recalc as fallback
           const serverExtraAmount = Math.max(0, collectedAmount - expectedFare);
-          const extraAmount = (typeof data.extraAmount === 'number' && data.extraAmount > 0) ? data.extraAmount : serverExtraAmount;
+          const clientExtra = Number(data.extraAmount) || 0;
+          const extraAmount = clientExtra > 0 ? clientExtra : serverExtraAmount;
 
           console.log(`💰 Payment details: collected=£${collectedAmount}, expectedFare=£${expectedFare}`);
           console.log(`💰 extraAmount: client=${data.extraAmount}, server=${serverExtraAmount}, final=${extraAmount}`);

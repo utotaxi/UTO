@@ -7677,12 +7677,20 @@ export default function RideTrackingScreen({ navigation }: any) {
   useEffect(() => {
     if (rideIsOver && !pendingRating && !hasNavigatedAway.current) {
       // pendingRating is null → user submitted or skipped rating. Navigate home now.
-      const timer = setTimeout(() => {
-        navigateHome();
-      }, 500);
-      return () => clearTimeout(timer);
+      navigateHome();
     }
   }, [rideIsOver, pendingRating, navigateHome]);
+
+  // Wrapped callbacks: navigate home first, THEN clear the rating state
+  const handleRatingSubmit = useCallback((rideId: string, rating: number, comment?: string) => {
+    navigateHome();
+    submitRiderRating(rideId, rating, comment);
+  }, [navigateHome, submitRiderRating]);
+
+  const handleRatingDismiss = useCallback(() => {
+    navigateHome();
+    dismissRiderRating();
+  }, [navigateHome, dismissRiderRating]);
 
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
@@ -7753,13 +7761,16 @@ export default function RideTrackingScreen({ navigation }: any) {
             ratedRole="driver"
             ratedName={pendingRating.driverName || "Driver"}
             rideId={pendingRating.rideId || ""}
-            onSubmit={submitRiderRating}
-            onDismiss={dismissRiderRating}
+            onSubmit={handleRatingSubmit}
+            onDismiss={handleRatingDismiss}
           />
         </View>
       );
     }
-    return null;
+    // Show a brief transition screen instead of null to avoid crash
+    return (
+      <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]} />
+    );
   }
 
   const getStatusMessage = () => {
