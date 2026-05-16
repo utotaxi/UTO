@@ -7664,12 +7664,17 @@ export default function RideTrackingScreen({ navigation }: any) {
     if (rideStatus === "cancelled_no_drivers") {
       setNoDriversAvailable(true);
     }
-    // Handle no-show cancellation — navigate home after showing alert
+    // Handle no-show cancellation — show alert with charge info, then navigate home
     if (rideStatus === "cancelled_no_show" && !hasNavigatedAway.current) {
-      const timer = setTimeout(() => {
-        navigateHome();
-      }, 1500);
-      return () => clearTimeout(timer);
+      const fareAmount = activeRide?.estimatedPrice || activeRide?.farePrice || 0;
+      Alert.alert(
+        "No-Show – Ride Cancelled",
+        fareAmount > 0
+          ? `You did not show up within the required waiting time. A no-show fee of £${fareAmount.toFixed(2)} has been charged to your payment method.`
+          : "You did not show up within the required waiting time. The ride has been cancelled.",
+        [{ text: "OK", onPress: () => navigateHome() }]
+      );
+      return;
     }
   }, [rideStatus, navigateHome]);
 
@@ -7714,20 +7719,42 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   const handleCancel = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    Alert.alert(
-      "Cancel Ride",
-      "Are you sure you want to cancel this ride? No cancellation fee will be charged.",
-      [
-        { text: "No", style: "cancel" },
-        { 
-          text: "Yes, Cancel", 
-          style: "destructive",
-          onPress: () => {
-            if (activeRide) cancelRide(activeRide.id, false);
+    const driverHasArrived = currentStatus === "arrived" || currentStatus === "at_pickup";
+    const fareAmount = activeRide?.estimatedPrice || activeRide?.farePrice || 0;
+
+    if (driverHasArrived && fareAmount > 0) {
+      // Post-arrival: full fare will be charged
+      Alert.alert(
+        "Cancellation Fee Applies",
+        `Your driver has already arrived. Cancelling now will result in the full fare amount of £${fareAmount.toFixed(2)} being charged to your payment method.`,
+        [
+          { text: "Keep Ride", style: "cancel" },
+          { 
+            text: "Cancel & Accept Charge", 
+            style: "destructive",
+            onPress: () => {
+              if (activeRide) cancelRide(activeRide.id, true);
+            }
           }
-        }
-      ]
-    );
+        ]
+      );
+    } else {
+      // Pre-arrival: free cancellation
+      Alert.alert(
+        "Cancel Ride",
+        "Are you sure you want to cancel this ride? No cancellation fee will be charged.",
+        [
+          { text: "No", style: "cancel" },
+          { 
+            text: "Yes, Cancel", 
+            style: "destructive",
+            onPress: () => {
+              if (activeRide) cancelRide(activeRide.id, false);
+            }
+          }
+        ]
+      );
+    }
   };
 
   const handleCall = () => {

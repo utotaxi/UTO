@@ -437,7 +437,7 @@ export function getSocket(): Socket {
     socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       timeout: 10000,
     });

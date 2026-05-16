@@ -120,6 +120,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
       methods: ["GET", "POST"],
     },
     transports: ["websocket", "polling"],
+    // Extended timeouts so drivers switching to Google Maps don't disconnect
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
   const connectedDrivers = new Map<string, string>();  // driverId -> socketId
@@ -200,6 +203,48 @@ export function setupSocketIO(httpServer: HTTPServer) {
     console.log(`📡 Dispatching ride ${rideId} to nearest driver ${entry.driverId} (${entry.distance.toFixed(2)} mi away)`);
     io.to(`driver:${entry.driverId}`).emit("ride:new", enrichedRide);
 
+    // Issue 9: Send push notification for background ride delivery
+    try {
+      const { data: driverUser } = await supabase
+        .from("drivers")
+        .select("user_id")
+        .eq("id", entry.driverId)
+        .single();
+      
+      if (driverUser?.user_id) {
+        const { data: userRow } = await supabase
+          .from("users")
+          .select("push_token")
+          .eq("id", driverUser.user_id)
+          .single();
+        
+        if (userRow?.push_token) {
+          const pushMessage = {
+            to: userRow.push_token,
+            sound: "default",
+            title: "🚕 New Ride Request",
+            body: `New ride from ${enrichedRide.pickupLocation?.address || enrichedRide.pickupAddress || "nearby"} — £${(enrichedRide.farePrice || enrichedRide.estimatedPrice || 0).toFixed(2)}`,
+            data: { type: "ride_request", rideId },
+            priority: "high",
+          };
+          
+          fetch("https://exp.host/--/api/v2/push/send", {
+            method: "POST",
+            headers: {
+              "Accept": "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(pushMessage),
+          }).catch((pushErr) => {
+            console.warn(`⚠️ Push notification failed for driver ${entry!.driverId}:`, pushErr);
+          });
+          console.log(`📲 Push notification sent to driver ${entry.driverId} (token: ${userRow.push_token.substring(0, 20)}...)`);
+        }
+      }
+    } catch (pushErr) {
+      console.warn(`⚠️ Could not send push notification to driver ${entry.driverId}:`, pushErr);
+    }
+
     // Start 15-second countdown
     state.timer = setTimeout(() => {
       console.log(`⏱️ Driver ${entry!.driverId} did not respond within ${DISPATCH_TIMEOUT_MS / 1000}s — moving to next`);
@@ -231,8 +276,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
               dropoff_latitude: rideData.dropoffLocation?.latitude || 0,
               dropoff_longitude: rideData.dropoffLocation?.longitude || 0,
               estimated_price: rideData.farePrice || 0,
-              distance: rideData.distanceKm || rideData.distanceMiles || 0,
-              estimated_duration: rideData.durationMinutes || 0,
+              // Parse to integers to avoid "invalid input syntax for type integer" DB error
+              distance: Math.round(parseFloat(rideData.distanceKm || rideData.distanceMiles || 0)),
+              estimated_duration: Math.round(parseFloat(rideData.durationMinutes || 0)),
               payment_method: rideData.paymentMethod || "cash",
             };
 
@@ -281,10 +327,33 @@ export function setupSocketIO(httpServer: HTTPServer) {
       //    We query is_online=true only (not is_available — the driver socket connection is the real signal)
       const { data: onlineDrivers, error: driversErr } = await supabase
         .from("drivers")
-        .select("id, current_latitude, current_longitude, is_available")
+        .select("id, current_latitude, current_longitude, is_available, vehicle_type")
         .eq("is_online", true);
 
       console.log(`📊 DB online drivers: ${onlineDrivers?.length || 0}, error: ${driversErr?.message || 'none'}`);
+
+      // Issue 10: Vehicle type matching
+      // Map rider-requested ride types to compatible driver vehicle types
+      const requestedType = (rideData.rideType || rideData.vehicleType || rideData.vehicle_type || "economy").toLowerCase();
+      const getCompatibleVehicleTypes = (rideType: string): string[] => {
+        switch (rideType) {
+          case 'economy':
+          case 'standard':
+          case 'comfort':
+          case 'saloon':
+            return ['saloon', 'economy', 'standard', 'comfort'];
+          case 'people_carrier':
+          case 'people carrier':
+            return ['people_carrier', 'minibus'];
+          case 'minibus':
+            return ['minibus'];
+          default:
+            // Fallback: accept any vehicle type for unknown ride types
+            return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'minibus'];
+        }
+      };
+      const compatibleTypes = getCompatibleVehicleTypes(requestedType);
+      console.log(`🚗 Requested vehicle type: "${requestedType}" → compatible: [${compatibleTypes.join(', ')}]`);
 
       // 3. Build Min-Heap combining DB drivers + socket-connected drivers
       const heap = new MinHeap();
@@ -299,12 +368,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
             continue;
           }
 
+          // Vehicle type filtering
+          const driverVehicle = (driver.vehicle_type || 'saloon').toLowerCase();
+          if (!compatibleTypes.includes(driverVehicle)) {
+            console.log(`   ⏭️ Skipping driver ${driver.id} — vehicle "${driverVehicle}" not compatible with "${requestedType}"`);
+            continue;
+          }
+
           if (driver.current_latitude != null && driver.current_longitude != null) {
             const dist = haversineDistanceMiles(
               pickupLat, pickupLng,
               driver.current_latitude, driver.current_longitude
             );
-            console.log(`   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (has DB location)`);
+            console.log(`   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle})`);
 
             if (dist <= RADIUS_MILES) {
               heap.push({ driverId: driver.id, distance: dist, socketId: driverSocketId });
@@ -320,13 +396,33 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
       // Second pass: Add any socket-connected drivers not yet in heap
       // (they may not have location in DB yet but are actively connected)
+      // For these drivers, we still need vehicle type checking
       for (const [driverId, socketId] of connectedDrivers) {
         if (!addedDriverIds.has(driverId)) {
-          // Assign a default distance (e.g., 1 mile) since we don't know their exact location
-          // This ensures they still get ride offers
-          console.log(`   🔄 Adding socket-connected driver ${driverId} without DB location (default 1 mi distance)`);
-          heap.push({ driverId, distance: 1.0, socketId });
-          addedDriverIds.add(driverId);
+          // Check vehicle type from DB for this driver
+          let vehicleOk = true;
+          try {
+            const { data: driverRow } = await supabase
+              .from("drivers")
+              .select("vehicle_type")
+              .eq("id", driverId)
+              .single();
+            const driverVehicle = (driverRow?.vehicle_type || 'saloon').toLowerCase();
+            if (!compatibleTypes.includes(driverVehicle)) {
+              console.log(`   ⏭️ Skipping socket driver ${driverId} — vehicle "${driverVehicle}" not compatible`);
+              vehicleOk = false;
+            }
+          } catch (_) {
+            // If we can't look up vehicle type, allow as fallback
+          }
+          
+          if (vehicleOk) {
+            // Assign a default distance (e.g., 1 mile) since we don't know their exact location
+            // This ensures they still get ride offers
+            console.log(`   🔄 Adding socket-connected driver ${driverId} without DB location (default 1 mi distance)`);
+            heap.push({ driverId, distance: 1.0, socketId });
+            addedDriverIds.add(driverId);
+          }
         }
       }
 
@@ -376,11 +472,29 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.log(`🚗 Driver ${driverId} connected (socket ${socket.id})`);
       console.log(`📊 Total connected drivers: ${connectedDrivers.size}`);
 
+      // Re-link driver's socket to any active rides (handles reconnection after Google Maps)
+      for (const [rideId, rideInfo] of activeRides.entries()) {
+        if (rideInfo.driverSocketId && rideInfo.driverSocketId !== socket.id) {
+          // Check if this driver owns this ride via DB
+          try {
+            const { data: rideRow } = await supabase
+              .from("rides")
+              .select("driver_id, status")
+              .eq("id", rideId)
+              .single();
+            if (rideRow && rideRow.driver_id === driverId && ["accepted", "arrived", "in_progress"].includes(rideRow.status)) {
+              rideInfo.driverSocketId = socket.id;
+              console.log(`🔗 Re-linked driver ${driverId} socket to active ride ${rideId}`);
+            }
+          } catch (_) { /* non-critical */ }
+        }
+      }
+
       try {
-        // Set driver as online AND available when they connect
+        // Set driver as online AND available when they connect, and update last seen
         const { error } = await supabase
           .from("drivers")
-          .update({ is_online: true, is_available: true })
+          .update({ is_online: true, is_available: true, last_seen_at: new Date().toISOString() })
           .eq("id", driverId);
         if (error) {
           console.error("❌ Error updating driver status on connect:", error);
@@ -405,6 +519,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           .update({
             current_latitude: location.latitude,
             current_longitude: location.longitude,
+            last_seen_at: new Date().toISOString()
           })
           .eq("id", location.driverId);
 
@@ -422,7 +537,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           .eq("driver_id", location.driverId);
 
         for (const ride of (activeRidesData || [])) {
-          if (["accepted", "arriving", "in_progress"].includes(ride.status)) {
+          if (["accepted", "arriving", "arrived", "in_progress"].includes(ride.status)) {
             io.to(`rider:${ride.rider_id}`).emit("driver:location", location);
           }
         }
@@ -449,6 +564,67 @@ export function setupSocketIO(httpServer: HTTPServer) {
         if (dispState.timer) clearTimeout(dispState.timer);
         console.log(`⏭️ Driver ${data.driverId} declined — dispatching to next nearest driver`);
         dispatchToNextDriver(data.rideId);
+      }
+    });
+
+    socket.on("ride:driver_cancel_at_pickup", async (data: { rideId: string, driverId?: string }) => {
+      console.log('⚠️ Driver cancelled at pickup for ride:', data.rideId);
+      
+      try {
+        const { data: ride } = await supabase
+          .from("rides")
+          .select("estimated_price, driver_id")
+          .eq("id", data.rideId)
+          .single();
+
+        if (ride) {
+          const fare = ride.estimated_price || 0;
+          const penaltyAmount = fare * 0.5;
+
+          if (penaltyAmount > 0 && (data.driverId || ride.driver_id)) {
+            const actualDriverId = data.driverId || ride.driver_id;
+            // Record 50% penalty deduction
+            await supabase.from("driver_deductions").insert({
+              driver_id: actualDriverId,
+              amount: penaltyAmount,
+              type: "cancel_at_pickup_penalty",
+              reason: `Cancelled at pickup location for ride ${data.rideId}`,
+            });
+            console.log(`💸 Driver ${actualDriverId} charged 50% penalty (£${penaltyAmount}) for cancelling at pickup`);
+          }
+
+          // Update ride status to cancelled
+          await supabase
+            .from("rides")
+            .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+            .eq("id", data.rideId);
+
+          // Notify rider — look up rider_id from ride record
+          const { data: rideForNotify } = await supabase
+            .from("rides")
+            .select("rider_id")
+            .eq("id", data.rideId)
+            .single();
+          if (rideForNotify?.rider_id) {
+            io.to(`rider:${rideForNotify.rider_id}`).emit("ride:update", {
+              rideId: data.rideId,
+              status: "cancelled",
+            });
+          }
+
+          // Broadcast cancellation to all drivers so they can clear UI
+          io.emit("ride:update", { rideId: data.rideId, status: "cancelled" });
+
+          // Reassign ride to next nearest driver
+          try {
+            const { reassignRide } = await import("../services/dispatch");
+            await reassignRide(data.rideId);
+          } catch (e) {
+            console.error("Failed to reassign ride after driver cancellation", e);
+          }
+        }
+      } catch (err) {
+        console.error("Error processing driver cancel at pickup:", err);
       }
     });
 
@@ -714,7 +890,117 @@ export function setupSocketIO(httpServer: HTTPServer) {
           else if (update.status === "cancelled") {
             updateData.cancelled_at = new Date().toISOString();
 
-            // (arrived timer clear logic removed as it's now client-side)
+            // ── Server-side cancellation fee processing ──────────────────────
+            // If driver had already arrived at pickup, charge the rider the full fare
+            try {
+              const { data: cancelledRide } = await supabase
+                .from("rides")
+                .select("rider_id, driver_id, status, estimated_price, final_price, payment_method")
+                .eq("id", update.rideId)
+                .single();
+
+              if (cancelledRide && ["arrived", "at_pickup"].includes(cancelledRide.status)) {
+                const fareAmount = cancelledRide.final_price || cancelledRide.estimated_price || 0;
+                const riderId = cancelledRide.rider_id;
+
+                if (riderId && fareAmount > 0) {
+                  console.log(`💸 Rider ${riderId} cancelling after driver arrived — charging £${fareAmount} cancellation fee`);
+
+                  // 1. Try Stripe card charge if payment method is card
+                  let chargedViaCard = false;
+                  if (cancelledRide.payment_method === "card") {
+                    try {
+                      const { data: riderUser } = await supabase
+                        .from("users")
+                        .select("stripe_customer_id")
+                        .eq("id", riderId)
+                        .single();
+
+                      if (riderUser?.stripe_customer_id) {
+                        const { chargeSavedCard } = await import("./services/stripe");
+                        const chargeResult = await chargeSavedCard(
+                          riderUser.stripe_customer_id,
+                          Math.round(fareAmount * 100),
+                          `Cancellation fee for ride ${update.rideId}`
+                        );
+                        if (chargeResult.success) {
+                          chargedViaCard = true;
+                          updateData.payment_status = "cancellation_fee_card_charged";
+                          console.log(`✅ Cancellation fee £${fareAmount} charged to card for rider ${riderId}`);
+                        }
+                      }
+                    } catch (cardErr) {
+                      console.warn(`⚠️ Card charge failed for cancellation fee:`, cardErr);
+                    }
+                  }
+
+                  // 2. Fallback: deduct from wallet
+                  if (!chargedViaCard) {
+                    try {
+                      const { data: userRow } = await supabase
+                        .from("users")
+                        .select("wallet_balance")
+                        .eq("id", riderId)
+                        .single();
+
+                      const currentBalance = userRow?.wallet_balance || 0;
+                      const newBalance = Math.max(0, currentBalance - fareAmount);
+
+                      await supabase
+                        .from("users")
+                        .update({ wallet_balance: newBalance })
+                        .eq("id", riderId);
+
+                      updateData.payment_status = "cancellation_fee_wallet_charged";
+                      console.log(`💰 Cancellation fee £${fareAmount} deducted from wallet (${currentBalance} → ${newBalance})`);
+                    } catch (walletErr) {
+                      console.error("❌ Failed to deduct cancellation fee from wallet:", walletErr);
+                    }
+                  }
+
+                  // 3. Record wallet transaction for history
+                  try {
+                    await supabase
+                      .from("wallet_transactions")
+                      .insert({
+                        user_id: riderId,
+                        ride_id: update.rideId,
+                        amount: fareAmount,
+                        type: "debit",
+                        description: `Cancellation fee — driver already arrived at pickup`,
+                      });
+                    console.log(`✅ Wallet transaction recorded for cancellation fee`);
+                  } catch (txnErr) {
+                    console.warn("⚠️ Failed to insert cancellation fee wallet transaction:", txnErr);
+                  }
+
+                  // 4. Credit driver earnings with the cancellation fee
+                  if (cancelledRide.driver_id) {
+                    try {
+                      const { data: driverData } = await supabase
+                        .from("drivers")
+                        .select("total_earnings")
+                        .eq("id", cancelledRide.driver_id)
+                        .single();
+
+                      const currentEarnings = driverData?.total_earnings || 0;
+                      const newEarnings = Number((currentEarnings + fareAmount).toFixed(2));
+
+                      await supabase
+                        .from("drivers")
+                        .update({ total_earnings: newEarnings })
+                        .eq("id", cancelledRide.driver_id);
+
+                      console.log(`✅ Driver ${cancelledRide.driver_id} earnings updated for cancellation fee: +£${fareAmount}`);
+                    } catch (earningsErr) {
+                      console.error("❌ Failed to update driver earnings on cancellation:", earningsErr);
+                    }
+                  }
+                }
+              }
+            } catch (cancelFeeErr) {
+              console.error("❌ Error processing cancellation fee:", cancelFeeErr);
+            }
           }
 
           console.log(`📝 Updating ride ${update.rideId} in Supabase with:`, JSON.stringify(updateData));
@@ -874,6 +1160,29 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
                 // ✅ Also update the ride to mark it as fully paid/completed 
                 await supabase.from("rides").update({ payment_status: "paid" }).eq("id", update.rideId);
+              }
+
+              // ✅ Insert wallet_transaction so the rider can see the fare in their transaction history
+              if (rideData.rider_id && fareAmount > 0) {
+                try {
+                  const payMethod = rideData.payment_method === "card" ? "card" : "cash";
+                  const { error: walletTxnErr } = await supabase
+                    .from("wallet_transactions")
+                    .insert({
+                      user_id: rideData.rider_id,
+                      ride_id: update.rideId,
+                      amount: fareAmount,
+                      type: "debit",
+                      description: `Ride fare — paid by ${payMethod}`,
+                    });
+                  if (walletTxnErr) {
+                    console.warn("⚠️ Failed to insert ride fare wallet_transaction:", walletTxnErr.message);
+                  } else {
+                    console.log(`✅ Wallet transaction recorded: £${fareAmount} debit for rider ${rideData.rider_id}`);
+                  }
+                } catch (txnErr) {
+                  console.warn("⚠️ Exception inserting wallet_transaction for ride fare:", txnErr);
+                }
               }
             }
           } catch (error) {
@@ -1376,15 +1685,52 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
       for (const [driverId, socketId] of connectedDrivers.entries()) {
         if (socketId === socket.id) {
-          connectedDrivers.delete(driverId);
-          console.log(`📊 Driver ${driverId} disconnected. Remaining connected drivers: ${connectedDrivers.size}`);
-          try {
-            await supabase
-              .from("drivers")
-              .update({ is_online: false, is_available: false })
-              .eq("id", driverId);
-          } catch (error) {
-            console.error("Error updating driver status on disconnect:", error);
+          // Check if driver has an active ride — if so, give a grace period
+          // to allow reconnection after switching to Google Maps
+          let hasActiveRide = false;
+          for (const [, rideInfo] of activeRides.entries()) {
+            if (rideInfo.driverSocketId === socket.id) {
+              hasActiveRide = true;
+              break;
+            }
+          }
+
+          if (hasActiveRide) {
+            console.log(`⏳ Driver ${driverId} disconnected during active ride — waiting 30s before marking offline`);
+            // Grace period: wait 30 seconds before marking offline
+            setTimeout(async () => {
+              // Check if driver reconnected with a NEW socket in the meantime
+              const currentSocketId = connectedDrivers.get(driverId);
+              if (currentSocketId && currentSocketId !== socket.id) {
+                console.log(`✅ Driver ${driverId} reconnected with new socket ${currentSocketId} — keeping online`);
+                return; // Driver reconnected, don't mark offline
+              }
+              // Driver did NOT reconnect — mark offline
+              if (!currentSocketId || currentSocketId === socket.id) {
+                connectedDrivers.delete(driverId);
+                console.log(`📊 Driver ${driverId} did not reconnect within 30s — marking offline. Remaining: ${connectedDrivers.size}`);
+                try {
+                  await supabase
+                    .from("drivers")
+                    .update({ is_online: false, is_available: false })
+                    .eq("id", driverId);
+                } catch (error) {
+                  console.error("Error updating driver status on disconnect:", error);
+                }
+              }
+            }, 30000);
+          } else {
+            // No active ride — mark offline immediately
+            connectedDrivers.delete(driverId);
+            console.log(`📊 Driver ${driverId} disconnected (no active ride). Remaining connected drivers: ${connectedDrivers.size}`);
+            try {
+              await supabase
+                .from("drivers")
+                .update({ is_online: false, is_available: false })
+                .eq("id", driverId);
+            } catch (error) {
+              console.error("Error updating driver status on disconnect:", error);
+            }
           }
           break;
         }
