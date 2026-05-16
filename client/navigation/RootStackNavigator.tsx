@@ -136,6 +136,7 @@ import TaxInvoicesScreen from "@/screens/driver/TaxInvoicesScreen";
 import TaxSummariesScreen from "@/screens/driver/TaxSummariesScreen";
 import AboutScreen from "@/screens/legal/AboutScreen";
 import AirportBookingScreen from "@/screens/rider/AirportBookingScreen";
+import DriverProfileScreen from "@/screens/driver/DriverProfileScreen";
 
 export type RootStackParamList = {
   Welcome: undefined;
@@ -152,6 +153,7 @@ export type RootStackParamList = {
   Settings: undefined;
   Wallet: undefined;
   RiderProfile: undefined;
+  DriverProfile: undefined;
   RiderNotifications: undefined;
   RiderSafety: undefined;
   RiderSavedPlaces: undefined;
@@ -255,6 +257,14 @@ export default function RootStackNavigator() {
           <Stack.Screen
             name="RiderProfile"
             component={RiderProfileScreen}
+            options={{
+              headerShown: false,
+              presentation: "card",
+            }}
+          />
+          <Stack.Screen
+            name="DriverProfile"
+            component={DriverProfileScreen}
             options={{
               headerShown: false,
               presentation: "card",

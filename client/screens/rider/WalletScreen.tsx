@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { StyleSheet, View, Text, FlatList, ActivityIndicator, Pressable } from "react-native";
+import React, { useState, useCallback } from "react";
+import { StyleSheet, View, Text, FlatList, ActivityIndicator, Pressable, RefreshControl } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { ThemedText } from "@/components/ThemedText";
 import { useAuth } from "@/context/AuthContext";
@@ -12,12 +13,16 @@ export default function WalletScreen({ navigation }: any) {
   const { user, updateProfile } = useAuth();
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    if (user?.id) {
-      loadTransactions();
-    }
-  }, [user?.id]);
+  // Refresh transactions every time the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        loadTransactions();
+      }
+    }, [user?.id])
+  );
 
   const loadTransactions = async () => {
     try {
@@ -43,6 +48,12 @@ export default function WalletScreen({ navigation }: any) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadTransactions();
+    setRefreshing(false);
   };
 
   const renderTransaction = ({ item }: { item: WalletTransaction }) => {
@@ -109,6 +120,14 @@ export default function WalletScreen({ navigation }: any) {
             renderItem={renderTransaction}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={UTOColors.primary}
+                colors={[UTOColors.primary]}
+              />
+            }
           />
         )}
       </View>

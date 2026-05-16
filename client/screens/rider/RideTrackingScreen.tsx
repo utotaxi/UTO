@@ -7718,7 +7718,7 @@ export default function RideTrackingScreen({ navigation }: any) {
   };
 
   const handleCancel = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); } catch (_) {}
     const driverHasArrived = currentStatus === "arrived" || currentStatus === "at_pickup";
     const fareAmount = activeRide?.estimatedPrice || activeRide?.farePrice || 0;
 
@@ -7733,7 +7733,12 @@ export default function RideTrackingScreen({ navigation }: any) {
             text: "Cancel & Accept Charge", 
             style: "destructive",
             onPress: () => {
-              if (activeRide) cancelRide(activeRide.id, true);
+              try {
+                if (activeRide) cancelRide(activeRide.id, true);
+              } catch (e) {
+                console.error('Cancel ride error:', e);
+                navigateHome();
+              }
             }
           }
         ]
@@ -7749,7 +7754,12 @@ export default function RideTrackingScreen({ navigation }: any) {
             text: "Yes, Cancel", 
             style: "destructive",
             onPress: () => {
-              if (activeRide) cancelRide(activeRide.id, false);
+              try {
+                if (activeRide) cancelRide(activeRide.id, false);
+              } catch (e) {
+                console.error('Cancel ride error:', e);
+                navigateHome();
+              }
             }
           }
         ]

@@ -176,6 +176,8 @@ import DriverHomeScreen from "@/screens/driver/DriverHomeScreen";
 import EarningsScreen from "@/screens/driver/EarningsScreen";
 import DriverAccountScreen from "@/screens/driver/DriverAccountScreen";
 import DriverMarketplaceScreen from "@/screens/driver/DriverMarketplaceScreen";
+import DriverUpcomingBookingsScreen from "@/screens/driver/DriverUpcomingBookingsScreen";
+import DriverPayoutMethodsScreen from "@/screens/driver/DriverPayoutMethodsScreen";
 import DriverDocumentsScreen from "@/screens/driver/DriverDocumentsScreen";
 import DriverSafetyScreen from "@/screens/driver/DriverSafetyScreen";
 import DriverNotificationsScreen from "@/screens/driver/DriverNotificationsScreen";
@@ -268,6 +270,16 @@ function AccountStackNavigator({ navigation }: any) {
       <AccountStack.Screen
         name="Marketplace"
         component={DriverMarketplaceScreen}
+        options={{ headerShown: false }}
+      />
+      <AccountStack.Screen
+        name="UpcomingBookings"
+        component={DriverUpcomingBookingsScreen}
+        options={{ headerShown: false }}
+      />
+      <AccountStack.Screen
+        name="PayoutMethods"
+        component={DriverPayoutMethodsScreen}
         options={{ headerShown: false }}
       />
       <AccountStack.Screen

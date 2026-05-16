@@ -622,8 +622,6 @@ export default function EarningsScreen() {
                   {[
                     { icon: "person" as const, label: "Rider", value: selectedTrip.riderName },
                     { icon: "straighten" as const, label: "Distance", value: `${selectedTrip.distanceMiles} mi` },
-                    { icon: "schedule" as const, label: "Duration", value: `${selectedTrip.durationMinutes} min` },
-                    { icon: "star" as const, label: "Rating", value: selectedTrip.rating ? `${selectedTrip.rating} ★` : "N/A" },
                   ].map((item) => (
                     <View
                       key={item.label}

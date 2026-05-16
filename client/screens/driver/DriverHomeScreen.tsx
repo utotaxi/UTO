@@ -1,6 +1,6 @@
 
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -13,6 +13,8 @@ import {
   Modal,
   TextInput,
   Alert,
+  AppState,
+  AppStateStatus,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -36,7 +38,7 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { RatingModal } from "@/components/RatingModal";
 import { UTOColors, Spacing, BorderRadius, formatPrice } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
-import { sendDriverLocation } from "@/lib/socket";
+import { sendDriverLocation, getSocket, connectAsDriver } from "@/lib/socket";
 
 const darkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
@@ -95,8 +97,10 @@ export default function DriverHomeScreen({ navigation }: any) {
   const [routeDistanceText, setRouteDistanceText] = useState<string | null>(null);
   const [routeDurationText, setRouteDurationText] = useState<string | null>(null);
   const [collectedAmountStr, setCollectedAmountStr] = useState<string>("");
+  const [showOtherAmount, setShowOtherAmount] = useState(false);
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
   const [paidWaitingElapsedSec, setPaidWaitingElapsedSec] = useState(0);
+  const [acceptedElapsedSec, setAcceptedElapsedSec] = useState(0);
 
   // Early completion modal state
   const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
@@ -125,10 +129,44 @@ export default function DriverHomeScreen({ navigation }: any) {
     }
   }, [completedRidePayment]);
 
-  const activeRideRef = React.useRef(activeRideRequest);
+  const activeRideRef = useRef(activeRideRequest);
   useEffect(() => {
     activeRideRef.current = activeRideRequest;
   }, [activeRideRequest]);
+
+  // ─── AppState: reconnect socket when app comes back to foreground ──────────
+  // This ensures the driver stays online even after switching to Google Maps.
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        const driverId = driverProfile?.id || user?.id;
+        if (!driverId) return;
+        try {
+          const sock = getSocket();
+          if (!sock.connected) {
+            sock.connect();
+          }
+          // Re-register driver on socket server to refresh online status
+          connectAsDriver(driverId);
+          // Immediately send current location to update last_seen_at
+          if (location) {
+            sendDriverLocation({
+              driverId,
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              heading: location.coords.heading || undefined,
+              speed: location.coords.speed || undefined,
+            });
+          }
+          console.log('📱 App foregrounded — socket reconnected and driver re-registered');
+        } catch (err) {
+          console.warn('⚠️ AppState reconnect error:', err);
+        }
+      }
+    };
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [driverProfile?.id, user?.id, location]);
 
   useEffect(() => {
     if (!activeRideRequest || !activeRideRequest.pickupLatitude || !activeRideRequest.dropoffLatitude) {
@@ -279,22 +317,39 @@ export default function DriverHomeScreen({ navigation }: any) {
   }, [rideState]);
 
   // Track elapsed waiting time when at pickup using a persistent ref
-  const arrivedAtRef = React.useRef<number | null>(null);
+  const arrivedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if (rideState !== "at_pickup") {
       setWaitingElapsedSec(0);
       arrivedAtRef.current = null;
       return;
     }
-    // Only set the start time ONCE when entering at_pickup
     if (!arrivedAtRef.current) {
       arrivedAtRef.current = Date.now();
     }
     const start = arrivedAtRef.current;
-    // Immediately compute elapsed so there's no 1s gap
     setWaitingElapsedSec(Math.floor((Date.now() - start) / 1000));
     const interval = setInterval(() => {
       setWaitingElapsedSec(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [rideState]);
+
+  // ─── Track elapsed time since driver accepted (for 1-min cancel penalty) ───
+  const acceptedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (rideState !== "accepted") {
+      setAcceptedElapsedSec(0);
+      acceptedAtRef.current = null;
+      return;
+    }
+    if (!acceptedAtRef.current) {
+      acceptedAtRef.current = Date.now();
+    }
+    const start = acceptedAtRef.current;
+    setAcceptedElapsedSec(Math.floor((Date.now() - start) / 1000));
+    const interval = setInterval(() => {
+      setAcceptedElapsedSec(Math.floor((Date.now() - start) / 1000));
     }, 1000);
     return () => clearInterval(interval);
   }, [rideState]);
@@ -580,22 +635,36 @@ export default function DriverHomeScreen({ navigation }: any) {
 
             <View style={[styles.acceptedDivider, { backgroundColor: theme.border }]} />
 
-            <View style={styles.acceptedRider}>
-              <View style={[styles.acceptedAvatar, { backgroundColor: theme.backgroundSecondary }]}>
+            <View style={[styles.acceptedRider, { backgroundColor: theme.backgroundSecondary, borderRadius: 12, padding: 12 }]}>
+              <View style={[styles.acceptedAvatar, { backgroundColor: theme.backgroundDefault }]}>
                 <Feather name="user" size={18} color={theme.textSecondary} />
               </View>
               <View style={{ flex: 1 }}>
                 <ThemedText style={styles.acceptedRiderName}>{activeRideRequest.riderName}</ThemedText>
-                <ThemedText style={[styles.acceptedPickupLabel, { color: theme.textSecondary }]}>
-                  {routeDistanceText ? `${routeDistanceText} away` : `${activeRideRequest.pickupDistance} miles away`}
-                </ThemedText>
+                {activeRideRequest.riderPhone ? (
+                  <ThemedText style={[styles.acceptedPickupLabel, { color: theme.textSecondary }]}>
+                    📞 {activeRideRequest.riderPhone}
+                  </ThemedText>
+                ) : (
+                  <ThemedText style={[styles.acceptedPickupLabel, { color: theme.textSecondary }]}>
+                    {routeDistanceText ? `${routeDistanceText} away` : `${activeRideRequest.pickupDistance} miles away`}
+                  </ThemedText>
+                )}
               </View>
-              <Pressable
-                onPress={handleOpenNavigation}
-                style={[styles.circleBtn, { backgroundColor: theme.backgroundSecondary }]}
-              >
-                <MaterialIcons name="navigation" size={20} color={UTOColors.driver.primary} />
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable
+                  onPress={() => activeRideRequest?.riderPhone ? Linking.openURL(`tel:${activeRideRequest.riderPhone}`) : Alert.alert('No Phone', 'Rider phone not available.')}
+                  style={[styles.circleBtn, { backgroundColor: UTOColors.success + '20' }]}
+                >
+                  <Feather name="phone" size={18} color={UTOColors.success} />
+                </Pressable>
+                <Pressable
+                  onPress={handleOpenNavigation}
+                  style={[styles.circleBtn, { backgroundColor: theme.backgroundDefault }]}
+                >
+                  <MaterialIcons name="navigation" size={20} color={UTOColors.driver.primary} />
+                </Pressable>
+              </View>
             </View>
 
             <View style={styles.acceptedRoute}>
@@ -622,11 +691,57 @@ export default function DriverHomeScreen({ navigation }: any) {
               <ThemedText style={styles.arrivedBtnText}>I've Arrived at Pickup</ThemedText>
             </Pressable>
 
+            {/* 1-min cancel penalty warning badge */}
+            {acceptedElapsedSec >= 60 && (
+              <View style={{ backgroundColor: UTOColors.error + '15', borderRadius: 8, padding: 10, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialIcons name="warning" size={16} color={UTOColors.error} />
+                <ThemedText style={{ color: UTOColors.error, fontSize: 12, flex: 1, fontWeight: '600' }}>
+                  Cancelling now will incur a 50% fare penalty (ASAP ride — over 1 min since acceptance)
+                </ThemedText>
+              </View>
+            )}
+
             <Pressable
-              onPress={handleDecline}
-              style={[styles.cancelTripBtn, { backgroundColor: UTOColors.error + "15" }]}
+              onPress={() => {
+                const fare = activeRideRequest?.estimatedFare || 0;
+                const over1Min = acceptedElapsedSec >= 60;
+                if (over1Min && fare > 0) {
+                  Alert.alert(
+                    'Cancel with Penalty',
+                    `You accepted this ride over 1 minute ago. A 50% penalty of £${(fare * 0.5).toFixed(2)} will be deducted from your earnings.`,
+                    [
+                      { text: 'Keep Ride', style: 'cancel' },
+                      {
+                        text: 'Cancel & Accept Penalty',
+                        style: 'destructive',
+                        onPress: () => { declineRide(true); setOtpValue(''); },
+                      },
+                    ]
+                  );
+                } else {
+                  Alert.alert(
+                    'Cancel Ride',
+                    'Are you sure you want to cancel this ride? No penalty will be charged.',
+                    [
+                      { text: 'Keep Ride', style: 'cancel' },
+                      {
+                        text: 'Cancel Ride',
+                        style: 'destructive',
+                        onPress: () => { declineRide(); setOtpValue(''); },
+                      },
+                    ]
+                  );
+                }
+              }}
+              style={[styles.cancelTripBtn, {
+                backgroundColor: acceptedElapsedSec >= 60 ? UTOColors.error + '20' : UTOColors.error + '15',
+                borderWidth: acceptedElapsedSec >= 60 ? 1 : 0,
+                borderColor: UTOColors.error + '40',
+              }]}
             >
-              <ThemedText style={[styles.cancelTripText, { color: UTOColors.error }]}>Cancel Trip</ThemedText>
+              <ThemedText style={[styles.cancelTripText, { color: UTOColors.error }]}>
+                {acceptedElapsedSec >= 60 ? '⚠️ Cancel Trip (50% Fee Applies)' : 'Cancel Trip'}
+              </ThemedText>
             </Pressable>
           </View>
         </Animated.View>
@@ -815,7 +930,21 @@ export default function DriverHomeScreen({ navigation }: any) {
             {/* Cancel Trip Button */}
             <Pressable
               onPress={() => {
-                declineRide();
+                Alert.alert(
+                  "Cancel Ride Penalty",
+                  "Canceling a ride after arriving at the pickup location will incur a 50% penalty of the estimated fare. Are you sure you want to cancel?",
+                  [
+                    { text: "No, Keep Ride", style: "cancel" },
+                    {
+                      text: "Yes, Cancel Ride",
+                      style: "destructive",
+                      onPress: () => {
+                        declineRide(true);
+                        setOtpValue("");
+                      }
+                    }
+                  ]
+                );
               }}
               style={[styles.cancelTripBtn, { backgroundColor: UTOColors.error + '10', marginTop: 8 }]}
             >
@@ -999,24 +1128,104 @@ export default function DriverHomeScreen({ navigation }: any) {
             <View style={styles.paymentAmountCard}>
               <Text style={styles.paymentAmountLabel}>AMOUNT TO COLLECT</Text>
               
-              {completedRidePayment?.paymentMethod === 'cash' ? (
-                <View style={{ flexDirection: 'column', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Text style={styles.paymentAmountPrice}>£</Text>
-                    <TextInput
-                      style={[styles.paymentAmountPrice, { minWidth: 100, borderBottomWidth: 1, borderBottomColor: '#333' }]}
-                      keyboardType="decimal-pad"
-                      value={collectedAmountStr}
-                      onChangeText={setCollectedAmountStr}
-                    />
-                  </View>
-                  {Number(collectedAmountStr) > (completedRidePayment.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment.fareAmount || 0)) && (
-                    <Text style={{ color: '#10B981', marginTop: 12, fontSize: 16, fontWeight: '500' }}>
-                      £{(Number(collectedAmountStr) - (completedRidePayment.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment.fareAmount || 0))).toFixed(2)} will be added to rider's wallet
+              {completedRidePayment?.paymentMethod === 'cash' ? (() => {
+                const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
+                const collected = Number(collectedAmountStr) || 0;
+                const change = collected - expected;
+                // Generate smart quick-select amounts
+                const exactAmount = expected;
+                const quickAmounts = [exactAmount];
+                // Add common round-up values
+                [5, 10, 15, 20, 50].forEach(v => {
+                  if (v > exactAmount && !quickAmounts.includes(v)) quickAmounts.push(v);
+                });
+                // Also add nearest £5 ceiling
+                const nearest5 = Math.ceil(exactAmount / 5) * 5;
+                if (nearest5 > exactAmount && !quickAmounts.includes(nearest5)) {
+                  quickAmounts.push(nearest5);
+                  quickAmounts.sort((a, b) => a - b);
+                }
+                // Keep max 5 quick amounts
+                const displayAmounts = quickAmounts.slice(0, 5);
+
+                return (
+                  <View style={{ flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                    {/* Show the fare amount */}
+                    <Text style={[styles.paymentAmountPrice, { marginBottom: 16 }]}>
+                      £{expected.toFixed(2)}
                     </Text>
-                  )}
-                </View>
-              ) : (
+
+                    {/* Quick-select denomination buttons */}
+                    <Text style={{ color: '#9CA3AF', fontSize: 12, fontWeight: '600', letterSpacing: 1, marginBottom: 10 }}>CASH RECEIVED</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
+                      {displayAmounts.map(amt => (
+                        <Pressable
+                          key={amt}
+                          onPress={() => { setCollectedAmountStr(amt.toString()); setShowOtherAmount(false); }}
+                          style={{
+                            paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+                            backgroundColor: collected === amt ? UTOColors.driver.primary : '#2A2A2A',
+                            borderWidth: 1.5,
+                            borderColor: collected === amt ? UTOColors.driver.primary : '#333',
+                            minWidth: 60, alignItems: 'center',
+                          }}
+                        >
+                          <Text style={{
+                            fontSize: 16, fontWeight: '700',
+                            color: collected === amt ? '#000' : '#FFF',
+                          }}>
+                            {amt === exactAmount ? `£${amt.toFixed(2)}` : `£${amt}`}
+                          </Text>
+                          {amt === exactAmount && (
+                            <Text style={{ fontSize: 10, color: collected === amt ? '#000' : '#9CA3AF', marginTop: 2 }}>Exact</Text>
+                          )}
+                        </Pressable>
+                      ))}
+                      {/* Other button */}
+                      <Pressable
+                        onPress={() => { setShowOtherAmount(true); setCollectedAmountStr(''); }}
+                        style={{
+                          paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+                          backgroundColor: showOtherAmount ? UTOColors.driver.primary : '#2A2A2A',
+                          borderWidth: 1.5,
+                          borderColor: showOtherAmount ? UTOColors.driver.primary : '#333',
+                          minWidth: 60, alignItems: 'center',
+                        }}
+                      >
+                        <Text style={{
+                          fontSize: 16, fontWeight: '700',
+                          color: showOtherAmount ? '#000' : '#FFF',
+                        }}>Other</Text>
+                      </Pressable>
+                    </View>
+
+                    {/* Other amount text input */}
+                    {showOtherAmount && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 4 }}>
+                        <Text style={{ color: '#FFF', fontSize: 28, fontWeight: '700' }}>£</Text>
+                        <TextInput
+                          style={{ color: '#FFF', fontSize: 28, fontWeight: '700', minWidth: 80, borderBottomWidth: 1.5, borderBottomColor: UTOColors.driver.primary, paddingHorizontal: 8, paddingVertical: 4, textAlign: 'center' }}
+                          keyboardType="decimal-pad"
+                          placeholder="0.00"
+                          placeholderTextColor="#555"
+                          value={collectedAmountStr}
+                          onChangeText={setCollectedAmountStr}
+                          autoFocus
+                        />
+                      </View>
+                    )}
+
+                    {/* Change calculation message */}
+                    {change > 0 && (
+                      <View style={{ backgroundColor: '#10B981' + '20', borderRadius: 10, padding: 12, marginTop: 10, width: '100%', alignItems: 'center' }}>
+                        <Text style={{ color: '#10B981', fontSize: 18, fontWeight: '700' }}>
+                          Give £{change.toFixed(2)} change to passenger
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })() : (
                 <Text style={styles.paymentAmountPrice}>
                   {formatPrice(completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0))}
                 </Text>
@@ -1185,7 +1394,6 @@ export default function DriverHomeScreen({ navigation }: any) {
                 'Passenger requested early drop-off',
                 'Wrong destination',
                 'Emergency situation',
-                'Rider no-show during trip',
                 'Other',
               ].map((reason) => (
                 <Pressable

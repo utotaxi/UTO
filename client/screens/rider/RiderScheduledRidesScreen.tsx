@@ -176,6 +176,13 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
 
   useEffect(() => { fetchRides(); }, [fetchRides]);
 
+  // Auto-retry on error after 5 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => fetchRides(), 5000);
+    return () => clearTimeout(timer);
+  }, [error, fetchRides]);
+
   const handleCancel = (ride: ScheduledRide) => {
     const now = Date.now();
     const pickupMs = new Date(ride.pickup_at).getTime();
@@ -233,7 +240,7 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
       </View>
       <Text style={cs.emptyTitle}>No Scheduled Rides</Text>
       <Text style={cs.emptySub}>
-        You haven't scheduled any future rides yet. Tap the "Later" option on the home screen to plan a ride.
+        You haven't scheduled any future rides yet. Tap "Reserve" under Services to plan a ride.
       </Text>
       <Pressable
         style={cs.emptyBtn}
@@ -264,9 +271,8 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
         <View style={cs.centerBox}>
           <MaterialIcons name="error-outline" size={48} color="#EF4444" />
           <Text style={cs.errorText}>{error}</Text>
-          <Pressable style={cs.retryBtn} onPress={() => fetchRides()}>
-            <Text style={cs.retryText}>Retry</Text>
-          </Pressable>
+          <Text style={cs.loadingText}>Retrying…</Text>
+          <ActivityIndicator size="small" color={UTO_YELLOW} style={{ marginTop: 8 }} />
         </View>
       ) : (
         <FlatList
@@ -317,8 +323,7 @@ const cs = StyleSheet.create({
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 },
   loadingText: { color: '#6B7280', fontSize: 14, marginTop: 8 },
   errorText: { color: '#EF4444', fontSize: 15, textAlign: 'center' },
-  retryBtn: { marginTop: 12, backgroundColor: UTO_YELLOW, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 10 },
-  retryText: { color: '#000', fontWeight: '700', fontSize: 14 },
+
 
   // List
   listContent: { padding: 16 },

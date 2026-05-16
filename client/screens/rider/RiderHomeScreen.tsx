@@ -6,8 +6,6 @@ import {
   ScrollView,
   Dimensions,
   ActivityIndicator,
-  Modal,
-  TouchableOpacity,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -237,9 +235,6 @@ export default function RiderHomeScreen({ navigation }: any) {
   }, [nearbyDrivers.length]);
 
 
-  const [showRideTimeModal, setShowRideTimeModal] = useState(false);
-  const [selectedRideTime, setSelectedRideTime] = useState<'now' | 'later'>('now');
-
   const handleWhereToPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     navigation.navigate("RideRequest");
@@ -252,22 +247,6 @@ export default function RiderHomeScreen({ navigation }: any) {
       navigation.navigate("AirportBooking");
     } else if (serviceId === "reserve") {
       navigation.navigate("LaterRide");
-    }
-  };
-
-  const handleSchedulePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedRideTime('now');
-    setShowRideTimeModal(true);
-  };
-
-  const handleRideTimeDone = () => {
-    setShowRideTimeModal(false);
-    if (selectedRideTime === 'later') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      navigation.navigate("LaterRide");
-    } else {
-      navigation.navigate("RideRequest");
     }
   };
 
@@ -287,75 +266,6 @@ export default function RiderHomeScreen({ navigation }: any) {
 
   return (
     <View style={[styles.container, { backgroundColor: "#000000" }]}>
-      {/* When do you need a ride? Modal */}
-      <Modal
-        visible={showRideTimeModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowRideTimeModal(false)}
-      >
-        <Pressable
-          style={modalStyles.overlay}
-          onPress={() => setShowRideTimeModal(false)}
-        >
-          <Pressable style={modalStyles.sheet} onPress={() => {}}>  
-            <View style={modalStyles.handle} />
-            <ThemedText style={modalStyles.title}>When do you need a ride?</ThemedText>
-
-            {/* Now Option */}
-            <Pressable
-              style={modalStyles.option}
-              onPress={() => setSelectedRideTime('now')}
-            >
-              <View style={modalStyles.optionLeft}>
-                <MaterialIcons name="schedule" size={24} color="#FFFFFF" style={{ marginRight: 16 }} />
-                <View>
-                  <ThemedText style={modalStyles.optionTitle}>Now</ThemedText>
-                  <ThemedText style={modalStyles.optionSubtitle}>Request a ride, hop-in, and go</ThemedText>
-                </View>
-              </View>
-              <View style={[
-                modalStyles.radioOuter,
-                selectedRideTime === 'now' && modalStyles.radioOuterSelected
-              ]}>
-                {selectedRideTime === 'now' && <View style={modalStyles.radioInner} />}
-              </View>
-            </Pressable>
-
-            {/* Separator */}
-            <View style={modalStyles.separator} />
-
-            {/* Later Option */}
-            <Pressable
-              style={modalStyles.option}
-              onPress={() => setSelectedRideTime('later')}
-            >
-              <View style={modalStyles.optionLeft}>
-                <MaterialIcons name="event" size={24} color="#FFFFFF" style={{ marginRight: 16 }} />
-                <View>
-                  <ThemedText style={modalStyles.optionTitle}>Later</ThemedText>
-                  <ThemedText style={modalStyles.optionSubtitle}>Reserve for extra peace of mind</ThemedText>
-                </View>
-              </View>
-              <View style={[
-                modalStyles.radioOuter,
-                selectedRideTime === 'later' && modalStyles.radioOuterSelected
-              ]}>
-                {selectedRideTime === 'later' && <View style={modalStyles.radioInner} />}
-              </View>
-            </Pressable>
-
-            {/* Done Button */}
-            <TouchableOpacity
-              style={modalStyles.doneButton}
-              onPress={handleRideTimeDone}
-              activeOpacity={0.85}
-            >
-              <ThemedText style={modalStyles.doneButtonText}>Done</ThemedText>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[
@@ -411,10 +321,6 @@ export default function RiderHomeScreen({ navigation }: any) {
               <MaterialIcons name="search" size={20} color="#9CA3AF" />
             </View>
             <ThemedText style={styles.searchPlaceholder}>Where to?</ThemedText>
-            <Pressable onPress={handleSchedulePress} style={styles.laterButton}>
-              <MaterialIcons name="schedule" size={16} color="#FFFFFF" />
-              <ThemedText style={styles.laterText}>Later</ThemedText>
-            </Pressable>
           </Pressable>
         </Animated.View>
 
@@ -483,92 +389,6 @@ export default function RiderHomeScreen({ navigation }: any) {
     </View>
   );
 }
-
-const modalStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 24,
-    paddingBottom: 36,
-    paddingTop: 12,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#E5E7EB',
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#000000',
-    marginBottom: 24,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-  },
-  optionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  optionTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#000000',
-    marginBottom: 2,
-  },
-  optionSubtitle: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  radioOuter: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioOuterSelected: {
-    borderColor: '#000000',
-  },
-  radioInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#000000',
-  },
-  separator: {
-    height: 1,
-    backgroundColor: '#F3F4F6',
-    marginHorizontal: -24,
-  },
-  doneButton: {
-    backgroundColor: '#000000',
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  doneButtonText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-});
 
 const styles = StyleSheet.create({
   container: {
@@ -665,20 +485,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "500",
   },
-  laterButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#333333",
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    gap: 6,
-  },
-  laterText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "500",
-  },
+
   currentLocationCard: {
     flexDirection: "row",
     alignItems: "center",

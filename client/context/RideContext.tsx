@@ -1545,20 +1545,22 @@ export function RideProvider({ children }: { children: ReactNode }) {
     if (rideToCancel) {
       if (withPenalty) {
         const currentBalance = userRef.current?.walletBalance || 0;
-        const penaltyAmount = rideToCancel.farePrice || 0;
+        const penaltyAmount = rideToCancel.farePrice || (rideToCancel as any).estimatedPrice || 0;
         
         try {
-          // Negative means subtracting penalty from balance
-          await updateProfile({ walletBalance: Math.max(0, currentBalance - penaltyAmount) });
-          console.log(`✅ [RideContext] Deducted £${penaltyAmount} penalty for auto-cancelled ride ${rideId}`);
+          if (penaltyAmount > 0) {
+            // Negative means subtracting penalty from balance
+            await updateProfile({ walletBalance: Math.max(0, currentBalance - penaltyAmount) });
+            console.log(`✅ [RideContext] Deducted £${penaltyAmount} penalty for cancelled ride ${rideId}`);
+          }
           
-          if (userRef.current?.id) {
+          if (userRef.current?.id && penaltyAmount > 0) {
             const { api } = await import('@/lib/api');
             await api.payments.addWalletTransaction(userRef.current.id, {
               rideId,
               amount: penaltyAmount,
               type: "debit",
-              description: `Cancellation fee for ride`,
+              description: `Cancellation fee — £${penaltyAmount.toFixed(2)}`,
             });
           }
         } catch (err) {

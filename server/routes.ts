@@ -2021,6 +2021,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(generateMockRoute());
       }
 
+    // Rider cancellation endpoint with 1‑minute rule
+    app.patch("/api/rides/:id/cancel", async (req: Request, res: Response) => {
+      try {
+        const rideId = req.params.id as string;
+        const { userId } = req.body; // rider's user ID for verification
+        // Fetch ride
+        const { data: ride, error: fetchErr } = await supabase
+          .from("rides")
+          .select("id, rider_id, driver_id, estimated_price, accepted_at, status")
+          .eq("id", rideId)
+          .single();
+        if (fetchErr) {
+          console.error("Failed to fetch ride for cancellation", fetchErr);
+          return res.status(500).json({ error: "Failed to fetch ride" });
+        }
+        if (!ride) return res.status(404).json({ error: "Ride not found" });
+        if (ride.rider_id !== userId) {
+          return res.status(403).json({ error: "Not authorized to cancel this ride" });
+        }
+        if (ride.status === "cancelled" || ride.status === "completed") {
+          return res.status(400).json({ error: "Ride already finished" });
+        }
+        // Determine fee
+        let cancellationFee = 0;
+        if (ride.accepted_at) {
+          const elapsedMs = Date.now() - new Date(ride.accepted_at).getTime();
+          if (elapsedMs >= 60_000) {
+            // Apply full fare as penalty
+            cancellationFee = Number(ride.estimated_price) || 0;
+          }
+        }
+        // Update ride status
+        const { error: updateErr } = await supabase
+          .from("rides")
+          .update({ status: "cancelled", cancelled_at: new Date().toISOString(), cancellation_fee: cancellationFee })
+          .eq("id", rideId);
+        if (updateErr) {
+          console.error("Failed to update ride status", updateErr);
+          return res.status(500).json({ error: "Failed to cancel ride" });
+        }
+        // Notify driver if assigned
+        if (ride.driver_id) {
+          io.to(`driver:${ride.driver_id}`).emit("ride:update", { rideId, status: "cancelled", cancellationFee });
+        }
+        // Notify rider client
+        const riderSocket = connectedRiders.get(userId);
+        if (riderSocket) {
+          io.to(riderSocket).emit("ride:update", { rideId, status: "cancelled", cancellationFee });
+        }
+        return res.json({ success: true, cancellationFee });
+      } catch (err) {
+        console.error("Rider cancellation error", err);
+        res.status(500).json({ error: "Failed to process cancellation" });
+      }
+    });
+
+    // Later booking (reservation) endpoint with 4‑hour validation
+    app.post("/api/later-bookings", async (req: Request, res: Response) => {
+      try {
+        const { userId, pickup_time, ...rest } = req.body;
+        if (!userId || !pickup_time) {
+          return res.status(400).json({ error: "userId and pickup_time are required" });
+        }
+        const pickupDate = new Date(pickup_time);
+        const now = new Date();
+        if (pickupDate.getTime() - now.getTime() < 4 * 60 * 60 * 1000) {
+          return res.status(400).json({ error: "Bookings must be made at least 4 hours before the journey" });
+        }
+        const payload = { user_id: userId, pickup_time: pickupDate.toISOString(), ...rest };
+        const { data, error } = await supabase.from("later_bookings").insert(payload).select().single();
+        if (error) {
+          console.error("Failed to insert later booking", error);
+          return res.status(500).json({ error: "Failed to create reservation" });
+        }
+        return res.status(201).json({ laterBooking: data });
+      } catch (e) {
+        console.error("Later booking error", e);
+        res.status(500).json({ error: "Server error" });
+      }
+    });
+
       // Sort routes by fastest traffic-aware duration (duration_in_traffic preferred)
       data.routes.sort((a: any, b: any) => {
         const durA = a.legs?.reduce((sum: number, leg: any) =>
@@ -2486,12 +2567,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updateData.driver_id = driverId;
       }
 
-      const { data, error } = await sb
+      let { data, error } = await sb
         .from("later_bookings")
         .update(updateData)
         .eq("id", req.params.id as string)
         .select()
         .single();
+
+      // If accepted_by_driver_at column doesn't exist, retry without it
+      if (error && error.message?.includes("accepted_by_driver_at")) {
+        console.warn("⚠️ accepted_by_driver_at column missing, retrying without it");
+        delete updateData.accepted_by_driver_at;
+        const retry = await sb
+          .from("later_bookings")
+          .update(updateData)
+          .eq("id", req.params.id as string)
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) return res.status(500).json({ error: error.message });
       res.json({ booking: data });
@@ -2711,6 +2806,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Escalation engine error:', err);
     }
   }, 60000); // 1 minute interval
+
+  // ─── Driver Payout Methods ────────────────────────────────────────
+  app.get("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await sb
+        .from("driver_payout_methods")
+        .select("*")
+        .eq("driver_id", req.params.driverId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        // No rows found is not a real error
+        if (error.code === 'PGRST116') {
+          return res.json(null);
+        }
+        return res.status(500).json({ error: error.message });
+      }
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Failed to fetch payout method" });
+    }
+  });
+
+  app.post("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
+    try {
+      const { account_name, account_no, sort_code, bank_provider } = req.body;
+      if (!account_name || !account_no || !sort_code || !bank_provider) {
+        return res.status(400).json({ error: "All fields are required" });
+      }
+
+      const { data, error } = await sb
+        .from("driver_payout_methods")
+        .insert({
+          driver_id: req.params.driverId,
+          account_name,
+          account_no,
+          sort_code,
+          bank_provider,
+        })
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+      res.status(201).json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Failed to create payout method" });
+    }
+  });
+
+  app.put("/api/driver-payout-methods/:driverId/:id", async (req: Request, res: Response) => {
+    try {
+      const { account_name, account_no, sort_code, bank_provider } = req.body;
+
+      const { data, error } = await sb
+        .from("driver_payout_methods")
+        .update({
+          account_name,
+          account_no,
+          sort_code,
+          bank_provider,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", req.params.id)
+        .eq("driver_id", req.params.driverId)
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Failed to update payout method" });
+    }
+  });
 
   return httpServer;
 

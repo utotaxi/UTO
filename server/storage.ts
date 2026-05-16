@@ -351,6 +351,7 @@ export class SupabaseStorage implements IStorage {
     if (updates.fullName !== undefined) snakeData.full_name = updates.fullName;
     if (updates.password !== undefined) snakeData.password = updates.password;
     if (updates.phone !== undefined) snakeData.phone = updates.phone;
+    if (updates.email !== undefined) snakeData.email = updates.email;
     if (updates.profileImage !== undefined) snakeData.profile_image = updates.profileImage;
     if (updates.role !== undefined) snakeData.role = updates.role;
     if (updates.rating !== undefined) snakeData.rating = updates.rating;

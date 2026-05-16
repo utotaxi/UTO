@@ -313,7 +313,7 @@ export default function DriverMarketplaceScreen() {
         </View>
       ) : (
         <FlatList
-          data={bookings}
+          data={bookings.filter(b => b.status !== 'driver_accepted')}
           keyExtractor={item => item.id}
           renderItem={({ item }) => (
             <BookingCard

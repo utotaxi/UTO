@@ -117,8 +117,8 @@ export function useRiderTracking({ riderId, rideId }: UseRiderTrackingOptions) {
     });
 
     return () => {
-      unsubLocation();
-      unsubRide();
+      if (typeof unsubLocation === 'function') unsubLocation();
+      if (typeof unsubRide === 'function') unsubRide();
     };
   }, [riderId, rideId]);
 

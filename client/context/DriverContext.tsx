@@ -3288,12 +3288,24 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const declineRide = () => {
+  const declineRide = (isAtPickup = false) => {
     if (activeRideRequest) {
       if (rideState === "accepted" || rideState === "at_pickup") {
         try {
           const socket = getSocket();
-          socket.emit("ride:status", { rideId: activeRideRequest.id, status: "cancelled", driverId: driverProfile?.id || user?.id || undefined });
+          if (isAtPickup) {
+            // Emits a specific status for cancellation at pickup so server can apply 50% penalty
+            socket.emit("ride:driver_cancel_at_pickup", { 
+              rideId: activeRideRequest.id, 
+              driverId: driverProfile?.id || user?.id || undefined 
+            });
+          } else {
+            socket.emit("ride:status", { 
+              rideId: activeRideRequest.id, 
+              status: "cancelled", 
+              driverId: driverProfile?.id || user?.id || undefined 
+            });
+          }
         } catch (e) {
           console.warn("Failed to emit cancel:", e);
         }
@@ -3552,9 +3564,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     // Refresh trip data from Supabase so earnings display updates
     setTimeout(() => {
-      console.log('💰 Triggering post-payment refreshData...');
+      console.log('💰 Triggering post-payment refreshData (2s)...');
       refreshData().catch((err) => console.warn("⚠️ Post-payment refreshData failed:", err));
-    }, 2000); // Increased delay to 2s to let server process
+    }, 2000); // First refresh after 2s
+    // Second refresh after 5s to catch any slow DB writes
+    setTimeout(() => {
+      console.log('💰 Triggering post-payment refreshData (5s follow-up)...');
+      refreshData().catch((err) => console.warn("⚠️ Post-payment refreshData follow-up failed:", err));
+    }, 5000);
   };
 
   const calculateEarnings = (): Earnings => {

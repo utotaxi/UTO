@@ -287,6 +287,19 @@ export default function DriverAccountScreen({ navigation }: any) {
           ) : null}
         </View>
 
+        {/* Account Info */}
+        <View style={styles.section}>
+          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+            Account
+          </ThemedText>
+          <MenuItem
+            icon="user"
+            title="Profile"
+            subtitle="Edit your personal information"
+            onPress={() => navigation.navigate("DriverProfile")}
+          />
+        </View>
+
         {/* Opportunities */}
         <View style={styles.section}>
           <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
@@ -299,6 +312,14 @@ export default function DriverAccountScreen({ navigation }: any) {
             onPress={() => navigation.navigate("Marketplace")}
             showBadge
             badgeColor={UTOColors.primary}
+          />
+          <MenuItem
+            icon="calendar"
+            title="Upcoming Bookings"
+            subtitle="Your accepted scheduled rides"
+            onPress={() => navigation.navigate("UpcomingBookings")}
+            showBadge
+            badgeColor={UTOColors.success}
           />
         </View>
 
@@ -330,7 +351,7 @@ export default function DriverAccountScreen({ navigation }: any) {
           <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
             Earnings
           </ThemedText>
-          <MenuItem icon="dollar-sign" title="Payout Methods" subtitle="Manage how you get paid" onPress={() => { }} />
+          <MenuItem icon="dollar-sign" title="Payout Methods" subtitle="Manage how you get paid" onPress={() => navigation.navigate("PayoutMethods")} />
           <MenuItem icon="bar-chart-2" title="Tax Information" subtitle="View tax documents" onPress={() => navigation.navigate("TaxInformation")} />
         </View>
 
