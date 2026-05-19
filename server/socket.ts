@@ -129,6 +129,30 @@ export function setupSocketIO(httpServer: HTTPServer) {
   const connectedRiders = new Map<string, string>();    // riderId  -> socketId
   const activeRides = new Map<string, { riderSocketId: string; riderId?: string; declinedBy: Set<string>; rideData?: any; driverSocketId?: string }>();
 
+  // Add heartbeat interval to ensure drivers stay online while socket is connected
+  // This prevents the admin panel's 2-minute stale cleanup from falsely marking them offline
+  setInterval(async () => {
+    if (connectedDrivers.size > 0) {
+      const driverIds = Array.from(connectedDrivers.keys());
+      try {
+        // Chunking isn't strictly necessary for small numbers, but safe for scale
+        const chunkSize = 100;
+        for (let i = 0; i < driverIds.length; i += chunkSize) {
+          const chunk = driverIds.slice(i, i + chunkSize);
+          await supabase
+            .from("drivers")
+            .update({ 
+              is_online: true, 
+              last_seen_at: new Date().toISOString() 
+            })
+            .in("id", chunk);
+        }
+      } catch (err) {
+        console.error("Error in heartbeat interval:", err);
+      }
+    }
+  }, 60000); // 1 minute
+
   // ─── dispatchToNextDriver ──────────────────────────────────────────────
   // Pops the nearest driver from the heap and sends the ride exclusively to them.
   // Sets a 15-second timeout; if the driver doesn't accept, moves to the next.
@@ -519,6 +543,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           .update({
             current_latitude: location.latitude,
             current_longitude: location.longitude,
+            is_online: true,
             last_seen_at: new Date().toISOString()
           })
           .eq("id", location.driverId);
@@ -890,112 +915,116 @@ export function setupSocketIO(httpServer: HTTPServer) {
           else if (update.status === "cancelled") {
             updateData.cancelled_at = new Date().toISOString();
 
-            // ── Server-side cancellation fee processing ──────────────────────
-            // If driver had already arrived at pickup, charge the rider the full fare
+            // ── Cancellation policy: 1-minute free window from ride acceptance ──────────
+            // After 1 minute: rider pays 100% (wallet may go negative), driver pays 50%
+            const cancelledBy: string = (update as any).cancelledBy || ((update as any).driverId ? "driver" : "rider");
+            const ONE_MINUTE_MS = 60 * 1000;
+
             try {
               const { data: cancelledRide } = await supabase
                 .from("rides")
-                .select("rider_id, driver_id, status, estimated_price, final_price, payment_method")
+                .select("rider_id, driver_id, status, estimated_price, final_price, payment_method, accepted_at")
                 .eq("id", update.rideId)
                 .single();
 
-              if (cancelledRide && ["arrived", "at_pickup"].includes(cancelledRide.status)) {
+              if (cancelledRide) {
                 const fareAmount = cancelledRide.final_price || cancelledRide.estimated_price || 0;
-                const riderId = cancelledRide.rider_id;
+                const acceptedAt = cancelledRide.accepted_at ? new Date(cancelledRide.accepted_at).getTime() : null;
+                const now = Date.now();
+                const isAfterFreeWindow = acceptedAt ? (now - acceptedAt) > ONE_MINUTE_MS : false;
 
-                if (riderId && fareAmount > 0) {
-                  console.log(`💸 Rider ${riderId} cancelling after driver arrived — charging £${fareAmount} cancellation fee`);
+                console.log(`🚫 Cancellation by ${cancelledBy}, accepted_at=${cancelledRide.accepted_at}, isAfterFreeWindow=${isAfterFreeWindow}, fare=£${fareAmount}`);
 
-                  // 1. Try Stripe card charge if payment method is card
-                  let chargedViaCard = false;
-                  if (cancelledRide.payment_method === "card") {
-                    try {
-                      const { data: riderUser } = await supabase
-                        .from("users")
-                        .select("stripe_customer_id")
-                        .eq("id", riderId)
-                        .single();
+                if (isAfterFreeWindow && fareAmount > 0) {
 
-                      if (riderUser?.stripe_customer_id) {
-                        const { chargeSavedCard } = await import("./services/stripe");
-                        const chargeResult = await chargeSavedCard(
-                          riderUser.stripe_customer_id,
-                          Math.round(fareAmount * 100),
-                          `Cancellation fee for ride ${update.rideId}`
-                        );
-                        if (chargeResult.success) {
-                          chargedViaCard = true;
-                          updateData.payment_status = "cancellation_fee_card_charged";
-                          console.log(`✅ Cancellation fee £${fareAmount} charged to card for rider ${riderId}`);
+                  if (cancelledBy === "rider" && cancelledRide.rider_id) {
+                    // ── Rider cancelled after 1 min: charge 100% fare ────────────────
+                    const riderId = cancelledRide.rider_id;
+                    console.log(`💸 Rider ${riderId} cancelling after 1-min window — charging £${fareAmount}`);
+
+                    let chargedViaCard = false;
+                    if (cancelledRide.payment_method === "card") {
+                      try {
+                        const { data: riderUser } = await supabase
+                          .from("users").select("stripe_customer_id").eq("id", riderId).single();
+                        if (riderUser?.stripe_customer_id) {
+                          const chargeResult = await chargeSavedCard(
+                            riderUser.stripe_customer_id,
+                            Math.round(fareAmount * 100),
+                            `Cancellation fee for ride ${update.rideId}`
+                          );
+                          if (chargeResult.success) {
+                            chargedViaCard = true;
+                            updateData.payment_status = "cancellation_fee_card_charged";
+                            console.log(`✅ Cancellation fee £${fareAmount} charged to card`);
+                          }
                         }
+                      } catch (cardErr) {
+                        console.warn(`⚠️ Card charge failed for rider cancellation fee:`, cardErr);
                       }
-                    } catch (cardErr) {
-                      console.warn(`⚠️ Card charge failed for cancellation fee:`, cardErr);
                     }
-                  }
 
-                  // 2. Fallback: deduct from wallet
-                  if (!chargedViaCard) {
+                    if (!chargedViaCard) {
+                      // Deduct from wallet — ALLOW negative balance per policy
+                      try {
+                        const { data: userRow } = await supabase
+                          .from("users").select("wallet_balance").eq("id", riderId).single();
+                        const currentBalance = userRow?.wallet_balance || 0;
+                        const newBalance = currentBalance - fareAmount; // intentionally allow negative
+
+                        await supabase.from("users").update({ wallet_balance: newBalance }).eq("id", riderId);
+                        updateData.payment_status = "cancellation_fee_wallet_charged";
+                        console.log(`💰 Rider cancellation fee: wallet ${currentBalance} → ${newBalance} (penalty, may be negative)`);
+                      } catch (walletErr) {
+                        console.error("❌ Failed to deduct rider cancellation fee from wallet:", walletErr);
+                      }
+                    }
+
+                    // Record wallet transaction
                     try {
-                      const { data: userRow } = await supabase
-                        .from("users")
-                        .select("wallet_balance")
-                        .eq("id", riderId)
-                        .single();
-
-                      const currentBalance = userRow?.wallet_balance || 0;
-                      const newBalance = Math.max(0, currentBalance - fareAmount);
-
-                      await supabase
-                        .from("users")
-                        .update({ wallet_balance: newBalance })
-                        .eq("id", riderId);
-
-                      updateData.payment_status = "cancellation_fee_wallet_charged";
-                      console.log(`💰 Cancellation fee £${fareAmount} deducted from wallet (${currentBalance} → ${newBalance})`);
-                    } catch (walletErr) {
-                      console.error("❌ Failed to deduct cancellation fee from wallet:", walletErr);
-                    }
-                  }
-
-                  // 3. Record wallet transaction for history
-                  try {
-                    await supabase
-                      .from("wallet_transactions")
-                      .insert({
-                        user_id: riderId,
-                        ride_id: update.rideId,
-                        amount: fareAmount,
-                        type: "debit",
-                        description: `Cancellation fee — driver already arrived at pickup`,
+                      await supabase.from("wallet_transactions").insert({
+                        user_id: riderId, ride_id: update.rideId,
+                        amount: fareAmount, type: "debit",
+                        description: `Cancellation fee — cancelled after 1-min window`,
                       });
-                    console.log(`✅ Wallet transaction recorded for cancellation fee`);
-                  } catch (txnErr) {
-                    console.warn("⚠️ Failed to insert cancellation fee wallet transaction:", txnErr);
-                  }
+                    } catch (txnErr) {
+                      console.warn("⚠️ Failed to insert rider cancellation fee wallet_transaction:", txnErr);
+                    }
 
-                  // 4. Credit driver earnings with the cancellation fee
-                  if (cancelledRide.driver_id) {
-                    try {
-                      const { data: driverData } = await supabase
-                        .from("drivers")
-                        .select("total_earnings")
-                        .eq("id", cancelledRide.driver_id)
-                        .single();
+                    // Credit driver earnings
+                    const driverId = resolvedDriverId || cancelledRide.driver_id;
+                    if (driverId) {
+                      try {
+                        const { data: driverData } = await supabase
+                          .from("drivers").select("total_earnings").eq("id", driverId).single();
+                        const newEarnings = Number(((driverData?.total_earnings || 0) + fareAmount).toFixed(2));
+                        await supabase.from("drivers").update({ total_earnings: newEarnings }).eq("id", driverId);
+                        console.log(`✅ Driver ${driverId} credited £${fareAmount} cancellation fee`);
+                      } catch (earningsErr) {
+                        console.error("❌ Failed to credit driver earnings on rider cancellation:", earningsErr);
+                      }
+                    }
 
-                      const currentEarnings = driverData?.total_earnings || 0;
-                      const newEarnings = Number((currentEarnings + fareAmount).toFixed(2));
-
-                      await supabase
-                        .from("drivers")
-                        .update({ total_earnings: newEarnings })
-                        .eq("id", cancelledRide.driver_id);
-
-                      console.log(`✅ Driver ${cancelledRide.driver_id} earnings updated for cancellation fee: +£${fareAmount}`);
-                    } catch (earningsErr) {
-                      console.error("❌ Failed to update driver earnings on cancellation:", earningsErr);
+                  } else if (cancelledBy === "driver") {
+                    // ── Driver cancelled after 1 min: 50% penalty from earnings ────────
+                    const penaltyAmount = fareAmount * 0.5;
+                    const driverId = resolvedDriverId || cancelledRide.driver_id;
+                    if (driverId && penaltyAmount > 0) {
+                      try {
+                        await supabase.from("driver_deductions").insert({
+                          driver_id: driverId,
+                          amount: penaltyAmount,
+                          type: "late_cancellation_penalty",
+                          reason: `Cancelled accepted ride after 1-minute free window (ride ${update.rideId})`,
+                        });
+                        console.log(`💸 Driver ${driverId} charged 50% penalty £${penaltyAmount} for late cancellation`);
+                      } catch (deductErr) {
+                        console.error("❌ Failed to record driver cancellation penalty:", deductErr);
+                      }
                     }
                   }
+                } else {
+                  console.log(`✅ Cancellation within free window — no fee charged`);
                 }
               }
             } catch (cancelFeeErr) {
@@ -1310,14 +1339,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
               .single();
 
             const currentBalance = userRow?.wallet_balance || 0;
-            const newBalance = Math.max(0, currentBalance - fareAmount);
+            const newBalance = currentBalance - fareAmount; // allow negative per policy
 
             await supabase
               .from("users")
               .update({ wallet_balance: newBalance })
               .eq("id", rideRow.rider_id);
 
-            console.log(`💰 No-show penalty (wallet fallback): Debited £${fareAmount} from rider ${rideRow.rider_id} wallet (${currentBalance} → ${newBalance})`);
+            console.log(`💰 No-show penalty (wallet fallback): Debited £${fareAmount} from rider ${rideRow.rider_id} wallet (${currentBalance} → ${newBalance}, may be negative)`);
 
             await supabase
               .from("wallet_transactions")
