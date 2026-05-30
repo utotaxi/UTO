@@ -270,6 +270,70 @@ export const api = {
     },
   },
 
+  withdrawals: {
+    async getPayoutMethod(userId: string): Promise<any> {
+      const res = await apiRequest("GET", `/api/rider-payout-methods/${userId}`);
+      return res.json();
+    },
+
+    async createPayoutMethod(userId: string, data: { account_name: string, account_no: string, sort_code: string, bank_provider: string }): Promise<any> {
+      const res = await apiRequest("POST", `/api/rider-payout-methods/${userId}`, data);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to create payout method");
+      }
+      return res.json();
+    },
+
+    async updatePayoutMethod(userId: string, id: string, data: { account_name: string, account_no: string, sort_code: string, bank_provider: string }): Promise<any> {
+      const res = await apiRequest("PUT", `/api/rider-payout-methods/${userId}/${id}`, data);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to update payout method");
+      }
+      return res.json();
+    },
+
+    async requestWithdrawal(userId: string, amount: number, payout_method_id?: string): Promise<any> {
+      const res = await apiRequest("POST", `/api/withdrawals/${userId}`, { amount, payout_method_id });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to process withdrawal");
+      }
+      return res.json();
+    },
+
+    async getWithdrawalHistory(userId: string): Promise<any[]> {
+      const res = await apiRequest("GET", `/api/withdrawals/${userId}`);
+      const data = await res.json();
+      return data.withdrawals || [];
+    },
+
+    async approveWithdrawal(withdrawalId: string, transactionId?: string): Promise<any> {
+      const res = await apiRequest("POST", `/api/withdrawals/${withdrawalId}/approve`, { transactionId });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to approve withdrawal");
+      }
+      return res.json();
+    },
+
+    async cancelWithdrawal(withdrawalId: string, reason?: string): Promise<any> {
+      const res = await apiRequest("POST", `/api/withdrawals/${withdrawalId}/cancel`, { reason });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to cancel withdrawal");
+      }
+      return res.json();
+    },
+
+    async getPendingWithdrawals(): Promise<any[]> {
+      const res = await apiRequest("GET", `/api/withdrawals/pending/all`);
+      const data = await res.json();
+      return data.pending || [];
+    },
+  },
+
   pricingRules: {
     async getActive(): Promise<any> {
       try {

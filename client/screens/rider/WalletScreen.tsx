@@ -1,3 +1,4 @@
+//client/screens/rider/WalletScreen.tsx
 import React, { useState, useCallback } from "react";
 import { StyleSheet, View, Text, FlatList, ActivityIndicator, Pressable, RefreshControl } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -98,8 +99,24 @@ export default function WalletScreen({ navigation }: any) {
       </View>
 
       <View style={styles.balanceContainer}>
-        <ThemedText style={styles.balanceLabel}>Current Balance</ThemedText>
-        <ThemedText style={styles.balanceAmount}>£{Number(user?.walletBalance || 0).toFixed(2)}</ThemedText>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.balanceLabel}>Current Balance</ThemedText>
+          <ThemedText style={styles.balanceAmount}>£{Number(user?.walletBalance || 0).toFixed(2)}</ThemedText>
+        </View>
+        {user?.walletBalance && user.walletBalance > 0 && (
+          <Pressable
+            onPress={() => navigation.navigate("Withdrawal")}
+            style={{
+              backgroundColor: "#10B981",
+              borderRadius: 8,
+              paddingHorizontal: 16,
+              paddingVertical: 10,
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: "#000", fontWeight: "600", fontSize: 12 }}>Withdraw</Text>
+          </Pressable>
+        )}
       </View>
 
       <View style={styles.historyContainer}>
@@ -165,7 +182,9 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingBottom: 24,
     borderRadius: BorderRadius.xl,
-    alignItems: "center",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     borderWidth: 1,
     borderColor: "#333",
   },

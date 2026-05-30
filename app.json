@@ -14,13 +14,19 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "UTO needs your location to show nearby drivers and provide ride services.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "UTO needs your location to track your ride and navigate to your destination.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "location",
+          "fetch",
+          "remote-notification"
+        ]
       },
       "config": {
         "googleMapsApiKey": "AIzaSyCHpucmvtde0uRq3G_COT_Q5RMw3ceWMdE"
       }
     },
     "android": {
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#1A1A1A",
         "foregroundImage": "./assets/images/icon.png"
@@ -31,7 +37,9 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE_LOCATION"
       ],
       "config": {
         "googleMaps": {
@@ -72,7 +80,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "UTO needs your location to show nearby drivers and provide ride services."
+          "locationAlwaysAndWhenInUsePermission": "UTO needs your location to show nearby drivers and provide ride services.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
         }
       ],
       [

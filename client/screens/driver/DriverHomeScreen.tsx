@@ -1,4 +1,4 @@
-
+//client/screen/driver/DriverHomeScreen.tsx
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
@@ -134,13 +134,16 @@ export default function DriverHomeScreen({ navigation }: any) {
     activeRideRef.current = activeRideRequest;
   }, [activeRideRequest]);
 
-  // ─── AppState: reconnect socket when app comes back to foreground ──────────
+  // ─── AppState: handle foreground/background transitions ──────────────────
   // This ensures the driver stays online even after switching to Google Maps.
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
-      if (nextState === 'active') {
         const driverId = driverProfile?.id || user?.id;
         if (!driverId) return;
+
+      if (nextState === 'active') {
+        // App came back to foreground
+        console.log('📱 App foregrounded — re-establishing connection');
         try {
           const sock = getSocket();
           if (!sock.connected) {
@@ -162,6 +165,11 @@ export default function DriverHomeScreen({ navigation }: any) {
         } catch (err) {
           console.warn('⚠️ AppState reconnect error:', err);
         }
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        // App went to background - ensure we're still registered
+        // The socket connection should remain alive due to our reconnection settings
+        console.log('📵 App backgrounded — socket should remain alive');
+        // Don't disconnect - just let the socket handle reconnection automatically
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
@@ -219,10 +227,22 @@ export default function DriverHomeScreen({ navigation }: any) {
     let subscription: Location.LocationSubscription | null = null;
 
     (async () => {
+      // Request foreground location permissions first
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
+        console.warn("⚠️ Foreground location permission denied");
         setIsLoadingLocation(false);
         return;
+      }
+
+      // For iOS, also request background location permissions
+      if (Platform.OS === 'ios') {
+        const bgStatus = await Location.requestBackgroundPermissionsAsync();
+        if (bgStatus.status === 'granted') {
+          console.log('✅ Background location permissions granted for iOS');
+        } else {
+          console.warn('⚠️ Background location permissions not granted for iOS');
+        }
       }
 
       const enforceUK = (loc: Location.LocationObject) => {
@@ -272,14 +292,23 @@ export default function DriverHomeScreen({ navigation }: any) {
         }
 
         subscription = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 3000, distanceInterval: 5 },
+          { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
           (newLocation) => {
             const updatedLoc = enforceUK(newLocation);
             setLocation(updatedLoc);
             
-            // Re-check isOnlineRef (it needs to be up to date)
-            // But since this effect only runs once, using isOnline from state is stale
-            // We'll fix that with an effect that depends on location and isOnline below.
+            // Immediately send location to socket to ensure real-time tracking
+            // This is critical for background operation
+            const driverId = driverProfile?.id || user?.id;
+            if (isOnline && driverId) {
+              sendDriverLocation({
+                driverId,
+                latitude: updatedLoc.coords.latitude,
+                longitude: updatedLoc.coords.longitude,
+                heading: updatedLoc.coords.heading || undefined,
+                speed: updatedLoc.coords.speed || undefined,
+              });
+            }
           }
         );
       } catch (error) {
@@ -308,6 +337,34 @@ export default function DriverHomeScreen({ navigation }: any) {
       });
     }
   }, [location, isOnline, driverProfile?.id, user?.id]);
+
+  // ─── Keep-alive mechanism: Periodically re-register driver to prevent going offline ───
+  // This ensures the driver stays online even during background app usage (e.g., Google Maps)
+  useEffect(() => {
+    if (!isOnline) return;
+
+    const driverId = driverProfile?.id || user?.id;
+    if (!driverId) return;
+
+    // Send keep-alive heartbeat every 10 seconds when driver is online and has active ride
+    const keepAliveInterval = setInterval(() => {
+      try {
+        const sock = getSocket();
+        if (sock.connected) {
+          // Re-register driver connection to refresh server-side status
+          connectAsDriver(driverId);
+          console.log('Keep-alive: Driver re-registered');
+        } else {
+          console.log('Keep-alive: Socket not connected, will reconnect...');
+          sock.connect();
+        }
+      } catch (err) {
+        console.warn('Keep-alive error:', err);
+      }
+    }, 10000); // Every 10 seconds
+
+    return () => clearInterval(keepAliveInterval);
+  }, [isOnline, driverProfile?.id, user?.id]);
 
   useEffect(() => {
     if (rideState === "none") {
@@ -714,7 +771,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                       {
                         text: 'Cancel & Accept Penalty',
                         style: 'destructive',
-                        onPress: () => { declineRide(true); setOtpValue(''); },
+                        onPress: () => { declineRide(); setOtpValue(''); },
                       },
                     ]
                   );
@@ -939,7 +996,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                       text: "Yes, Cancel Ride",
                       style: "destructive",
                       onPress: () => {
-                        declineRide(true);
+                        declineRide();
                         setOtpValue("");
                       }
                     }
@@ -2010,16 +2067,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignSelf: "center" as const,
   },
-  cancelTripBtn: {
-    width: "100%" as const,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    marginTop: 8,
-  },
-  cancelTripText: {
-    fontSize: 15,
-    fontWeight: "600" as const,
-  },
+  // cancelTripBtn: {
+  //   width: "100%" as const,
+  //   paddingVertical: 14,
+  //   borderRadius: 12,
+  //   alignItems: "center" as const,
+  //   justifyContent: "center" as const,
+  //   marginTop: 8,
+  // },
+  // cancelTripText: {
+  //   fontSize: 15,
+  //   fontWeight: "600" as const,
+  // },
 });

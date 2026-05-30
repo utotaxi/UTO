@@ -1,25 +1,3 @@
-// import { sql } from "drizzle-orm";
-// import { pgTable, text, varchar } from "drizzle-orm/pg-core";
-// import { createInsertSchema } from "drizzle-zod";
-// import { z } from "zod";
-
-// export const users = pgTable("users", {
-//   id: varchar("id")
-//     .primaryKey()
-//     .default(sql`gen_random_uuid()`),
-//   username: text("username").notNull().unique(),
-//   password: text("password").notNull(),
-// });
-
-// export const insertUserSchema = createInsertSchema(users).pick({
-//   username: true,
-//   password: true,
-// });
-
-// export type InsertUser = z.infer<typeof insertUserSchema>;
-// export type User = typeof users.$inferSelect;
-
-
 import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, integer, boolean, timestamp, doublePrecision, serial, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -159,6 +137,33 @@ export const driverLocations = pgTable("driver_locations", {
   timestamp: timestamp("timestamp").defaultNow(),
 });
 
+export const riderPayoutMethods = pgTable("rider_payout_methods", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  accountName: text("account_name").notNull(),
+  accountNo: text("account_no").notNull(),
+  sortCode: text("sort_code").notNull(),
+  bankProvider: text("bank_provider").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const withdrawals = pgTable("withdrawals", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  payoutMethodId: varchar("payout_method_id").references(() => riderPayoutMethods.id),
+  amount: doublePrecision("amount").notNull(),
+  status: text("status").notNull().default("pending"),
+  transactionId: text("transaction_id"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
@@ -185,6 +190,18 @@ export const insertSavedPlaceSchema = createInsertSchema(savedPlaces).omit({
   createdAt: true,
 });
 
+export const insertRiderPayoutMethodSchema = createInsertSchema(riderPayoutMethods).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertWithdrawalSchema = createInsertSchema(withdrawals).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Driver = typeof drivers.$inferSelect;
@@ -195,3 +212,7 @@ export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type SavedPlace = typeof savedPlaces.$inferSelect;
 export type InsertSavedPlace = z.infer<typeof insertSavedPlaceSchema>;
+export type RiderPayoutMethod = typeof riderPayoutMethods.$inferSelect;
+export type InsertRiderPayoutMethod = z.infer<typeof insertRiderPayoutMethodSchema>;
+export type Withdrawal = typeof withdrawals.$inferSelect;
+export type InsertWithdrawal = z.infer<typeof insertWithdrawalSchema>;

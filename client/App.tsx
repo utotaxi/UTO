@@ -15,6 +15,7 @@ import {
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
 import { MaterialIcons } from "@expo/vector-icons";
+import { defineBackgroundLocationTask, setupAppStateListener } from '@/lib/backgroundLocation';
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
@@ -60,6 +61,19 @@ export default function App() {
     }
   }, [fontsLoaded, fontError, iconsLoaded]);
 
+  useEffect(() => {
+    // Initialize background location task
+    defineBackgroundLocationTask();
+    
+    // Setup app state listener
+    const unsubscribeAppState = setupAppStateListener();
+    
+    return () => {
+      unsubscribeAppState();
+    };
+  }, []);
+
+  // Guard conditions AFTER all hooks are defined
   if (!fontsLoaded && !fontError) {
     return null;
   }
