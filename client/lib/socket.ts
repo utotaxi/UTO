@@ -38,8 +38,8 @@ export function getSocket(): Socket {
       timeout: 60 * 60 * 1000, // Extended to 60 mins to handle app background
       autoConnect: true,
       // Keep connection alive even when app is in background
-      //pingInterval: 10000, // Match server ping interval
-      //pingTimeout: 60000,  // Match server ping timeout
+      // pingInterval: 10000, // Match server ping interval
+      // pingTimeout: 60000,  // Match server ping timeout
     });
 
     socket.on('connect', () => {

@@ -1,5 +1,4 @@
-//client/screen/driver/DriverHomeScreen.tsx
-
+//client/screens/driver/DriverHomeScreen.tsx
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   StyleSheet,
@@ -771,7 +770,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                       {
                         text: 'Cancel & Accept Penalty',
                         style: 'destructive',
-                        onPress: () => { declineRide(); setOtpValue(''); },
+                        onPress: () => { declineRide(true); setOtpValue(''); },
                       },
                     ]
                   );
@@ -996,7 +995,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                       text: "Yes, Cancel Ride",
                       style: "destructive",
                       onPress: () => {
-                        declineRide();
+                        declineRide(true);
                         setOtpValue("");
                       }
                     }
@@ -1777,13 +1776,17 @@ const styles = StyleSheet.create({
     color: "#000",
   },
   cancelTripBtn: {
-    alignItems: "center",
     padding: Spacing.md,
-    borderRadius: BorderRadius.lg,
+    width: "100%" as const,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginTop: 8,
   },
   cancelTripText: {
-    fontWeight: "600",
-    fontSize: 14,
+     fontSize: 15,
+    fontWeight: "600" as const,
   },
   otpInputContainer: {
     marginHorizontal: Spacing.lg,
@@ -2067,16 +2070,4 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignSelf: "center" as const,
   },
-  // cancelTripBtn: {
-  //   width: "100%" as const,
-  //   paddingVertical: 14,
-  //   borderRadius: 12,
-  //   alignItems: "center" as const,
-  //   justifyContent: "center" as const,
-  //   marginTop: 8,
-  // },
-  // cancelTripText: {
-  //   fontSize: 15,
-  //   fontWeight: "600" as const,
-  // },
 });
