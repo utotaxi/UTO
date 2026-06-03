@@ -56,6 +56,7 @@ export default function WalletScreen({ navigation }: any) {
     await loadTransactions();
     setRefreshing(false);
   };
+  const walletBalance = typeof user?.walletBalance === "number" ? user.walletBalance : 0;
 
   const renderTransaction = ({ item }: { item: WalletTransaction }) => {
     const isCredit = item.type === "credit";
@@ -101,9 +102,11 @@ export default function WalletScreen({ navigation }: any) {
       <View style={styles.balanceContainer}>
         <View style={{ flex: 1 }}>
           <ThemedText style={styles.balanceLabel}>Current Balance</ThemedText>
-          <ThemedText style={styles.balanceAmount}>£{Number(user?.walletBalance || 0).toFixed(2)}</ThemedText>
+          <ThemedText style={[styles.balanceAmount, walletBalance < 0 && styles.negativeBalance]}>
+            {walletBalance < 0 ? "-" : ""}£{Math.abs(walletBalance).toFixed(2)}
+          </ThemedText>
         </View>
-        {user?.walletBalance && user.walletBalance > 0 && (
+        {walletBalance > 0 && (
           <Pressable
             onPress={() => navigation.navigate("Withdrawal")}
             style={{
@@ -200,6 +203,9 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     lineHeight: 52,
     includeFontPadding: false,
+  },
+  negativeBalance: {
+    color: "#EF4444",
   },
   historyContainer: {
     flex: 1,

@@ -1,3 +1,4 @@
+//client/screens/rider/RideHomeScreen.tsx
 import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
@@ -538,7 +539,7 @@ const styles = StyleSheet.create({
   servicesGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "space-evenly",
     marginBottom: Spacing.xl,
   },
   serviceCard: {

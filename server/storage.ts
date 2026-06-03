@@ -1,3 +1,4 @@
+//server/storage.ts
 import { supabase } from "./db";
 
 // TypeScript interfaces matching schema columns (snake_case for Supabase)
@@ -290,6 +291,7 @@ export interface IStorage {
   updateDriver(id: string, data: any): Promise<any | undefined>;
   getOnlineDrivers(): Promise<any[]>;
   getDriverDeductions(driverId: string): Promise<any[]>;
+  createDriverDeduction(deduction: any): Promise<any>;
 
   getRide(id: string): Promise<any | undefined>;
   getRidesByRider(riderId: string): Promise<any[]>;
@@ -516,6 +518,29 @@ export class SupabaseStorage implements IStorage {
       .order("created_at", { ascending: false });
     if (error || !data) return [];
     return data.map((d: any) => toCamelDeduction(d as DriverDeduction));
+  }
+
+  async createDriverDeduction(deduction: any) {
+    const insertData: any = {
+      driver_id: deduction.driverId || deduction.driver_id,
+      amount: deduction.amount,
+      type: deduction.type,
+      reason: deduction.reason || null,
+      created_at: deduction.createdAt || new Date().toISOString(),
+    };
+    if (deduction.id) insertData.id = deduction.id;
+
+    const { data, error } = await supabase
+      .from("driver_deductions")
+      .insert(insertData)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error("Failed to create driver deduction:", error.message);
+      throw new Error(`Failed to create driver deduction: ${error.message}`);
+    }
+    return toCamelDeduction(data as DriverDeduction);
   }
 
   // ── Rides ──

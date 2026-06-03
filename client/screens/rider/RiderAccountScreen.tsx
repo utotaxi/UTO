@@ -1,4 +1,4 @@
-
+//client/screens/rider/RiderAccountScreen.tsx
 import React from "react";
 import { Platform, StyleSheet, View, Pressable, Image, ScrollView, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -63,6 +63,7 @@ export default function RiderAccountScreen({ navigation }: any) {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [isAddingCard, setIsAddingCard] = React.useState(false);
   const [savedCards, setSavedCards] = React.useState<any[]>([]);
+  const walletBalance = typeof user?.walletBalance === "number" ? user.walletBalance : 0;
 
   React.useEffect(() => {
     fetchSavedCards();
@@ -212,10 +213,10 @@ export default function RiderAccountScreen({ navigation }: any) {
           <MenuItem
             icon="account-balance-wallet"
             title="Wallet"
-            subtitle={`Balance: £${user?.walletBalance?.toFixed(2) || '0.00'}`}
+            subtitle={`Balance: ${walletBalance < 0 ? '-' : ''}£${Math.abs(walletBalance).toFixed(2)}`}
             onPress={() => navigation.navigate("Wallet")}
-            showBadge={Boolean(user?.walletBalance && user.walletBalance > 0)}
-            badgeColor="#10B981"
+            showBadge={walletBalance !== 0}
+            badgeColor={walletBalance < 0 ? "#EF4444" : "#10B981"}
           />
           <MenuItem
             icon="payment"
@@ -240,12 +241,12 @@ export default function RiderAccountScreen({ navigation }: any) {
               ))}
             </View>
           )}
-          <MenuItem
+          {/* <MenuItem
             icon="place"
             title="Saved Places"
             subtitle="Home, Work, and more"
             onPress={() => navigation.navigate("RiderSavedPlaces")}
-          />
+          /> */}
         </View>
       </Animated.View>
 

@@ -1,22 +1,31 @@
+//client/hooks/useNotifications.ts
+
 import { useState, useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import { getApiUrl } from "@/lib/query-client";
-
-let Notifications: typeof import("expo-notifications") | null = null;
+import * as Notifications from "expo-notifications";
 
 try {
-  Notifications = require("expo-notifications");
-
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
       shouldPlaySound: true,
       shouldSetBadge: true,
     }),
   });
 } catch (error) {
   console.log("expo-notifications not available");
+}
+
+function isNotificationData(data: unknown): data is NotificationData {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "type" in data &&
+    typeof (data as any).type === "string"
+  );
 }
 
 export interface NotificationData {
@@ -35,52 +44,52 @@ export interface NotificationData {
 
 export function useNotifications(userId?: string) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [notification, setNotification] = useState<any>(null);
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const [notification, setNotification] = useState<Notifications.Notification | null>(null);
+  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
+  const responseListener = useRef<Notifications.EventSubscription | null>(null);
 
   useEffect(() => {
-    if (!Notifications) return;
+    let mounted = true;
 
     registerForPushNotifications().then((token) => {
-      if (token) {
+      if (!mounted || !token) return;
+
         setExpoPushToken(token);
         if (userId) {
           savePushToken(userId, token);
         }
-      }
+    }).catch((err) => {
+      console.error("Error during push notification setup:", err);
     });
 
     notificationListener.current =
-      Notifications.addNotificationReceivedListener((notif: any) => {
+      Notifications?.addNotificationReceivedListener((notif) => {
         setNotification(notif);
       });
 
     responseListener.current =
-      Notifications.addNotificationResponseReceivedListener(
-        (response: any) => {
-          const data = response.notification.request.content
-            .data as NotificationData;
-          handleNotificationResponse(data);
+      Notifications?.addNotificationResponseReceivedListener(
+        (response) => {
+          const rawData = response?.notification?.request?.content?.data;
+
+          if (isNotificationData(rawData)) {
+            handleNotificationResponse(rawData);
+          }
         }
       );
 
     return () => {
-      if (!Notifications) return;
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(
-          notificationListener.current
-        );
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(
-          responseListener.current
-        );
-      }
+      mounted = false;
+
+      notificationListener?.current?.remove();
+      responseListener?.current?.remove();
     };
   }, [userId]);
 
-  return { expoPushToken, notification };
+  return {
+    expoPushToken,
+    notification,
+  };
 }
 
 async function registerForPushNotifications(): Promise<string | null> {
@@ -162,7 +171,7 @@ function handleNotificationResponse(data: NotificationData) {
 export async function sendLocalNotification(
   title: string,
   body: string,
-  data?: NotificationData
+  data?: Record<string, any>
 ) {
   if (!Notifications) {
     console.log(`📢 [Local Notification] ${title}: ${body}`);

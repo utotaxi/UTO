@@ -1,4 +1,5 @@
 // client/screens/rider/RiderScheduledRidesScreen.tsx
+// client/screens/rider/RiderScheduledRidesScreen.tsx
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
@@ -123,7 +124,7 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
       {/* Late-cancel warning */}
       {canCancel && isLateCancelWindow && (
         <View style={cs.lateCancelWarning}>
-          <Text style={cs.lateCancelText}>⚠️ Cancelling now will charge the full fare</Text>
+          <Text style={cs.lateCancelText}>⚠️ Cancelling now will charge a 50% fee</Text>
         </View>
       )}
 
@@ -195,7 +196,7 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
 
     const title = willCharge ? 'Cancellation Fee Applies' : 'Cancel Ride';
     const message = willCharge
-      ? `You are cancelling within 3 hours of your scheduled pickup. The full journey fare${fare ? ` (£${parseFloat(fare).toFixed(2)})` : ''} will be charged.\n\nDo you want to proceed?`
+      ? `You are cancelling within 3 hours of your scheduled pickup. A 50% cancellation fee${fare ? ` (£${(parseFloat(fare) * 0.5).toFixed(2)})` : ''} will be charged to your wallet.\n\nDo you want to proceed?`
       : 'Free cancellation — this booking is more than 3 hours away.\n\nAre you sure you want to cancel?';
 
     Alert.alert(

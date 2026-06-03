@@ -1,4 +1,5 @@
-//client/context/DriverContext.ts
+//client/context/DriverContext.tsx
+
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from "react";
 import { Alert, Platform, Vibration } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -115,6 +116,7 @@ interface DriverContextType {
   tripHistory: Trip[];
   driverDeductions: DriverDeduction[];
   earnings: Earnings;
+  totalEarnings: number;
   activeRideRequest: RideRequest | null;
   rideState: DriverRideState;
   rideCancelledByRider: boolean;
@@ -200,6 +202,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const [driverProfile, setDriverProfileState] = useState<DriverProfile | null>(null);
   const [tripHistory, setTripHistory] = useState<Trip[]>([]);
   const [driverDeductions, setDriverDeductions] = useState<DriverDeduction[]>([]);
+  const [totalEarnings, setTotalEarnings] = useState<number>(0);
   const [activeRideRequest, setActiveRideRequest] = useState<RideRequest | null>(null);
   const [rideState, setRideState] = useState<DriverRideState>("none");
   const [isLoading, setIsLoading] = useState(true);
@@ -467,6 +470,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         documentProfilePhotoStatus: driver.documentProfilePhotoStatus,
       };
       setDriverProfileState(profile);
+      setTotalEarnings(driver.totalEarnings || 0);
       await AsyncStorage.setItem(DRIVER_PROFILE_KEY, JSON.stringify(profile));
       console.log("✅ Driver profile synced from Supabase:", profile.vehicleMake, profile.vehicleModel);
 
@@ -501,8 +505,56 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       // ── FETCH DEDUCTIONS FROM SUPABASE ──
       try {
         const d = await api.drivers.getDeductions(driver.id);
-        setDriverDeductions(d);
-        console.log("✅ Driver deductions synced from Supabase count:", d.length);
+        
+        // ── Also add cancelled rides with fees as deduction entries ──
+        let allDeductions = [...d];
+        try {
+          const rides = await api.rides.getByDriver(driver.id);
+          if (rides && rides.length > 0) {
+            // Include ALL cancelled rides and check for fees
+            const cancelledRides = rides.filter((r: any) => r.status === 'cancelled');
+            
+            cancelledRides.forEach((ride: any) => {
+              // Use stored cancellation_fee if available, otherwise calculate from estimated price
+              let feeAmount = 0;
+              
+              if (ride.cancellation_fee && ride.cancellation_fee > 0) {
+                // Use the fee stored in the database
+                feeAmount = Number(ride.cancellation_fee);
+              } else if (ride.paymentStatus && ride.paymentStatus.includes('cancellation')) {
+                // If it's a cancellation payment status, calculate fee (50% of estimated price)
+                feeAmount = Number(((ride.estimatedPrice || 0) * 0.5).toFixed(2));
+              }
+              
+              if (feeAmount > 0) {
+                // Check if this deduction already exists (avoid duplicates)
+                const deductionExists = allDeductions.some((d: any) => d.id === `ride_${ride.id}_cancellation`);
+                if (!deductionExists) {
+                  allDeductions.push({
+                    id: `ride_${ride.id}_cancellation`,
+                    driverId: driver.id,
+                    amount: feeAmount,
+                    type: 'cancellation_fee',
+                    reason: `Cancellation - ${ride.pickupAddress || 'Trip'}`,
+                    createdAt: ride.cancelledAt || ride.updatedAt || new Date().toISOString(),
+                  });
+                }
+              }
+            });
+          }
+        } catch (ridesErr) {
+          console.warn("⚠️ Could not fetch cancelled rides for deductions:", ridesErr);
+        }
+        
+        // Merge with existing local deductions (optimistic updates)
+        // Keep local deductions that match the ride ID pattern, only replace from server data
+        setDriverDeductions((prevDeductions) => {
+          const serverDeductionIds = new Set(allDeductions.map((d: any) => d.id));
+          const localOnly = prevDeductions.filter((d: any) => !serverDeductionIds.has(d.id) && d.id.startsWith("local_"));
+          const merged = [...allDeductions, ...localOnly];
+          return merged;
+        });
+        
       } catch (deductionErr) {
         console.warn("⚠️ Could not sync deductions from Supabase:", deductionErr);
       }
@@ -641,6 +693,22 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           });
         } catch (e) {
           console.warn("Failed to emit cancel:", e);
+        }
+
+        if (isAtPickup && activeRideRequest.estimatedFare > 0) {
+          const penaltyAmount = Number((activeRideRequest.estimatedFare * 0.5).toFixed(2));
+          const localDeduction: DriverDeduction = {
+            id: `local_cancel_${activeRideRequest.id}`,
+            driverId: driverProfile?.id || user?.id || "",
+            amount: penaltyAmount,
+            type: "cancel_at_pickup_penalty",
+            reason: `50% cancellation penalty for ride ${activeRideRequest.id}`,
+            createdAt: new Date().toISOString(),
+          };
+          setDriverDeductions((prev) => [localDeduction, ...prev.filter((d) => d.id !== localDeduction.id)]);
+          setTimeout(() => {
+            refreshData().catch((err: any) => console.warn("⚠️ Post-cancel refreshData failed:", err));
+          }, 2000);
         }
       } else if (rideState === "incoming") {
         try {
@@ -999,6 +1067,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         tripHistory,
         driverDeductions,
         earnings: calculateEarnings(),
+        totalEarnings,
         activeRideRequest,
         rideState,
         rideCancelledByRider,

@@ -1,4 +1,4 @@
-//server/socket.ts - CORRECT SERVER IMPLEMENTATION
+//server/socket.ts
 
 import { Server as HTTPServer } from "http";
 import { Server, Socket } from "socket.io";  // ✅ CORRECT - Use socket.io for server
@@ -953,10 +953,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
     });
 
     socket.on("ride:driver_cancel_at_pickup", async (data: { rideId: string, driverId?: string, applyPenalty?: boolean, cancelledFrom?: string }) => {
-      console.log('⚠️ Driver cancelled accepted ride:', data.rideId, 'from:', data.cancelledFrom || 'unknown');
+
 
       try {
-        const { data: ride } = await supabase
+        const { data: ride, error: rideFetchErr } = await supabase
           .from("rides")
           .select("*")
           .eq("id", data.rideId)
@@ -969,13 +969,36 @@ export function setupSocketIO(httpServer: HTTPServer) {
           const penaltyAmount = fare * 0.5;
 
           if (data.applyPenalty && penaltyAmount > 0 && actualDriverId) {
-            await supabase.from("driver_deductions").insert({
-              driver_id: actualDriverId,
-              amount: penaltyAmount,
-              type: "cancel_at_pickup_penalty",
-              reason: `Cancelled accepted ride (${data.cancelledFrom || "accepted"}) for ride ${data.rideId}`,
-            });
-            console.log(`💸 Driver ${actualDriverId} charged 50% penalty (£${penaltyAmount}) for cancelling at pickup`);
+            try {
+              // Deduct penalty from driver's total_earnings
+              const { data: driverData } = await supabase
+                .from("drivers")
+                .select("total_earnings")
+                .eq("id", actualDriverId)
+                .single();
+              const currentEarnings = Number(driverData?.total_earnings || 0);
+              const newEarnings = Number((currentEarnings - penaltyAmount).toFixed(2));
+              const { error: earningsUpdateErr } = await supabase
+                .from("drivers")
+                .update({ total_earnings: newEarnings })
+                .eq("id", actualDriverId);
+
+              // Create deduction record
+              const deductionId = `ride_${data.rideId}_cancel_at_pickup`;
+              const deductionReason = `50% cancellation penalty for ride ${data.rideId}`;
+              const { error: deductionErr } = await supabase
+                .from("driver_deductions")
+                .insert({
+                  id: deductionId,
+                  driver_id: actualDriverId,
+                  amount: penaltyAmount,
+                  type: "cancel_at_pickup_penalty",
+                  reason: deductionReason,
+                  created_at: new Date().toISOString(),
+                });
+            } catch (penaltyErr) {
+              console.error(`❌ Failed to apply cancellation penalty to driver ${actualDriverId}:`, penaltyErr);
+            }
           }
 
           const rideInfo = activeRides.get(data.rideId);
@@ -1317,14 +1340,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
           }
           else if (update.status === "cancelled") {
             updateData.cancelled_at = new Date().toISOString();
+            updateData.cancelled_by = "rider"; // Track who cancelled (rider/driver)
 
             // ── Server-side cancellation fee processing ──────────────────────
             // Rider gets one free minute after driver assignment. After that,
-            // or once the driver has arrived, the full fare is owed.
+            // or once the driver has arrived, a 50% cancellation fee is owed.
             try {
-              const { data: cancelledRide } = await supabase
+              const { data: cancelledRide, error: cancelledRideErr } = await supabase
                 .from("rides")
-                .select("rider_id, driver_id, status, accepted_at, estimated_price, final_price, payment_method")
+                .select("rider_id, driver_id, status, accepted_at, estimated_price, final_price")
                 .eq("id", update.rideId)
                 .single();
 
@@ -1335,108 +1359,72 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const shouldChargeCancellationFee = !!cancelledRide && (isDriverAlreadyAtPickup || isAfterFreeMinute);
 
               if (cancelledRide && shouldChargeCancellationFee) {
-                const fareAmount = cancelledRide.final_price || cancelledRide.estimated_price || 0;
+                const fullFareAmount = Number(cancelledRide.final_price || cancelledRide.estimated_price || 0);
+                const cancellationFeeAmount = Number((fullFareAmount * 0.5).toFixed(2));
                 const riderId = cancelledRide.rider_id;
                 const rideInfo = activeRides.get(update.rideId);
                 const walletDeductionAlreadyTaken = Math.max(0, Number(rideInfo?.rideData?.walletDeduction || 0));
-                const amountToCharge = Math.max(0, Number((fareAmount - walletDeductionAlreadyTaken).toFixed(2)));
+                const walletAdjustmentAmount = Number((cancellationFeeAmount - walletDeductionAlreadyTaken).toFixed(2));
+                const walletDebitAmount = Math.max(0, walletAdjustmentAmount);
 
-                if (riderId && fareAmount > 0) {
-                  console.log(`💸 Rider ${riderId} cancelling after free period — full fare £${fareAmount}, additional charge £${amountToCharge}`);
+                if (riderId && cancellationFeeAmount > 0) {
 
-                  (update as any).cancellationFee = fareAmount;
-                  (update as any).chargedAmount = amountToCharge;
+                  (update as any).cancellationFee = cancellationFeeAmount;
+                  (update as any).chargedAmount = walletDebitAmount;
+                  (update as any).walletAdjustment = walletAdjustmentAmount;
                   (update as any).cancellationPolicy = isDriverAlreadyAtPickup ? "driver_arrived" : "after_free_minute";
+                  updateData.cancellation_fee = cancellationFeeAmount; // Store in database
 
-                  // 1. Try Stripe card charge if payment method is card
-                  let chargedViaCard = false;
-                  if (cancelledRide.payment_method === "card" && amountToCharge > 0) {
-                    try {
-                      const { data: riderUser } = await supabase
-                        .from("users")
-                        .select("stripe_customer_id")
-                        .eq("id", riderId)
-                        .single();
+                  // Always apply cancellation fee through wallet, for card and cash rides.
+                  // Wallet balance is allowed to go negative. If wallet was already
+                  // deducted for the ride, only apply the net adjustment needed.
+                  try {
+                    const { data: userRow, error: walletFetchErr } = await supabase
+                      .from("users")
+                      .select("wallet_balance")
+                      .eq("id", riderId)
+                      .single();
 
-                      if (riderUser?.stripe_customer_id) {
-                        const chargeResult = await chargeSavedCard(
-                          riderUser.stripe_customer_id,
-                          amountToCharge,
-                          update.rideId,
-                          "gbp",
-                          "cancellation_fee"
-                        );
-                        if (chargeResult.success) {
-                          chargedViaCard = true;
-                          updateData.payment_status = "cancellation_fee_card_charged";
-                          updateData.payment_intent_id = chargeResult.paymentIntentId;
-                          (update as any).chargedVia = "card";
-                          console.log(`✅ Cancellation fee £${fareAmount} charged to card for rider ${riderId}`);
+                    const currentBalance = Number(userRow?.wallet_balance || 0);
+                    const newBalance = Number((currentBalance - walletAdjustmentAmount).toFixed(2));
 
-                          await supabase.from("payments").insert({
-                            ride_id: update.rideId,
-                            user_id: riderId,
-                            amount: amountToCharge,
-                            currency: "gbp",
-                            status: "succeeded",
-                            payment_method: "card",
-                            stripe_payment_intent_id: chargeResult.paymentIntentId || null,
-                            completed_at: new Date().toISOString(),
-                          });
-                        }
-                      }
-                    } catch (cardErr) {
-                      console.warn(`⚠️ Card charge failed for cancellation fee:`, cardErr);
-                    }
-                  }
+                    const { error: walletUpdateErr } = await supabase
+                      .from("users")
+                      .update({ wallet_balance: newBalance })
+                      .eq("id", riderId);
 
-                  // 2. Fallback: deduct from wallet
-                  if (!chargedViaCard && amountToCharge > 0) {
-                    try {
-                      const { data: userRow } = await supabase
-                        .from("users")
-                        .select("wallet_balance")
-                        .eq("id", riderId)
-                        .single();
+                    const { data: verifyUser, error: verifyErr } = await supabase
+                      .from("users")
+                      .select("wallet_balance")
+                      .eq("id", riderId)
+                      .single();
 
-                      const currentBalance = Number(userRow?.wallet_balance || 0);
-                      const newBalance = Number((currentBalance - amountToCharge).toFixed(2));
-
-                      await supabase
-                        .from("users")
-                        .update({ wallet_balance: newBalance })
-                        .eq("id", riderId);
-
-                      updateData.payment_status = "cancellation_fee_wallet_charged";
-                      (update as any).chargedVia = "wallet";
-                      console.log(`💰 Cancellation fee £${amountToCharge} deducted from wallet (${currentBalance} → ${newBalance})`);
-                    } catch (walletErr) {
-                      console.error("❌ Failed to deduct cancellation fee from wallet:", walletErr);
-                    }
-                  } else if (amountToCharge <= 0) {
                     updateData.payment_status = "cancellation_fee_wallet_charged";
-                    (update as any).chargedVia = walletDeductionAlreadyTaken > 0 ? "wallet" : "none";
+                    (update as any).chargedVia = "wallet";
+                    (update as any).walletBalance = newBalance;
+                  } catch (walletErr) {
+                    console.error("❌ Failed to adjust wallet for cancellation fee:", walletErr);
                   }
 
-                  // 3. Record extra wallet debit for history when wallet was charged now.
-                  if ((update as any).chargedVia === "wallet" && amountToCharge > 0) {
+                  if ((update as any).chargedVia === "wallet" && walletAdjustmentAmount !== 0) {
                     try {
-                      await supabase
+                      const { error: walletTxnErr } = await supabase
                         .from("wallet_transactions")
                         .insert({
                           user_id: riderId,
                           ride_id: update.rideId,
-                          amount: amountToCharge,
-                          type: "debit",
-                          description: `Cancellation fee — free cancellation period ended`,
+                          amount: Math.abs(walletAdjustmentAmount),
+                          type: walletAdjustmentAmount > 0 ? "debit" : "credit",
+                          description: walletAdjustmentAmount > 0
+                            ? `50% Cancellation fee (£${cancellationFeeAmount.toFixed(2)})`
+                            : `Refund unused wallet deduction after 50% cancellation fee (£${cancellationFeeAmount.toFixed(2)})`,
                         });
-                      console.log(`✅ Wallet transaction recorded for cancellation fee`);
                     } catch (txnErr) {
                       console.warn("⚠️ Failed to insert cancellation fee wallet transaction:", txnErr);
                     }
                   }
 
-                  // 4. Credit driver earnings with the cancellation fee
+                  // Credit driver earnings with the 50% cancellation fee when rider cancels.
                   if (cancelledRide.driver_id) {
                     try {
                       const { data: driverData } = await supabase
@@ -1446,14 +1434,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
                         .single();
 
                       const currentEarnings = Number(driverData?.total_earnings || 0);
-                      const newEarnings = Number((currentEarnings + fareAmount).toFixed(2));
+                      const newEarnings = Number((currentEarnings + cancellationFeeAmount).toFixed(2));
 
-                      await supabase
+                      const { error: driverEarningsErr } = await supabase
                         .from("drivers")
                         .update({ total_earnings: newEarnings })
                         .eq("id", cancelledRide.driver_id);
 
-                      console.log(`✅ Driver ${cancelledRide.driver_id} earnings updated for cancellation fee: +£${fareAmount}`);
                     } catch (earningsErr) {
                       console.error("❌ Failed to update driver earnings on cancellation:", earningsErr);
                     }
@@ -1463,6 +1450,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 (update as any).cancellationFee = 0;
                 (update as any).chargedAmount = 0;
                 (update as any).chargedVia = "none";
+                updateData.cancellation_fee = 0; // Store in database
               }
             } catch (cancelFeeErr) {
               console.error("❌ Error processing cancellation fee:", cancelFeeErr);

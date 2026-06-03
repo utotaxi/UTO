@@ -317,7 +317,7 @@ export default function RideTrackingScreen({ navigation }: any) {
       // For cancellations and other cases, navigate after a short delay
       const timer = setTimeout(() => {
         navigateHome();
-      }, 300);
+      }, 10000);
       return () => clearTimeout(timer);
     }
   }, [activeRide, rideStatus, navigateHome]);
@@ -405,7 +405,7 @@ export default function RideTrackingScreen({ navigation }: any) {
         : "Your free cancellation period has ended and your driver is on the way.";
       Alert.alert(
         "Cancellation Fee Applies",
-        `${feeReason} Cancelling now will result in the full fare amount of £${fareAmount.toFixed(2)} being charged to your payment method.`,
+        `${feeReason} Cancelling now will result in a 50% cancellation fee of £${(fareAmount * 0.5).toFixed(2)} being charged to your wallet.`,
         [
           { text: "Keep Ride", style: "cancel" },
           { 
@@ -471,7 +471,7 @@ export default function RideTrackingScreen({ navigation }: any) {
           Unfortunately we don't have any available drivers at the moment. Please try again shortly.
         </ThemedText>
         <Pressable
-          onPress={handleRebook}
+          onPress={() => handleRebook()}
           style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary, marginTop: Spacing.xl }]}
         >
           <MaterialIcons name="refresh" size={20} color="#000" />
@@ -985,7 +985,7 @@ export default function RideTrackingScreen({ navigation }: any) {
               Unfortunately we don't have any available drivers at the moment. Please try again shortly.
             </ThemedText>
             <Pressable
-              onPress={handleRebook}
+              onPress={() => handleRebook()}
               style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary }]}
             >
               <MaterialIcons name="refresh" size={20} color="#000" />

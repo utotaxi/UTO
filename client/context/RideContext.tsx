@@ -277,9 +277,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
             }
 
             if (update.status === "cancelled" && cancellationFee > 0) {
-              if (chargedVia === "wallet" && chargedAmount > 0) {
+              const serverWalletBalance = (update as any).walletBalance;
+              if (chargedVia === "wallet" && typeof serverWalletBalance === "number") {
+                updateProfile({ walletBalance: serverWalletBalance });
+              } else if (chargedVia === "wallet" && chargedAmount > 0) {
                 const currentBalance = userRef.current?.walletBalance || 0;
-                updateProfile({ walletBalance: Number((currentBalance - chargedAmount).toFixed(2)) });
+                const newBalance = Number((currentBalance - chargedAmount).toFixed(2));
+                updateProfile({ walletBalance: newBalance });
               }
 
               setTimeout(() => {

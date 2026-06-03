@@ -1,5 +1,7 @@
 //client/screen/rider/ServicesScreen.tsx
 
+//client/screen/rider/ServicesScreen.tsx
+
 import React from "react";
 import {
   StyleSheet,
@@ -21,7 +23,7 @@ const { width } = Dimensions.get("window");
 
 const RIDE_SERVICES = [
   { id: "trip", name: "Trip", icon: "directions-car", description: "Everyday rides" },
-  { id: "reserve", name: "Reserve", icon: "event", description: "Reserve your ride at least 4 hours in advance" },
+  // { id: "reserve", name: "Reserve", icon: "event", description: "Reserve your ride at least 4 hours in advance" },
   { id: "airport", name: "Airport", icon: "flight", description: "Airport transfers" },
 ];
 

@@ -1,3 +1,4 @@
+//server/routes.ts 
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
@@ -524,6 +525,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/drivers/:id/deductions", async (req: Request, res: Response) => {
     try {
       const deductions = await storage.getDriverDeductions(req.params.id as string);
+      // Prevent caching to ensure fresh deductions data
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
       res.json({ deductions });
     } catch (error) {
       console.error("Get driver deductions error:", error);
@@ -1519,26 +1524,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (cancelledBy === 'rider') {
         if (withinThreeHours || pastPickup) {
-          // Charge full fare — no refund
-          cancellationFee = estimatedFare;
-          penaltyNote = `Cancellation within 3 hours — full fare of £${estimatedFare.toFixed(2)} charged.`;
+          // Charge 50% cancellation fee for late cancellation
+          const halfFare = estimatedFare * 0.5;
+          cancellationFee = halfFare;
+          penaltyNote = `Late cancellation within 3 hours — 50% fee of £${halfFare.toFixed(2)} charged.`;
 
-          // Deduct from rider wallet if they have balance
-          if (booking.rider_id && estimatedFare > 0) {
+          // Deduct from rider wallet (allowing negative balance)
+          if (booking.rider_id && halfFare > 0) {
             try {
               const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', booking.rider_id).single();
               const currentBalance = riderRow?.wallet_balance || 0;
-              const newBalance = Math.max(0, currentBalance - estimatedFare);
+              const newBalance = Number((currentBalance - halfFare).toFixed(2));
               await sb.from('users').update({ wallet_balance: newBalance }).eq('id', booking.rider_id);
               // Record wallet transaction
               await sb.from('wallet_transactions').insert({
                 user_id: booking.rider_id,
-                ride_id: booking.id,
-                amount: estimatedFare,
+                ride_id: null,
+                amount: halfFare,
                 type: 'debit',
-                description: `Late cancellation fee — booking within 3 hours of pickup`,
+                description: `50% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${booking.id}`,
               });
-              console.log(`💸 Late cancel: rider ${booking.rider_id} charged £${estimatedFare}`);
+              console.log(`💸 Late cancel: rider ${booking.rider_id} charged 50% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
             } catch (walletErr) {
               console.error('Failed to charge rider wallet for late cancel:', walletErr);
             }
@@ -1570,7 +1576,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 type: 'late_cancel_penalty',
                 reason: `Late cancellation penalty (50%) for scheduled booking ${booking.id}`,
               });
-              console.log(`💸 Driver ${booking.driver_id} penalised £${driverPenalty} for late cancel`);
+
+              // Also deduct from driver's total_earnings
+              const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
+              const currentEarnings = Number(driverData?.total_earnings || 0);
+              const newEarnings = Number((currentEarnings - driverPenalty).toFixed(2));
+              await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id);
+
             } catch (penaltyErr) {
               console.error('Failed to record driver penalty:', penaltyErr);
             }
