@@ -1,3 +1,109 @@
+// //client/navigator/rootstacknavigator.tsx 
+// import React from "react";
+// import { ActivityIndicator, View, StyleSheet } from "react-native";
+// import { createNativeStackNavigator } from "@react-navigation/native-stack";
+
+// import WelcomeScreen from "@/screens/auth/WelcomeScreen";
+// import SignInScreen from "@/screens/auth/SignInScreen";
+// import SignUpScreen from "@/screens/auth/SignUpScreen";
+// import RiderTabNavigator from "@/navigation/RiderTabNavigator";
+// import DriverTabNavigator from "@/navigation/DriverTabNavigator";
+// import RideTrackingScreen from "@/screens/rider/RideTrackingScreen";
+// import SettingsScreen from "@/screens/SettingsScreen";
+// import { useScreenOptions } from "@/hooks/useScreenOptions";
+// import { useAuth } from "@/context/AuthContext";
+// import { useMode } from "@/context/ModeContext";
+// import { useTheme } from "@/hooks/useTheme";
+// import { UTOColors } from "@/constants/theme";
+
+// export type RootStackParamList = {
+//   Welcome: undefined;
+//   SignIn: { role?: string };
+//   SignUp: { role?: string };
+//   Main: undefined;
+//   RideTracking: undefined;
+//   Settings: undefined;
+// };
+
+// const Stack = createNativeStackNavigator<RootStackParamList>();
+
+// function MainNavigator() {
+//   const { currentMode } = useMode();
+
+//   return currentMode === "rider" ? <RiderTabNavigator /> : <DriverTabNavigator />;
+// }
+
+// export default function RootStackNavigator() {
+//   const screenOptions = useScreenOptions();
+//   const { isAuthenticated, isLoading: authLoading } = useAuth();
+//   const { isLoading: modeLoading } = useMode();
+//   const { theme } = useTheme();
+
+//   if (authLoading || modeLoading) {
+//     return (
+//       <View style={[styles.loadingContainer, { backgroundColor: "#000000" }]}>
+//         <ActivityIndicator size="large" color={UTOColors.primary} />
+//       </View>
+//     );
+//   }
+
+//   return (
+//     <Stack.Navigator screenOptions={screenOptions}>
+//       {!isAuthenticated ? (
+//         <>
+//           <Stack.Screen
+//             name="Welcome"
+//             component={WelcomeScreen}
+//             options={{ headerShown: false }}
+//           />
+//           <Stack.Screen
+//             name="SignIn"
+//             component={SignInScreen}
+//             options={{ headerShown: false }}
+//           />
+//           <Stack.Screen
+//             name="SignUp"
+//             component={SignUpScreen}
+//             options={{ headerShown: false }}
+//           />
+//         </>
+//       ) : (
+//         <>
+//           <Stack.Screen
+//             name="Main"
+//             component={MainNavigator}
+//             options={{ headerShown: false }}
+//           />
+//           <Stack.Screen
+//             name="RideTracking"
+//             component={RideTrackingScreen}
+//             options={{
+//               headerTitle: "Your Ride",
+//               presentation: "card",
+//             }}
+//           />
+//           <Stack.Screen
+//             name="Settings"
+//             component={SettingsScreen}
+//             options={{
+//               headerTitle: "Settings",
+//               presentation: "modal",
+//             }}
+//           />
+//         </>
+//       )}
+//     </Stack.Navigator>
+//   );
+// }
+
+// const styles = StyleSheet.create({
+//   loadingContainer: {
+//     flex: 1,
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+// });
+
 //client/navigation/RootStackNavigator.tsx 
 import React from "react";
 import { ActivityIndicator, View, StyleSheet } from "react-native";

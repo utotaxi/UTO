@@ -1,4 +1,3 @@
-//client/screens/rider/WalletScreen.tsx
 import React, { useState, useCallback } from "react";
 import { StyleSheet, View, Text, FlatList, ActivityIndicator, Pressable, RefreshControl } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

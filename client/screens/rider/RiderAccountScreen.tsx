@@ -1,4 +1,4 @@
-//client/screens/rider/RiderAccountScreen.tsx
+
 import React from "react";
 import { Platform, StyleSheet, View, Pressable, Image, ScrollView, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

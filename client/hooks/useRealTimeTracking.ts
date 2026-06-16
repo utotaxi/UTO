@@ -1,4 +1,3 @@
-//client/hooks/UseRealTimeTracking.ts
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as Location from "expo-location";
 import { Platform } from "react-native";

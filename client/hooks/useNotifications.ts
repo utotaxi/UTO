@@ -1,5 +1,3 @@
-//client/hooks/useNotifications.ts
-
 import { useState, useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import Constants from "expo-constants";

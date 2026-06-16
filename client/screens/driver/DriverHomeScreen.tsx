@@ -1,4 +1,5 @@
-//client/screens/driver/DriverHomeScreen.tsx
+
+
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   StyleSheet,
