@@ -63,7 +63,7 @@ export function TripCard({ trip, onPress }: TripCardProps) {
       ]}
     >
       <View style={styles.leftSection}>
-        <ThemedText style={[styles.time, { color: isDark ? "#9CA3AF" : theme.textSecondary }]}>
+        <ThemedText style={[styles.time, { color: isDark ? "#9CA3AF" : theme.textSecondary, display: !!trip.completedAt ? "flex" : "none" }]}>
           {formatTime(trip.completedAt)}
         </ThemedText>
         <ThemedText style={[styles.riderName, { color: isDark ? "#FFFFFF" : theme.text }]}>

@@ -16,6 +16,7 @@ export interface User {
   stripe_customer_id: string | null;
   wallet_balance: number | null;
   push_token: string | null;
+  is_deleted: boolean | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -86,6 +87,8 @@ export interface Ride {
   cancellation_reason: string | null;
   payment_method: string | null;
   otp: string | null;
+  cancellation_fee: number | null;
+  cancelled_by: string | null;
 }
 
 export interface Payment {
@@ -121,6 +124,8 @@ export interface DriverDeduction {
   type: string;
   reason: string | null;
   created_at: string | null;
+  cancelled_by?: string | null;
+  cancellation_fee?: number | null;
 }
 
 export interface ScheduledRide {
@@ -155,6 +160,7 @@ function toCamelUser(row: User) {
     stripeCustomerId: row.stripe_customer_id,
     walletBalance: row.wallet_balance || 0,
     pushToken: row.push_token,
+    isDeleted: row.is_deleted || false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -233,6 +239,8 @@ function toCamelRide(row: Ride) {
     completedAt: row.completed_at,
     cancelledAt: row.cancelled_at,
     cancellationReason: row.cancellation_reason,
+    cancellation_fee: row.cancellation_fee,
+    cancelled_by: row.cancelled_by,
     paymentMethod: row.payment_method,
     otp: row.otp,
   };
@@ -284,6 +292,7 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<any | undefined>;
   createUser(user: any): Promise<any>;
   updateUser(id: string, data: any): Promise<any | undefined>;
+  softDeleteUser(id: string): Promise<any | undefined>;
 
   getDriver(id: string): Promise<any | undefined>;
   getDriverByUserId(userId: string): Promise<any | undefined>;
@@ -368,11 +377,26 @@ export class SupabaseStorage implements IStorage {
     if (updates.stripeCustomerId !== undefined) snakeData.stripe_customer_id = updates.stripeCustomerId;
     if (updates.walletBalance !== undefined) snakeData.wallet_balance = updates.walletBalance;
     if (updates.pushToken !== undefined) snakeData.push_token = updates.pushToken;
+    if (updates.isDeleted !== undefined) snakeData.is_deleted = updates.isDeleted;
     snakeData.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
       .from("users")
       .update(snakeData)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error || !data) return undefined;
+    return toCamelUser(data as User);
+  }
+
+  async softDeleteUser(id: string) {
+    const { data, error } = await supabase
+      .from("users")
+      .update({
+        is_deleted: true,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", id)
       .select()
       .single();
@@ -535,7 +559,7 @@ export class SupabaseStorage implements IStorage {
       .insert(insertData)
       .select()
       .single();
-    
+
     if (error) {
       console.error("Failed to create driver deduction:", error.message);
       throw new Error(`Failed to create driver deduction: ${error.message}`);
@@ -722,7 +746,7 @@ export class SupabaseStorage implements IStorage {
     };
     if (userName) insertData.user_name = userName;
     if (userEmail) insertData.user_email = userEmail;
-    
+
     if (payment.id) insertData.id = payment.id;
     if (payment.stripePaymentIntentId) insertData.stripe_payment_intent_id = payment.stripePaymentIntentId;
     if (payment.paymentMethod) insertData.payment_method = payment.paymentMethod;

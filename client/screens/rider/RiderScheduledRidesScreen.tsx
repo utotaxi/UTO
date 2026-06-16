@@ -1,5 +1,4 @@
 // client/screens/rider/RiderScheduledRidesScreen.tsx
-// client/screens/rider/RiderScheduledRidesScreen.tsx
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
@@ -49,12 +48,12 @@ function fmtDateTime(iso: string) {
 
 function statusLabel(status: BookingStatus): { label: string; color: string; bg: string } {
   switch (status) {
-    case 'scheduled':      return { label: 'Scheduled',       color: '#000', bg: UTO_YELLOW };
+    case 'scheduled': return { label: 'Scheduled', color: '#000', bg: UTO_YELLOW };
     case 'driver_accepted': return { label: 'Driver Assigned', color: '#fff', bg: '#10B981' };
-    case 'in_progress':    return { label: 'In Progress',     color: '#fff', bg: '#3B82F6' };
-    case 'completed':      return { label: 'Completed',       color: '#fff', bg: '#6B7280' };
-    case 'cancelled':      return { label: 'Cancelled',       color: '#fff', bg: '#EF4444' };
-    default:               return { label: status,             color: '#fff', bg: '#6B7280' };
+    case 'in_progress': return { label: 'In Progress', color: '#fff', bg: '#3B82F6' };
+    case 'completed': return { label: 'Completed', color: '#fff', bg: '#6B7280' };
+    case 'cancelled': return { label: 'Cancelled', color: '#fff', bg: '#EF4444' };
+    default: return { label: status, color: '#fff', bg: '#6B7280' };
   }
 }
 
@@ -69,7 +68,7 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
   const msUntilPickup = new Date(ride.pickup_at).getTime() - now;
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
   const isLateCancelWindow = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
-  
+
   // Calculate dynamic fare if distance & duration are available, otherwise fallback
   let displayFare = ride.estimated_fare;
   if (ride.distance_miles && ride.duration_minutes) {
@@ -124,7 +123,7 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
       {/* Late-cancel warning */}
       {canCancel && isLateCancelWindow && (
         <View style={cs.lateCancelWarning}>
-          <Text style={cs.lateCancelText}>⚠️ Cancelling now will charge a 50% fee</Text>
+          <Text style={cs.lateCancelText}>⚠️ Cancelling now will charge a 100% fee</Text>
         </View>
       )}
 
@@ -196,7 +195,7 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
 
     const title = willCharge ? 'Cancellation Fee Applies' : 'Cancel Ride';
     const message = willCharge
-      ? `You are cancelling within 3 hours of your scheduled pickup. A 50% cancellation fee${fare ? ` (£${(parseFloat(fare) * 0.5).toFixed(2)})` : ''} will be charged to your wallet.\n\nDo you want to proceed?`
+      ? `You are cancelling within 3 hours of your scheduled pickup. A 100% cancellation fee${fare ? ` (£${(parseFloat(fare) * 1).toFixed(2)})` : ''} will be charged to your wallet.\n\nDo you want to proceed?`
       : 'Free cancellation — this booking is more than 3 hours away.\n\nAre you sure you want to cancel?';
 
     Alert.alert(

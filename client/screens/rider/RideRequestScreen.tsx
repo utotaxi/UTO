@@ -1,4 +1,5 @@
-//client//screens/rider/RideRequestScreen.tsx
+//client/screens/rider/RideRequestScreen.tsx
+
 import React, { useState, useEffect, useMemo } from "react";
 import {
   StyleSheet,
@@ -375,7 +376,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
         setPickupLocation({ latitude: prefillPickup.latitude, longitude: prefillPickup.longitude });
         setDropoff(prefillDropoff.address);
         setDropoffLocation({ latitude: prefillDropoff.latitude, longitude: prefillDropoff.longitude });
-        
+
         setLocation({
           coords: { latitude: prefillPickup.latitude, longitude: prefillPickup.longitude, altitude: 0, accuracy: 0, altitudeAccuracy: 0, heading: 0, speed: 0 },
           timestamp: Date.now(),
@@ -433,17 +434,17 @@ export default function RideRequestScreen({ navigation, route }: any) {
   useEffect(() => {
     if (dropoff.length >= 3 && dropoffLocation) {
       setShowVehicleSelector(true);
-      
+
       // Fetch actual distance
       (async () => {
         try {
           const baseUrl = getApiUrl();
           const originStr = `${pickupLocation?.latitude || location?.coords.latitude || 51.5074},${pickupLocation?.longitude || location?.coords.longitude || -0.1278}`;
           const destStr = `${dropoffLocation.latitude},${dropoffLocation.longitude}`;
-          
+
           const res = await fetch(`${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`);
           const data = await res.json();
-          
+
           if (data.status === "OK" && data.routes?.[0]?.legs?.[0]) {
             const leg = data.routes[0].legs[0];
             setDistanceKm((leg.distance?.value || 0) / 1000);
@@ -855,7 +856,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
             </View>
 
             {(user?.walletBalance && user.walletBalance > 0) ? (
-              <Pressable 
+              <Pressable
                 onPress={() => setUseWalletBalance(!useWalletBalance)}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#333333', marginBottom: 12 }}
               >
@@ -866,10 +867,10 @@ export default function RideRequestScreen({ navigation, route }: any) {
                     <Text style={{ fontSize: 13, color: '#A0A0A0' }}>Available: £{user.walletBalance.toFixed(2)}</Text>
                   </View>
                 </View>
-                <MaterialIcons 
-                  name={useWalletBalance ? "check-box" : "check-box-outline-blank"} 
-                  size={24} 
-                  color={useWalletBalance ? UTOColors.primary : "#A0A0A0"} 
+                <MaterialIcons
+                  name={useWalletBalance ? "check-box" : "check-box-outline-blank"}
+                  size={24}
+                  color={useWalletBalance ? UTOColors.primary : "#A0A0A0"}
                 />
               </Pressable>
             ) : null}
@@ -1014,7 +1015,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                 </View>
                 {/* Day names */}
                 <View style={schedStyles.calDayNames}>
-                  {['S','M','T','W','T','F','S'].map((d, i) => (
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
                     <Text key={i} style={schedStyles.calDayName}>{d}</Text>
                   ))}
                 </View>
@@ -1229,7 +1230,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                     });
                     if (!res.ok) {
                       let resBody: any = {};
-                      try { resBody = await res.json(); } catch (_) {}
+                      try { resBody = await res.json(); } catch (_) { }
                       Alert.alert('Error', resBody.error || `Server error ${res.status}`);
                       return;
                     }
@@ -1305,23 +1306,23 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
   },
-  pickupLaterBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#1A1A1A",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 4,
-  },
-  pickupLaterBtnActive: {
-    backgroundColor: UTOColors.primary,
-  },
-  pickupLaterText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "600",
-  },
+  // pickupLaterBtn: {
+  //   flexDirection: "row",
+  //   alignItems: "center",
+  //   backgroundColor: "#1A1A1A",
+  //   paddingHorizontal: 10,
+  //   paddingVertical: 8,
+  //   borderRadius: 20,
+  //   gap: 4,
+  // },
+  // pickupLaterBtnActive: {
+  //   backgroundColor: UTOColors.primary,
+  // },
+  // pickupLaterText: {
+  //   color: "#FFFFFF",
+  //   fontSize: 12,
+  //   fontWeight: "600",
+  // },
   routeContainer: {
     flexDirection: "row",
   },

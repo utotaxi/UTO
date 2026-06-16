@@ -167,6 +167,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log('ℹ️ drivers.badge_no migration skipped:', (e as Error).message);
   }
 
+  // ─── Safe migration: ensure is_deleted column exists on users table ───
+  try {
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;`
+    });
+    console.log('✅ Ensured users.is_deleted column exists');
+  } catch (e) {
+    console.log('ℹ️ users.is_deleted migration skipped:', (e as Error).message);
+  }
+
   app.get("/api/pricing-rules/active", async (req: Request, res: Response) => {
     try {
       const { data, error } = await supabase
@@ -175,7 +185,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
-      
+
       if (error) {
         return res.status(404).json({ error: "No active configuration found", details: error.message });
       }
@@ -199,6 +209,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const existingUser = await storage.getUserByEmail(email);
       if (existingUser) {
+        // Block registration if the account was soft-deleted
+        if (existingUser.isDeleted) {
+          console.log(`⛔ Register blocked: account was deleted for ${email}`);
+          return res.status(403).json({ error: "This account has been deleted. Please contact support if you wish to re-register." });
+        }
         console.log(`⚠️ Register: user already exists: ${email}`);
         return res.status(409).json({ error: "User already exists" });
       }
@@ -262,6 +277,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(401).json({ error: "Invalid credentials" });
         }
       } else if (!isGoogle) {
+        // Block login if account is soft-deleted
+        if (user.isDeleted) {
+          console.log(`⛔ Login blocked: account was deleted for ${email}`);
+          return res.status(403).json({ error: "This account has been deleted." });
+        }
         // Security logic: check if standard login attempts have matching passwords
         if (user.password) {
           // User has a stored password — verify it matches
@@ -276,6 +296,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log(`🔐 Password set for existing user: ${email}`);
           }
         }
+      }
+
+      // Block login for Google users if account is soft-deleted
+      if (user && user.isDeleted) {
+        console.log(`⛔ Login blocked: account was deleted for ${email}`);
+        return res.status(403).json({ error: "This account has been deleted." });
       }
 
       res.json({ user });
@@ -390,6 +416,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Soft Delete Account ───
+  app.post("/api/users/:id/delete-account", async (req: Request, res: Response) => {
+    try {
+      const userId = req.params.id as string;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const deletedUser = await storage.softDeleteUser(userId);
+      if (!deletedUser) {
+        return res.status(500).json({ error: "Failed to delete account" });
+      }
+
+      console.log(`🗑️ Account soft-deleted: userId=${userId}, email=${user.email}`);
+      res.json({ success: true, message: "Account has been deleted successfully." });
+    } catch (error) {
+      console.error("Delete account error:", error);
+      res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
+
   app.post("/api/drivers", async (req: Request, res: Response) => {
     try {
       const { userId, vehicleType, vehicleMake, vehicleModel, licensePlate, isOnline, isAvailable, vehicleYear, vehicleColor, councilLicence, badgeNo } = req.body;
@@ -477,14 +525,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch (broadcastErr) {
         console.warn("⚠️ Could not broadcast driver location to riders:", broadcastErr);
-    }
+      }
 
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Error updating driver location:", error);
-    res.status(500).json({ error: "Failed to update location" });
-  }
-});
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating driver location:", error);
+      res.status(500).json({ error: "Failed to update location" });
+    }
+  });
 
   app.get("/api/drivers/online", async (req: Request, res: Response) => {
     try {
@@ -1060,30 +1108,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(generateMockRoute());
       }
 
-    // Later booking (reservation) endpoint with 4‑hour validation
-    app.post("/api/later-bookings", async (req: Request, res: Response) => {
-      try {
-        const { userId, pickup_time, ...rest } = req.body;
-        if (!userId || !pickup_time) {
-          return res.status(400).json({ error: "userId and pickup_time are required" });
+      // Later booking (reservation) endpoint with 4‑hour validation
+      app.post("/api/later-bookings", async (req: Request, res: Response) => {
+        try {
+          const { userId, pickup_time, ...rest } = req.body;
+          if (!userId || !pickup_time) {
+            return res.status(400).json({ error: "userId and pickup_time are required" });
+          }
+          const pickupDate = new Date(pickup_time);
+          const now = new Date();
+          if (pickupDate.getTime() - now.getTime() < 4 * 60 * 60 * 1000) {
+            return res.status(400).json({ error: "Bookings must be made at least 4 hours in advance" });
+          }
+          const payload = { user_id: userId, pickup_time: pickupDate.toISOString(), ...rest };
+          const { data, error } = await supabase.from("later_bookings").insert(payload).select().single();
+          if (error) {
+            console.error("Failed to insert later booking", error);
+            return res.status(500).json({ error: "Failed to create reservation" });
+          }
+          return res.status(201).json({ laterBooking: data });
+        } catch (e) {
+          console.error("Later booking error", e);
+          res.status(500).json({ error: "Server error" });
         }
-        const pickupDate = new Date(pickup_time);
-        const now = new Date();
-        if (pickupDate.getTime() - now.getTime() < 4 * 60 * 60 * 1000) {
-          return res.status(400).json({ error: "Bookings must be made at least 4 hours in advance" });
-        }
-        const payload = { user_id: userId, pickup_time: pickupDate.toISOString(), ...rest };
-        const { data, error } = await supabase.from("later_bookings").insert(payload).select().single();
-        if (error) {
-          console.error("Failed to insert later booking", error);
-          return res.status(500).json({ error: "Failed to create reservation" });
-        }
-        return res.status(201).json({ laterBooking: data });
-      } catch (e) {
-        console.error("Later booking error", e);
-        res.status(500).json({ error: "Server error" });
-      }
-    });
+      });
 
       // Sort routes by fastest traffic-aware duration (duration_in_traffic preferred)
       data.routes.sort((a: any, b: any) => {
@@ -1292,7 +1340,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (dropoffTime) {
         const gapMs = dropoffTime.getTime() - pickupTime.getTime();
         if (gapMs < 30 * 60 * 1000) {
-          return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs/60000)} min)` });
+          return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs / 60000)} min)` });
         }
       }
 
@@ -1301,16 +1349,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const normalizedCouponCode = couponCode?.toUpperCase()?.trim();
         const { error: couponRpcError } = await sb.rpc('increment_coupon_usage', { coupon_code: normalizedCouponCode });
         if (couponRpcError) {
-        const { data: couponData } = await sb
-          .from("discount_coupons")
-          .select("used_count")
-          .eq("code", normalizedCouponCode)
-          .single();
-        if (couponData) {
-          await sb
+          const { data: couponData } = await sb
             .from("discount_coupons")
-            .update({ used_count: (couponData.used_count || 0) + 1 })
-            .eq("code", normalizedCouponCode);
+            .select("used_count")
+            .eq("code", normalizedCouponCode)
+            .single();
+          if (couponData) {
+            await sb
+              .from("discount_coupons")
+              .update({ used_count: (couponData.used_count || 0) + 1 })
+              .eq("code", normalizedCouponCode);
           }
         }
       }
@@ -1322,33 +1370,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const insertData: any = {
-          rider_id: riderId,
-          pickup_address: pickupAddress,
-          pickup_latitude: pickupLatitude ?? null,
-          pickup_longitude: pickupLongitude ?? null,
-          dropoff_address: dropoffAddress,
-          dropoff_latitude: dropoffLatitude ?? null,
-          dropoff_longitude: dropoffLongitude ?? null,
-          pickup_at: pickupTime.toISOString(),
-          dropoff_by: finalDropoffTime.toISOString(),
-          status: "scheduled",
-          vehicle_type: vehicleType || 'saloon',
-          estimated_fare: estimatedFare ?? null,
-          distance_miles: clientDistanceMiles ?? null,
-          duration_minutes: clientDurationMinutes ?? null,
-          flight_number: flightNumber ?? null,
-          is_round_trip: isRoundTrip ?? false,
-          booking_type: bookingType || 'standard',
-          passengers: passengers ?? 1,
-          luggage: luggage ?? 0,
-          coupon_code: couponCode ?? null,
-          discount_amount: discountAmount ?? 0,
-          return_pickup_address: returnPickupAddress ?? null,
-          return_pickup_latitude: returnPickupLatitude ?? null,
-          return_pickup_longitude: returnPickupLongitude ?? null,
-          return_dropoff_address: returnDropoffAddress ?? null,
-          return_dropoff_latitude: returnDropoffLatitude ?? null,
-          return_dropoff_longitude: returnDropoffLongitude ?? null,
+        rider_id: riderId,
+        pickup_address: pickupAddress,
+        pickup_latitude: pickupLatitude ?? null,
+        pickup_longitude: pickupLongitude ?? null,
+        dropoff_address: dropoffAddress,
+        dropoff_latitude: dropoffLatitude ?? null,
+        dropoff_longitude: dropoffLongitude ?? null,
+        pickup_at: pickupTime.toISOString(),
+        dropoff_by: finalDropoffTime.toISOString(),
+        status: "scheduled",
+        vehicle_type: vehicleType || 'saloon',
+        estimated_fare: estimatedFare ?? null,
+        distance_miles: clientDistanceMiles ?? null,
+        duration_minutes: clientDurationMinutes ?? null,
+        flight_number: flightNumber ?? null,
+        is_round_trip: isRoundTrip ?? false,
+        booking_type: bookingType || 'standard',
+        passengers: passengers ?? 1,
+        luggage: luggage ?? 0,
+        coupon_code: couponCode ?? null,
+        discount_amount: discountAmount ?? 0,
+        return_pickup_address: returnPickupAddress ?? null,
+        return_pickup_latitude: returnPickupLatitude ?? null,
+        return_pickup_longitude: returnPickupLongitude ?? null,
+        return_dropoff_address: returnDropoffAddress ?? null,
+        return_dropoff_latitude: returnDropoffLatitude ?? null,
+        return_dropoff_longitude: returnDropoffLongitude ?? null,
       };
 
       for (const column of missingLaterBookingColumns) {
@@ -1386,7 +1434,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!error) {
-          error = null;
+        error = null;
       }
 
       if (error) {
@@ -1445,12 +1493,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) => {
     try {
       const { driverId } = req.body;
-      const updateData: any = { 
-        status: "driver_accepted", 
+      const updateData: any = {
+        status: "driver_accepted",
         updated_at: new Date().toISOString(),
         accepted_by_driver_at: new Date().toISOString()
       };
-      
+
       if (driverId) {
         updateData.driver_id = driverId;
       }
@@ -1514,7 +1562,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let cancellationFee = 0;
       let refundAmount = 0;
       let penaltyNote = '';
-      
+
       // Tracking fields
       let statusToSet = 'cancelled';
       let driverCancelType = null;
@@ -1524,10 +1572,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (cancelledBy === 'rider') {
         if (withinThreeHours || pastPickup) {
-          // Charge 50% cancellation fee for late cancellation
-          const halfFare = estimatedFare * 0.5;
+          // Charge 100% cancellation fee for late cancellation
+          const halfFare = estimatedFare * 1;
           cancellationFee = halfFare;
-          penaltyNote = `Late cancellation within 3 hours — 50% fee of £${halfFare.toFixed(2)} charged.`;
+          penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
 
           // Deduct from rider wallet (allowing negative balance)
           if (booking.rider_id && halfFare > 0) {
@@ -1542,12 +1590,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 ride_id: null,
                 amount: halfFare,
                 type: 'debit',
-                description: `50% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${booking.id}`,
+                description: `100% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${booking.id}`,
               });
-              console.log(`💸 Late cancel: rider ${booking.rider_id} charged 50% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
+              console.log(`💸 Late cancel: rider ${booking.rider_id} charged 100% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
             } catch (walletErr) {
               console.error('Failed to charge rider wallet for late cancel:', walletErr);
             }
+          }
+
+          // Credit driver earnings with the 100% cancellation fee (no platform commission)
+          if (booking.driver_id && halfFare > 0) {
+            try {
+              const { data: driverData, error: driverFetchErr } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
+
+              if (driverFetchErr) {
+                console.error(`❌ Failed to fetch driver ${booking.driver_id}:`, driverFetchErr);
+              } else if (!driverData) {
+                console.warn(`⚠️ Driver ${booking.driver_id} not found in database`);
+              } else {
+                const currentEarnings = Number(driverData?.total_earnings || 0);
+                const newEarnings = Number((currentEarnings + Math.abs(halfFare)).toFixed(2));
+                await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id);
+              }
+            } catch (earningsErr) {
+              console.error(`❌ Exception updating driver earnings for driver ${booking.driver_id}:`, earningsErr);
+            }
+          } else if (halfFare > 0) {
+            console.warn(`⚠️ No driver assigned to booking ${booking.id} - cannot credit earnings`);
           }
         } else {
           // Free cancellation — issue full refund
@@ -1602,7 +1671,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cancellation_note: penaltyNote,
         cancelled_by: cancelledBy || 'rider',
       };
-      
+
       if (cancelledBy === 'driver') {
         if (releaseDriverAssignment) {
           updatePayload.driver_id = null;
@@ -1691,7 +1760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { riderRating, driverRating, riderComment, driverComment, ratedBy } = req.body;
 
       const updateData: any = {};
-      
+
       if (ratedBy === "driver") {
         if (riderRating !== undefined) updateData.rider_rating = riderRating;
         // if (riderComment !== undefined) updateData.rider_comment = riderComment; // Column doesn't exist

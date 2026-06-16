@@ -25,7 +25,7 @@ import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
 
 export default function RiderProfileScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, signOut } = useAuth();
 
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -462,11 +462,24 @@ export default function RiderProfileScreen({ navigation }: any) {
                     {
                       text: "Delete",
                       style: "destructive",
-                      onPress: () => {
-                        Alert.alert(
-                          "Contact Support",
-                          "To delete your account, please contact our support team at support@uto.com or call +44 07596 266 901."
-                        );
+                      onPress: async () => {
+                        try {
+                          if (user?.id) {
+                            await api.users.deleteAccount(user.id);
+                          }
+                          Alert.alert(
+                            "Account Deleted",
+                            "Your account has been successfully deleted.",
+                            [
+                              {
+                                text: "OK",
+                                onPress: () => signOut(),
+                              },
+                            ]
+                          );
+                        } catch (err: any) {
+                          Alert.alert("Error", err?.message || "Failed to delete account. Please try again.");
+                        }
                       },
                     },
                   ]

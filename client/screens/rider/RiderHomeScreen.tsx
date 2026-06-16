@@ -1,4 +1,5 @@
-//client/screens/rider/RideHomeScreen.tsx
+//client/screens/rider/RiderHomeScreen.tsx
+
 import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
@@ -118,7 +119,7 @@ export default function RiderHomeScreen({ navigation }: any) {
   const { isDark } = useTheme();
   const { user } = useAuth();
   const { pendingRating, submitRiderRating, dismissRiderRating } = useRide();
-  
+
   useNotifications(user?.id);
 
   const [currentAddress, setCurrentAddress] = useState<string>("Locating...");
@@ -348,7 +349,7 @@ export default function RiderHomeScreen({ navigation }: any) {
 
         {/* Suggestions header */}
         <Animated.View entering={FadeInDown.delay(300).duration(400)}>
-          <Pressable 
+          <Pressable
             style={styles.suggestionsHeader}
             onPress={() => navigation.navigate("ServicesTab")}
           >

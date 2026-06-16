@@ -1,4 +1,3 @@
-//client/screens/driver/EarningsScreen.tsx
 import React, { useState, useMemo, useCallback } from "react";
 import {
   StyleSheet,
@@ -30,13 +29,13 @@ type TimeFilter = "today" | "week" | "month";
 type EarningsEntry =
   | (Trip & { entryType?: "trip" })
   | {
-      id: string;
-      entryType: "deduction";
-      amount: number;
-      reason?: string;
-      type: string;
-      createdAt: string;
-    };
+    id: string;
+    entryType: "deduction";
+    amount: number;
+    reason?: string;
+    type: string;
+    createdAt: string;
+  };
 
 // ─── Month names ───
 const MONTH_NAMES = [
@@ -135,7 +134,7 @@ export default function EarningsScreen() {
       const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       const weekMonday = new Date(todayStart);
       weekMonday.setDate(weekMonday.getDate() - daysToMonday);
-      
+
       const weekSunday = new Date(weekMonday);
       weekSunday.setDate(weekSunday.getDate() + 6);
       return new Date(weekSunday.getFullYear(), weekSunday.getMonth(), weekSunday.getDate(), 23, 59, 59);
@@ -161,7 +160,8 @@ export default function EarningsScreen() {
       driverDeductions.forEach((deduction) => {
         const dd = new Date(deduction.createdAt);
         if (dd >= cutoffDate && dd <= cutoffEnd) {
-          total -= deduction.amount;
+          const isCredit = deduction.type === 'cancellation_credit';
+          total += isCredit ? deduction.amount : -deduction.amount;
         }
       });
 
@@ -210,9 +210,15 @@ export default function EarningsScreen() {
             const bDate = new Date(b.entryType === "deduction" ? b.createdAt : b.completedAt).getTime();
             return bDate - aDate;
           }),
-          dayTotal: data.reduce((sum, item) => (
-            item.entryType === "deduction" ? sum - item.amount : sum + item.farePrice
-          ), 0),
+          dayTotal: data.reduce((sum, item) => {
+            if (item.entryType === "deduction") {
+              // Cancellation credits add to the total, deductions subtract
+              const isCredit = item.type === 'cancellation_credit';
+              return isCredit ? sum + item.amount : sum - item.amount;
+            } else {
+              return sum + item.farePrice;
+            }
+          }, 0),
         };
       }).sort((a, b) => {
         const aDate = new Date(a.data[0]?.entryType === "deduction" ? a.data[0]?.createdAt : a.data[0]?.completedAt).getTime();
@@ -224,13 +230,13 @@ export default function EarningsScreen() {
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-      
+
       // Get Monday of current week
       const dayOfWeek = todayStart.getDay();
       const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 0=Sunday, 1=Monday
       const weekMonday = new Date(todayStart);
       weekMonday.setDate(weekMonday.getDate() - daysToMonday);
-      
+
       const daily: { label: string; amount: number; dayNum: number }[] = [];
       for (let i = 0; i < 7; i++) {
         const d = new Date(weekMonday);
@@ -249,7 +255,9 @@ export default function EarningsScreen() {
         driverDeductions.forEach((deduction) => {
           const dd = new Date(deduction.createdAt);
           if (dd >= dayStart && dd < dayEnd) {
-            dayTotal -= deduction.amount;
+            // Credits add, deductions subtract
+            const isCredit = deduction.type === 'cancellation_credit';
+            dayTotal += isCredit ? deduction.amount : -deduction.amount;
           }
         });
 
@@ -300,10 +308,10 @@ export default function EarningsScreen() {
         const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         const weekMonday = new Date(todayStart);
         weekMonday.setDate(weekMonday.getDate() - daysToMonday);
-        
+
         const weekSunday = new Date(weekMonday);
         weekSunday.setDate(weekSunday.getDate() + 6);
-        
+
         return `${fmt(weekMonday)} – ${fmt(weekSunday)}`;
       }
       case "month":
@@ -364,8 +372,8 @@ export default function EarningsScreen() {
           {selectedFilter === "today"
             ? "Today's earnings"
             : selectedFilter === "week"
-            ? "This week's earnings"
-            : "This month's earnings"}
+              ? "This week's earnings"
+              : "This month's earnings"}
         </Text>
       </View>
 
@@ -491,6 +499,12 @@ export default function EarningsScreen() {
 
     if (isDeduction) {
       const deductionItem = item as any;
+      // Check if this is a credit (rider cancelled) or deduction (driver cancelled)
+      const isCredit = deductionItem.type === 'cancellation_credit';
+      const displayColor = isCredit ? SUCCESS : "#EF4444";
+      const displayIcon = isCredit ? "+" : "-";
+      const displayDotColor = isCredit ? SUCCESS : "#EF4444";
+
       return (
         <View style={[styles.tripCard, { backgroundColor: C.card, borderColor: C.border }]}>
           <View style={styles.tripLeft}>
@@ -499,19 +513,19 @@ export default function EarningsScreen() {
 
           <View style={styles.tripCenter}>
             <View style={styles.tripRouteRow}>
-              <View style={[styles.tripDot, { backgroundColor: "#EF4444" }]} />
+              <View style={[styles.tripDot, { backgroundColor: displayDotColor }]} />
               <Text style={[styles.tripAddr, { color: C.text }]} numberOfLines={1}>
-                Cancellation Fee
+                {isCredit ? "Cancellation Fee Credit" : "Cancellation Fee"}
               </Text>
             </View>
             <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={2}>
-              {deductionItem.reason || deductionItem.type || "Driver cancellation penalty"}
+              {deductionItem.reason || deductionItem.type || "Cancellation"}
             </Text>
           </View>
 
           <View style={styles.tripRight}>
-            <Text style={[styles.tripFare, { color: "#EF4444" }]}>
-              -{formatPrice(deductionItem.amount)}
+            <Text style={[styles.tripFare, { color: displayColor }]}>
+              {displayIcon}{formatPrice(deductionItem.amount)}
             </Text>
           </View>
         </View>
@@ -519,46 +533,46 @@ export default function EarningsScreen() {
     }
 
     const trip = item;
-  return (
-    <TouchableOpacity
-      activeOpacity={0.7}
-      onPress={() => setSelectedTrip(trip)}
-      style={[styles.tripCard, { backgroundColor: C.card, borderColor: C.border }]}
-    >
-      <View style={styles.tripLeft}>
-        <Text style={[styles.tripTime, { color: C.textMid }]}>{formatTime(trip.completedAt)}</Text>
-      </View>
-
-      <View style={styles.tripCenter}>
-        <View style={styles.tripRouteRow}>
-          <View style={[styles.tripDot, { backgroundColor: SUCCESS }]} />
-          <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={1}>
-            {trip.pickupAddress}
-          </Text>
+    return (
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => setSelectedTrip(trip)}
+        style={[styles.tripCard, { backgroundColor: C.card, borderColor: C.border }]}
+      >
+        <View style={styles.tripLeft}>
+          <Text style={[styles.tripTime, { color: C.textMid }]}>{formatTime(trip.completedAt)}</Text>
         </View>
-        <View style={styles.tripRouteRow}>
-          <View style={[styles.tripDot, { backgroundColor: "#EF4444" }]} />
-          <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={1}>
-            {trip.dropoffAddress}
-          </Text>
-        </View>
-      </View>
 
-      <View style={styles.tripRight}>
-        <Text style={[styles.tripFare, { color: C.success }]}>
-          +{formatPrice(trip.farePrice)}
-        </Text>
-        {trip.rating ? (
-          <View style={styles.tripRating}>
-            <MaterialIcons name="star" size={12} color={C.gold} />
-            <Text style={[styles.tripRatingText, { color: C.textMid }]}>{trip.rating}</Text>
+        <View style={styles.tripCenter}>
+          <View style={styles.tripRouteRow}>
+            <View style={[styles.tripDot, { backgroundColor: SUCCESS }]} />
+            <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={1}>
+              {trip.pickupAddress}
+            </Text>
           </View>
-        ) : null}
-        <MaterialIcons name="chevron-right" size={18} color={C.textDim} />
-      </View>
-    </TouchableOpacity>
-  );
-};
+          <View style={styles.tripRouteRow}>
+            <View style={[styles.tripDot, { backgroundColor: "#EF4444" }]} />
+            <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={1}>
+              {trip.dropoffAddress}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.tripRight}>
+          <Text style={[styles.tripFare, { color: C.success }]}>
+            +{formatPrice(trip.farePrice)}
+          </Text>
+          {trip.rating ? (
+            <View style={styles.tripRating}>
+              <MaterialIcons name="star" size={12} color={C.gold} />
+              <Text style={[styles.tripRatingText, { color: C.textMid }]}>{trip.rating}</Text>
+            </View>
+          ) : null}
+          <MaterialIcons name="chevron-right" size={18} color={C.textDim} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: C.bg }]}>
@@ -678,13 +692,13 @@ export default function EarningsScreen() {
                   <View style={[styles.tripDetailFareBadge, {
                     backgroundColor: selectedTrip.paymentMethod === 'card' ? UTOColors.primary + "20" : SUCCESS + "20"
                   }]}>
-                    <MaterialIcons 
-                      name={selectedTrip.paymentMethod === 'card' ? "credit-card" : "payments"} 
-                      size={14} 
-                      color={selectedTrip.paymentMethod === 'card' ? UTOColors.primary : SUCCESS} 
+                    <MaterialIcons
+                      name={selectedTrip.paymentMethod === 'card' ? "credit-card" : "payments"}
+                      size={14}
+                      color={selectedTrip.paymentMethod === 'card' ? UTOColors.primary : SUCCESS}
                     />
-                    <Text style={[styles.tripDetailFareBadgeText, { 
-                      color: selectedTrip.paymentMethod === 'card' ? UTOColors.primary : SUCCESS 
+                    <Text style={[styles.tripDetailFareBadgeText, {
+                      color: selectedTrip.paymentMethod === 'card' ? UTOColors.primary : SUCCESS
                     }]}>
                       {selectedTrip.paymentMethod === 'card' ? 'Card Payment' : 'Cash Payment'}
                     </Text>

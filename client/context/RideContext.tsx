@@ -1,4 +1,3 @@
-//client/context/RideContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -256,14 +255,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               return newHistory;
             });
             AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
-
-            if (update.status === "cancelled_no_drivers") {
-              Alert.alert(
-                "No Drivers Available",
-                "We're sorry, but there are no drivers available within range right now. Please try again later.",
-                [{ text: "OK" }]
-              );
-            }
+            setActiveRide(null);
 
             const cancellationFee = Number((update as any).cancellationFee || 0);
             const chargedAmount = Number((update as any).chargedAmount || 0);
@@ -541,42 +533,42 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
   const calculateDynamicFare = (distanceMiles: number, durationMin: number, rideType: string): number => {
     const formattedType = rideType.charAt(0).toUpperCase() + rideType.slice(1);
-    
+
     // Supabase stores pricing under "vehicles" key, not "pricing"
     const vehiclePricing = pricingRules?.vehicles || pricingRules?.pricing;
-    
+
     if (!pricingRules || !vehiclePricing || !vehiclePricing[formattedType] || !vehiclePricing[formattedType].enabled) {
       // Fallback
       const baseFares: any = { saloon: 4.0, people_carrier: 5.0, minibus: 6.0 };
       const perKm: any = { saloon: 1.5, people_carrier: 1.85, minibus: 2.2 };
       const perMin: any = { saloon: 0.35, people_carrier: 0.42, minibus: 0.5 };
-  
+
       const distanceKm = distanceMiles / 0.621371;
       const base = baseFares[rideType] || 4.0;
       const distanceCost = distanceKm * (perKm[rideType] || 1.5);
       const timeCost = durationMin * (perMin[rideType] || 0.35);
-  
+
       return Math.round((base + distanceCost + timeCost) * 100) / 100;
     }
-  
+
     const p = vehiclePricing[formattedType];
     const mileTiers = pricingRules.mile_tiers || [];
-    
+
     let cost = parseFloat(p.start_price || "0");
-    
+
     let currentMileRate = parseFloat(p.base_mile_price || "1.00");
     let milesRemaining = distanceMiles;
     let previousTierMiles = 0;
-  
+
     const sortedTiers = [...mileTiers].map((t: any) => ({
       id: t.id,
       after_miles: parseFloat(t.after_miles || "0")
     })).sort((a, b) => a.after_miles - b.after_miles);
-  
+
     for (const tier of sortedTiers) {
       const milesInThisTier = tier.after_miles - previousTierMiles;
       if (milesRemaining <= 0) break;
-      
+
       if (milesRemaining > milesInThisTier) {
         cost += milesInThisTier * currentMileRate;
         milesRemaining -= milesInThisTier;
@@ -587,24 +579,24 @@ export function RideProvider({ children }: { children: ReactNode }) {
       previousTierMiles = tier.after_miles;
       currentMileRate = parseFloat(p.mile_tier_prices[tier.id] || "0");
     }
-  
+
     if (milesRemaining > 0) {
       cost += milesRemaining * currentMileRate;
     }
-  
+
     const waitingPrice = parseFloat(p.waiting_price || "0");
     const baseMinutePrice = parseFloat(p.base_minute_price || "0");
     // Use base minute price if specified, otherwise maybe waiting price applies if it strictly refers to journey
     // The prompt requested 'aiting time etc' to be considered. We'll add base_minute_price to duration.
-    const minuteRate = baseMinutePrice > 0 ? baseMinutePrice : 0; 
+    const minuteRate = baseMinutePrice > 0 ? baseMinutePrice : 0;
     const timeCost = durationMin * minuteRate;
     cost += timeCost;
-  
+
     const minPrice = parseFloat(p.min_price || "0");
     if (cost < minPrice) {
       cost = minPrice;
     }
-  
+
     return Math.round(cost * 100) / 100;
   };
 

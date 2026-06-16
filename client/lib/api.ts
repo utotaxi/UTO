@@ -41,6 +41,8 @@ export interface DriverDeduction {
   type: string;
   reason?: string;
   createdAt: string;
+  cancelled_by?: string;
+  cancellation_fee?: number;
 }
 
 export interface Payment {
@@ -134,6 +136,15 @@ export const api = {
       const res = await apiRequest("POST", `/api/users/${id}/upload`, { base64, mimeType });
       const data = await res.json();
       return data.url;
+    },
+
+    async deleteAccount(id: string): Promise<{ success: boolean; message: string }> {
+      const res = await apiRequest("POST", `/api/users/${id}/delete-account`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to delete account");
+      }
+      return data;
     },
   },
 
