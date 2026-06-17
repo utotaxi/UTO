@@ -465,13 +465,13 @@ export default function EarningsScreen() {
       {/* Period summary */}
       <View style={styles.periodRow}>
         <View style={[styles.periodCard, { backgroundColor: C.card, borderColor: C.border }]}>
-          <Text style={[styles.periodLabel, { color: C.textMid }]}>This Week</Text>
+          <Text style={[styles.periodLabel, { color: C.textMid }]}>Current Week</Text>
           <Text style={[styles.periodValue, { color: C.gold }]}>
             {formatPrice(earnings.thisWeek)}
           </Text>
         </View>
         <View style={[styles.periodCard, { backgroundColor: C.card, borderColor: C.border }]}>
-          <Text style={[styles.periodLabel, { color: C.textMid }]}>This Month</Text>
+          <Text style={[styles.periodLabel, { color: C.textMid }]}>Current Month</Text>
           <Text style={[styles.periodValue, { color: C.gold }]}>
             {formatPrice(earnings.thisMonth)}
           </Text>

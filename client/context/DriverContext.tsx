@@ -1193,15 +1193,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     driverDeductions.forEach((deduction) => {
       const deductionDate = new Date(deduction.createdAt);
+      // Cancellation credits (rider cancelled) add to earnings; other deductions subtract
+      const isCredit = deduction.type === 'cancellation_credit';
+      const amount = isCredit ? deduction.amount : -deduction.amount;
 
       if (deductionDate >= monthStart) {
-        thisMonth -= deduction.amount;
+        thisMonth += amount;
 
         if (deductionDate >= weekStart) {
-          thisWeek -= deduction.amount;
+          thisWeek += amount;
 
           if (deductionDate >= todayStart) {
-            today -= deduction.amount;
+            today += amount;
           }
         }
       }

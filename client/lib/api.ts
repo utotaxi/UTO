@@ -139,12 +139,15 @@ export const api = {
     },
 
     async deleteAccount(id: string): Promise<{ success: boolean; message: string }> {
-      const res = await apiRequest("POST", `/api/users/${id}/delete-account`);
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to delete account");
+      try {
+        const res = await apiRequest("POST", `/api/users/${id}/delete-account`);
+        const data = await res.json();
+        return data;
+      } catch (err: any) {
+        // apiRequest throws on non-2xx — extract the meaningful message
+        const msg = err?.message || "Failed to delete account";
+        throw new Error(msg.includes("Failed to delete") ? msg : `Failed to delete account: ${msg}`);
       }
-      return data;
     },
   },
 

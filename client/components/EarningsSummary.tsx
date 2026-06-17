@@ -87,7 +87,7 @@ export function EarningsSummary({
           ]}
         >
           <ThemedText style={[styles.periodLabel, { color: isDark ? "#9CA3AF" : theme.textSecondary }]}>
-            This Week
+            Current Week
           </ThemedText>
           <ThemedText style={[styles.periodValue, { color: isDark ? "#FFFFFF" : theme.text }]}>
             {formatPrice(thisWeek)}
@@ -104,7 +104,7 @@ export function EarningsSummary({
           ]}
         >
           <ThemedText style={[styles.periodLabel, { color: isDark ? "#9CA3AF" : theme.textSecondary }]}>
-            This Month
+            Current Month
           </ThemedText>
           <ThemedText style={[styles.periodValue, { color: isDark ? "#FFFFFF" : theme.text }]}>
             {formatPrice(thisMonth)}

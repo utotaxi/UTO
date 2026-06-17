@@ -425,9 +425,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const deletedUser = await storage.softDeleteUser(userId);
+      let deletedUser = await storage.softDeleteUser(userId);
+
+      // Fallback: if softDeleteUser returned undefined, try a direct Supabase update
       if (!deletedUser) {
-        return res.status(500).json({ error: "Failed to delete account" });
+        console.warn(`⚠️ softDeleteUser returned undefined for ${userId}, trying direct update...`);
+        try {
+          const { data, error: directErr } = await supabase
+            .from("users")
+            .update({ is_deleted: true, updated_at: new Date().toISOString() })
+            .eq("id", userId)
+            .select()
+            .single();
+
+          if (directErr) {
+            console.error(`❌ Direct soft-delete update failed:`, directErr.message, directErr.code);
+            return res.status(500).json({ error: `Failed to delete account: ${directErr.message}` });
+          }
+          deletedUser = data;
+        } catch (fallbackErr: any) {
+          console.error(`❌ Fallback soft-delete failed:`, fallbackErr?.message);
+          return res.status(500).json({ error: "Failed to delete account" });
+        }
       }
 
       console.log(`🗑️ Account soft-deleted: userId=${userId}, email=${user.email}`);
