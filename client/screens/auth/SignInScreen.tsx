@@ -32,6 +32,24 @@ import { supabase } from "@/lib/supabase";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
+const parseAuthError = (err: any, defaultMsg: string): string => {
+  const message = err?.message || "";
+  if (message.toLowerCase().includes("deleted")) {
+    return "This account has been deleted.";
+  }
+  try {
+    const jsonStart = message.indexOf("{");
+    if (jsonStart !== -1) {
+      const jsonStr = message.substring(jsonStart);
+      const jsonObj = JSON.parse(jsonStr);
+      if (jsonObj.error) {
+        return jsonObj.error;
+      }
+    }
+  } catch (_) {}
+  return defaultMsg;
+};
+
 export default function SignInScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
@@ -110,15 +128,11 @@ export default function SignInScreen({ navigation, route }: any) {
 
       console.log("🔑 Google OAuth: authenticated as", userEmail);
 
-      const success = await signIn(userEmail, "google", true, userFullName);
-      if (success) {
-        setUserRole(selectedRole === "driver" ? "driver" : "rider");
-      } else {
-        setError("Server Error: Google sign in failed on the backend");
-      }
+      await signIn(userEmail, "google", true, userFullName);
+      setUserRole(selectedRole === "driver" ? "driver" : "rider");
     } catch (err: any) {
       console.error("🔑 Google OAuth redirect error:", err);
-      setError(`Error: ${err?.message || "An unexpected error occurred"}`);
+      setError(parseAuthError(err, "Server Error: Google sign in failed on the backend"));
     } finally {
       setIsGoogleLoading(false);
     }
@@ -157,14 +171,10 @@ export default function SignInScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      const success = await signIn(email, password);
-      if (success) {
-        setUserRole(selectedRole === "driver" ? "driver" : "rider");
-      } else {
-        setError("Invalid email or password");
-      }
+      await signIn(email, password);
+      setUserRole(selectedRole === "driver" ? "driver" : "rider");
     } catch (err) {
-      setError("An unexpected error occurred");
+      setError(parseAuthError(err, "Invalid email or password"));
     } finally {
       setIsLoading(false);
     }

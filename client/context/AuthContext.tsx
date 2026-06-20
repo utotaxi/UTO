@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true;
     } catch (error) {
       console.error("Sign in API failed:", error);
-      return false;
+      throw error;
     }
   };
 
