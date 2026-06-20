@@ -449,12 +449,20 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   const handleCall = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Linking.openURL("tel:+4407596266901");
+    if (activeRide?.driverPhone) {
+      Linking.openURL(`tel:${activeRide.driverPhone}`);
+    } else {
+      Alert.alert("No Phone", "Driver phone not available.");
+    }
   };
 
   const handleMessage = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Linking.openURL("sms:+4407596266901");
+    if (activeRide?.driverPhone) {
+      Linking.openURL(`sms:${activeRide.driverPhone}`);
+    } else {
+      Alert.alert("No Phone", "Driver phone not available.");
+    }
   };
 
   // If no drivers available and ride has been cancelled, show standalone rebook UI

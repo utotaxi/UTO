@@ -848,6 +848,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           vehicleInfo,
           licensePlate,
           driverRating,
+          driverPhone: user?.phone || "",
         },
       });
     } catch (err) {

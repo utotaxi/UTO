@@ -25,6 +25,7 @@ export interface Ride {
   distanceKm: number;
   durationMinutes: number;
   driverName?: string;
+  driverPhone?: string;
   driverRating?: number;
   vehicleInfo?: string;
   licensePlate?: string;
@@ -331,6 +332,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               ...(update.status === "pending" && (update as any).driverCancelled
                 ? {
                   driverName: undefined,
+                  driverPhone: undefined,
                   driverRating: undefined,
                   vehicleInfo: undefined,
                   licensePlate: undefined,
@@ -342,6 +344,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               ...(update.status === "accepted" && (update as any).driverInfo
                 ? {
                   driverName: (update as any).driverInfo.driverName,
+                  driverPhone: (update as any).driverInfo.driverPhone,
                   vehicleInfo: (update as any).driverInfo.vehicleInfo,
                   licensePlate: (update as any).driverInfo.licensePlate,
                   driverRating: (update as any).driverInfo.driverRating,
@@ -442,6 +445,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 ...localActive,
                 status: serverRide.status as RideStatus,
                 acceptedAt: serverRideAny.acceptedAt || serverRideAny.accepted_at || localActive.acceptedAt,
+                driverName: serverRideAny.driverName || localActive.driverName,
+                driverPhone: serverRideAny.driverPhone || localActive.driverPhone,
+                vehicleInfo: serverRideAny.vehicleInfo || localActive.vehicleInfo,
+                licensePlate: serverRideAny.licensePlate || localActive.licensePlate,
+                driverRating: serverRideAny.driverRating || localActive.driverRating,
               });
             }
           }
@@ -485,6 +493,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
           distanceKm: r.distance || 0,
           durationMinutes: r.estimatedDuration || 0,
           driverName: r.driverName || undefined,
+          driverPhone: r.driverPhone || undefined,
           driverRating: r.driverRating || undefined,
           paymentMethod: r.paymentMethod || undefined,
           paymentStatus: r.paymentStatus || undefined,
@@ -502,7 +511,12 @@ export function RideProvider({ children }: { children: ReactNode }) {
         for (const [id, ride] of serverMap) {
           // Preserve local enrichment (driverName etc) if server doesn't have it
           const local = localMap.get(id);
-          merged.set(id, local ? { ...local, ...ride, driverName: ride.driverName || local.driverName } : ride);
+          merged.set(id, local ? {
+            ...local,
+            ...ride,
+            driverName: ride.driverName || local.driverName,
+            driverPhone: ride.driverPhone || local.driverPhone,
+          } : ride);
         }
         // Add local-only entries (e.g. rides from a different device session)
         for (const [id, ride] of localMap) {

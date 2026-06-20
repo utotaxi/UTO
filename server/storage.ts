@@ -575,7 +575,25 @@ export class SupabaseStorage implements IStorage {
       .eq("id", id)
       .single();
     if (error || !data) return undefined;
-    return toCamelRide(data as Ride);
+    const ride = toCamelRide(data as Ride);
+    if (ride.driverId) {
+      try {
+        const driver = await this.getDriver(ride.driverId);
+        if (driver) {
+          const driverUser = await this.getUser(driver.userId);
+          if (driverUser) {
+            (ride as any).driverName = driverUser.fullName;
+            (ride as any).driverPhone = driverUser.phone;
+            (ride as any).driverRating = driverUser.rating;
+            (ride as any).vehicleInfo = `${driver.vehicleMake} ${driver.vehicleModel}`.trim();
+            (ride as any).licensePlate = driver.licensePlate;
+          }
+        }
+      } catch (err) {
+        console.warn(`Failed to enrich ride ${id} with driver details:`, err);
+      }
+    }
+    return ride;
   }
 
   async getRidesByRider(riderId: string) {
