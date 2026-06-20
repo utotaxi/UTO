@@ -8,7 +8,7 @@ import { BlurView } from "expo-blur";
 import DriverHomeScreen from "@/screens/driver/DriverHomeScreen";
 import EarningsScreen from "@/screens/driver/EarningsScreen";
 import DriverAccountScreen from "@/screens/driver/DriverAccountScreen";
-import DriverActivityScreen from "@/screens/driver/DriverActivityScreen";
+
 import DriverMarketplaceScreen from "@/screens/driver/DriverMarketplaceScreen";
 import DriverUpcomingBookingsScreen from "@/screens/driver/DriverUpcomingBookingsScreen";
 import DriverPayoutMethodsScreen from "@/screens/driver/DriverPayoutMethodsScreen";
@@ -26,14 +26,13 @@ export type DriverTabParamList = {
   DriveTab: undefined;
   EarningsTab: undefined;
   AccountTab: undefined;
-  ActivityTab: undefined;
 };
 
 const Tab = createBottomTabNavigator<DriverTabParamList>();
 
 const DriveStack = createNativeStackNavigator();
 const EarningsStack = createNativeStackNavigator();
-const ActivityStack = createNativeStackNavigator();
+
 const AccountStack = createNativeStackNavigator();
 
 function DriveStackNavigator({ navigation }: any) {
@@ -84,28 +83,7 @@ function EarningsStackNavigator() {
   );
 }
 
-function ActivityStackNavigator() {
-  const screenOptions = useScreenOptions({ transparent: false });
-  const { isDark } = useTheme();
 
-  return (
-    <ActivityStack.Navigator
-      screenOptions={{
-        ...screenOptions,
-        headerStyle: {
-          backgroundColor: isDark ? "#000000" : "#FFFFFF",
-        },
-        headerTintColor: isDark ? "#FFFFFF" : "#000000",
-      }}
-    >
-      <ActivityStack.Screen
-        name="Activity"
-        component={DriverActivityScreen}
-        options={{ headerTitle: "Activity" }}
-      />
-    </ActivityStack.Navigator>
-  );
-}
 
 function AccountStackNavigator({ navigation }: any) {
   const screenOptions = useScreenOptions({ transparent: false });
@@ -214,16 +192,7 @@ export default function DriverTabNavigator() {
           ),
         }}
       />
-      <Tab.Screen
-        name="ActivityTab"
-        component={ActivityStackNavigator}
-        options={{
-          title: "Activity",
-          tabBarIcon: ({ color, size }) => (
-            <Feather name="clock" size={size} color={color} />
-          ),
-        }}
-      />
+
       <Tab.Screen
         name="AccountTab"
         component={AccountStackNavigator}

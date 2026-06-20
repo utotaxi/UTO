@@ -425,28 +425,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
 
-      let deletedUser = await storage.softDeleteUser(userId);
+      // Helper: attempt the soft-delete update
+      const attemptSoftDelete = async () => {
+        const { data, error } = await supabase
+          .from("users")
+          .update({ is_deleted: true, updated_at: new Date().toISOString() })
+          .eq("id", userId)
+          .select()
+          .single();
+        return { data, error };
+      };
 
-      // Fallback: if softDeleteUser returned undefined, try a direct Supabase update
-      if (!deletedUser) {
-        console.warn(`⚠️ softDeleteUser returned undefined for ${userId}, trying direct update...`);
+      let { data: deletedUser, error: deleteErr } = await attemptSoftDelete();
+
+      // If column is missing from schema cache, create it and retry
+      if (deleteErr && deleteErr.message?.includes("is_deleted")) {
+        console.warn("⚠️ is_deleted column missing, attempting to add it...");
         try {
-          const { data, error: directErr } = await supabase
-            .from("users")
-            .update({ is_deleted: true, updated_at: new Date().toISOString() })
-            .eq("id", userId)
-            .select()
-            .single();
-
-          if (directErr) {
-            console.error(`❌ Direct soft-delete update failed:`, directErr.message, directErr.code);
-            return res.status(500).json({ error: `Failed to delete account: ${directErr.message}` });
+          // Try via RPC first
+          await supabase.rpc('exec_sql', {
+            sql: `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;`
+          });
+        } catch (_rpcErr) {
+          // RPC may not exist; try via raw REST SQL endpoint as fallback
+          try {
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (supabaseUrl && serviceKey) {
+              await fetch(`${supabaseUrl}/rest/v1/rpc/exec_sql`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': serviceKey,
+                  'Authorization': `Bearer ${serviceKey}`,
+                },
+                body: JSON.stringify({
+                  sql: `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;`
+                }),
+              });
+            }
+          } catch (_fetchErr) {
+            console.warn("⚠️ Could not create is_deleted column via REST either");
           }
-          deletedUser = data;
-        } catch (fallbackErr: any) {
-          console.error(`❌ Fallback soft-delete failed:`, fallbackErr?.message);
-          return res.status(500).json({ error: "Failed to delete account" });
         }
+
+        // Retry after attempting column creation
+        const retry = await attemptSoftDelete();
+        deletedUser = retry.data;
+        deleteErr = retry.error;
+      }
+
+      if (deleteErr) {
+        console.error(`❌ Soft-delete failed:`, deleteErr.message, deleteErr.code);
+        return res.status(500).json({ error: `Failed to delete account: ${deleteErr.message}` });
       }
 
       console.log(`🗑️ Account soft-deleted: userId=${userId}, email=${user.email}`);
