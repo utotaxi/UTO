@@ -199,7 +199,7 @@ const playRideAlert = async () => {
 };
 
 export function DriverProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [isOnline, setIsOnlineState] = useState(false);
   const [driverProfile, setDriverProfileState] = useState<DriverProfile | null>(null);
   const [tripHistory, setTripHistory] = useState<Trip[]>([]);
@@ -229,21 +229,30 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (user) {
       loadStoredData();
-    } else {
-      // Clear in-memory state when user signs out
+    } else if (!authLoading) {
+      // Only clear state on a real sign-out — i.e. auth has finished loading and
+      // there is definitively no user. During a cold app launch, `user` is briefly
+      // null while AuthContext restores the session from storage; clearing here
+      // would wipe the persisted online status / active ride and make the driver
+      // always appear offline after reopening the app.
+      //
       // BUT keep TRIP_HISTORY_KEY in AsyncStorage as cache so earnings
       // display immediately on next login while Supabase fetch is in-flight
       setDriverProfileState(null);
       setTripHistory([]);
       setDriverDeductions([]);
       setIsOnlineState(false);
+      setActiveRide(null);
+      setActiveRideRequest(null);
+      setRideState("none");
       AsyncStorage.removeItem(DRIVER_PROFILE_KEY);
       AsyncStorage.removeItem(ONLINE_STATUS_KEY);
+      AsyncStorage.removeItem(ACTIVE_RIDE_KEY);
       // NOTE: We intentionally do NOT remove TRIP_HISTORY_KEY here.
       // Trip history is cached locally so earnings show instantly on re-login
       // before the Supabase refresh completes.
     }
-  }, [user]);
+  }, [user, authLoading]);
 
   // ─── Connect to socket & register as driver ───────────────────────────────
   // This runs once on mount and whenever driver id changes.
