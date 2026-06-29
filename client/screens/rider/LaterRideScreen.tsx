@@ -147,7 +147,7 @@ export default function LaterRideScreen({ navigation }: any) {
   };
   const handleRemoveCoupon = () => { setCouponCode(''); setCouponDiscount(0); setCouponDescription(''); setIsCouponApplied(false); setCouponError(''); };
 
-  const fareVehicle = (v: VehicleType) => v === 'people_carrier' ? 'minibus' : v;
+  const fareVehicle = (v: VehicleType) => v;
 
   // ── Calculate fare when both locations are set or vehicle changes ──
   useEffect(() => {

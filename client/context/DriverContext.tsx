@@ -934,8 +934,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         const rules = await api.pricingRules.getActive();
         const vehiclePricing = rules?.vehicles || rules?.pricing;
         const rideType = (activeRideRequest as any)?.rideType || 'saloon';
-        const formattedType = rideType.charAt(0).toUpperCase() + rideType.slice(1);
-        const waitPrice = parseFloat(vehiclePricing?.[formattedType]?.waiting_price || '0.50');
+        const normalizedRideType = String(rideType).toLowerCase().replace(/[\s-]+/g, "_");
+        const matchingVehicleKey = Object.keys(vehiclePricing || {}).find(
+          (key) => String(key).toLowerCase().replace(/[\s-]+/g, "_") === normalizedRideType
+        );
+        const waitPrice = parseFloat(
+          (matchingVehicleKey ? vehiclePricing?.[matchingVehicleKey]?.waiting_price : undefined) || '0.50'
+        );
         setWaitingChargePerMin(waitPrice > 0 ? waitPrice : 0.50);
         console.log(`⏱️ Waiting charge rate: £${waitPrice}/min`);
       } catch (e) {

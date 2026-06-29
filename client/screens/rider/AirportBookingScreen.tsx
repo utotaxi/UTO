@@ -213,8 +213,7 @@ export default function AirportBookingScreen({ navigation }: any) {
 
   const handleRemoveCoupon = () => { setCouponCode(''); setCouponDiscount(0); setCouponDescription(''); setIsCouponApplied(false); setCouponError(''); };
 
-  // Map people_carrier → minibus for fare calc (pricing only has saloon/minibus tiers)
-  const fareVehicle = (v: VehicleType) => v === 'people_carrier' ? 'minibus' : v;
+  const fareVehicle = (v: VehicleType) => v;
 
   // ── Calculate fare when both locations are set or vehicle changes ──
   useEffect(() => {

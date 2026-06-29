@@ -1344,7 +1344,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
 });
 
 const missingLaterBookingColumns = new Set<string>();
+const missingLaterBookingAcceptColumns = new Set<string>();
 const missingLaterBookingCancelColumns = new Set<string>();
+
+const normalizeVehicleType = (value: any): string => {
+  if (!value) return "saloon";
+  const normalized = String(value).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "peoplecarrier" || normalized === "people_carrier") return "people_carrier";
+  if (normalized === "mini_bus") return "minibus";
+  return normalized;
+};
+
+const normalizeLaterBooking = (
+  booking: any,
+  sourceTable: "later_bookings" | "web_booker",
+) => {
+  const rawStatus = String(booking?.status || "").toLowerCase();
+  const status = rawStatus === "marketplace" ? "scheduled" : (rawStatus || "scheduled");
+  const assignedDriverId = booking?.assigned_driver_id ?? booking?.driver_id ?? null;
+
+  return {
+    ...booking,
+    source_table: sourceTable,
+    rider_id: booking?.rider_id ?? booking?.user_id ?? booking?.customer_id ?? null,
+    pickup_address: booking?.pickup_address ?? booking?.pickup_location ?? booking?.pickupAddress ?? "",
+    dropoff_address: booking?.dropoff_address ?? booking?.dropoff_location ?? booking?.dropoffAddress ?? "",
+    pickup_at: booking?.pickup_at ?? booking?.scheduled_time ?? booking?.scheduled_pickup_time ?? booking?.pickup_time ?? null,
+    dropoff_by: booking?.dropoff_by ?? booking?.dropoff_time ?? null,
+    estimated_fare: booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null,
+    vehicle_type: normalizeVehicleType(booking?.vehicle_type ?? booking?.ride_type ?? booking?.vehicleType),
+    driver_id: assignedDriverId,
+    assigned_driver_id: assignedDriverId,
+    distance_miles: booking?.distance_miles ?? booking?.distance ?? null,
+    duration_minutes: booking?.duration_minutes ?? booking?.estimated_duration ?? null,
+    status,
+  };
+};
+
+const pickupTimestamp = (booking: any): number => {
+  const value = booking?.pickup_at ? new Date(booking.pickup_at).getTime() : NaN;
+  return Number.isFinite(value) ? value : 0;
+};
+
+const fetchLaterBookingsFromTable = async (
+  tableName: "later_bookings" | "web_booker",
+  limit = 2000,
+) => {
+  const { data, error } = await sb.from(tableName).select("*").limit(limit);
+  if (error) {
+    console.warn(`⚠️ Failed to read ${tableName}:`, error.message);
+    return [];
+  }
+  return data || [];
+};
+
+const updateLaterBookingWithFallbackColumns = async (
+  tableName: "later_bookings" | "web_booker",
+  bookingId: string,
+  initialPayload: any,
+  missingColumnsRegistry: Set<string>,
+  maxAttempts = 12,
+) => {
+  const payload: any = { ...initialPayload };
+  for (const col of missingColumnsRegistry) delete payload[col];
+
+  const discoveredMissingColumns: string[] = [];
+  let data: any = null;
+  let error: any = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const result = await sb
+      .from(tableName)
+      .update(payload)
+      .eq("id", bookingId)
+      .select()
+      .maybeSingle();
+
+    data = result.data;
+    error = result.error;
+    if (!error) break;
+
+    const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
+    if (!missingColumn || !(missingColumn in payload)) {
+      break;
+    }
+
+    missingColumnsRegistry.add(missingColumn);
+    discoveredMissingColumns.push(missingColumn);
+    delete payload[missingColumn];
+  }
+
+  return { data, error, discoveredMissingColumns };
+};
 
 app.post("/api/later-bookings", async (req: Request, res: Response) => {
   try {
@@ -1499,27 +1590,35 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
 
 app.get("/api/later-bookings", async (req: Request, res: Response) => {
   try {
-    const { driverId } = req.query;
+    const driverId = typeof req.query.driverId === "string" ? req.query.driverId : undefined;
+    const nowTs = Date.now();
 
-    let query = sb
-      .from("web_booker")
-      // .from("later_bookings")
-      .select("*")
-      // .order("pickup_at", { ascending: true });
-      .order("scheduled_time", { ascending: true });
-    if (driverId) {
-      const nowIso = new Date().toISOString();
-      // Driver sees unassigned scheduled rides (in the future) OR rides that they previously accepted
-      // query = query.or(`and(status.eq.scheduled,pickup_at.gte.${nowIso}),and(status.eq.driver_accepted,driver_id.eq.${driverId}),and(status.eq.cancelled,driver_id.eq.${driverId})`);
-      query = query.or(`and(status.eq.marketplace,scheduled_time.gte.${nowIso}),and(status.eq.driver_accepted,assigned_driver_id.eq.${driverId}),and(status.eq.cancelled,assigned_driver_id.eq.${driverId})`);
-    } else {
-      // query = query.in("status", ["scheduled", "driver_accepted"]);
-      query = query.in("status", ["marketplace", "driver_accepted"]);
-    }
-    const { data, error } = await query;
+    const [laterBookingsRaw, webBookerRaw] = await Promise.all([
+      fetchLaterBookingsFromTable("later_bookings"),
+      fetchLaterBookingsFromTable("web_booker"),
+    ]);
 
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ bookings: data || [] });
+    const bookings = [
+      ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
+      ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
+    ]
+      .filter((booking: any) => booking.pickup_at && booking.pickup_address && booking.dropoff_address)
+      .filter((booking: any) => {
+        const status = String(booking.status || "").toLowerCase();
+        const bookingDriverId = booking.driver_id || booking.assigned_driver_id;
+        const bookingPickupTs = pickupTimestamp(booking);
+
+        if (driverId) {
+          if (status === "scheduled") return bookingPickupTs >= nowTs;
+          if (status === "driver_accepted" || status === "cancelled") return bookingDriverId === driverId;
+          return false;
+        }
+
+        return status === "scheduled" || status === "driver_accepted";
+      })
+      .sort((a: any, b: any) => pickupTimestamp(a) - pickupTimestamp(b));
+
+    res.json({ bookings });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
   }
@@ -1527,17 +1626,24 @@ app.get("/api/later-bookings", async (req: Request, res: Response) => {
 
 app.get("/api/later-bookings/rider/:riderId", async (req: Request, res: Response) => {
   try {
-    const { data, error } = await sb
-      // .from("later_bookings")
-      .from("web_booker")
-      .select("*")
-      // .eq("rider_id", req.params.riderId as string)
-      .eq("assigned_driver_id", req.params.riderId as string)
-      // .order("pickup_at", { ascending: true });
-      .order("scheduled_time", { ascending: true });
+    const riderId = req.params.riderId as string;
+    if (!riderId) {
+      return res.status(400).json({ error: "riderId is required" });
+    }
 
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ bookings: data || [] });
+    const [laterBookingsRaw, webBookerRaw] = await Promise.all([
+      fetchLaterBookingsFromTable("later_bookings"),
+      fetchLaterBookingsFromTable("web_booker"),
+    ]);
+
+    const bookings = [
+      ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
+      ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
+    ]
+      .filter((booking: any) => String(booking.rider_id || "") === riderId)
+      .sort((a: any, b: any) => pickupTimestamp(a) - pickupTimestamp(b));
+
+    res.json({ bookings });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
   }
@@ -1545,43 +1651,65 @@ app.get("/api/later-bookings/rider/:riderId", async (req: Request, res: Response
 
 app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) => {
   try {
+    const bookingId = req.params.id as string;
     const { driverId } = req.body;
     const updateData: any = { 
       status: "driver_accepted", 
-      // updated_at: new Date().toISOString(),
-      // accepted_by_driver_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     };
     
     if (driverId) {
-      // updateData.driver_id = driverId;
+      updateData.driver_id = driverId;
       updateData.assigned_driver_id = driverId;
     }
 
-    let { data, error } = await sb
+    let sourceTable: "web_booker" | "later_bookings" | null = null;
+    const webFetch = await sb
       .from("web_booker")
-      // .from("later_bookings")
-      .update(updateData)
-      .eq("id", req.params.id as string)
-      .select()
-      .single();
-
-    // If accepted_by_driver_at column doesn't exist, retry without it
-    if (error && error.message?.includes("accepted_by_driver_at")) {
-      console.warn("⚠️ accepted_by_driver_at column missing, retrying without it");
-      delete updateData.accepted_by_driver_at;
-      const retry = await sb
+      .select("id")
+      .eq("id", bookingId)
+      .maybeSingle();
+    if (webFetch.error) {
+      console.warn(`⚠️ web_booker accept lookup failed for booking ${bookingId}:`, webFetch.error.message);
+    }
+    if (webFetch.data) {
+      sourceTable = "web_booker";
+    } else {
+      const laterFetch = await sb
         .from("later_bookings")
-        .update(updateData)
-        .eq("id", req.params.id as string)
-        .select()
-        .single();
-      data = retry.data;
-      error = retry.error;
+        .select("id")
+        .eq("id", bookingId)
+        .maybeSingle();
+      if (laterFetch.error) {
+        console.warn(`⚠️ later_bookings accept lookup failed for booking ${bookingId}:`, laterFetch.error.message);
+      }
+      if (laterFetch.data) {
+        sourceTable = "later_bookings";
+      }
     }
 
-    if (error) return res.status(500).json({ error: error.message });
-    io.emit("later-booking:update", { type: "accepted", booking: data });
-    res.json({ booking: data });
+    if (!sourceTable) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const updateResult = await updateLaterBookingWithFallbackColumns(
+      sourceTable,
+      bookingId,
+      updateData,
+      missingLaterBookingAcceptColumns,
+    );
+    if (updateResult.discoveredMissingColumns.length > 0) {
+      console.info(`ℹ️ ${sourceTable} accept skipped missing optional columns: ${updateResult.discoveredMissingColumns.join(", ")}`);
+    }
+
+    if (updateResult.error) return res.status(500).json({ error: updateResult.error.message });
+    if (!updateResult.data) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const normalizedBooking = normalizeLaterBooking(updateResult.data, sourceTable);
+    io.emit("later-booking:update", { type: "accepted", booking: normalizedBooking });
+    res.json({ booking: normalizedBooking });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to accept booking" });
   }
@@ -1589,31 +1717,65 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
 
 app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) => {
   try {
+    const bookingId = req.params.id as string;
     const { cancelledBy, reason } = req.body || {}; // 'rider' | 'driver'
 
-    // ── Fetch current booking ──
-    const { data: booking, error: fetchErr } = await sb
-      // .from("later_bookings")
+    // ── Fetch current booking (support both web_booker and later_bookings) ──
+    let sourceTable: "web_booker" | "later_bookings" | null = null;
+    let booking: any = null;
+
+    const webFetch = await sb
       .from("web_booker")
       .select("*")
-      .eq("id", req.params.id as string)
-      .single();
+      .eq("id", bookingId)
+      .maybeSingle();
+    if (webFetch.error) {
+      console.warn(`⚠️ web_booker fetch failed for booking ${bookingId}:`, webFetch.error.message);
+    }
+    if (webFetch.data) {
+      sourceTable = "web_booker";
+      booking = webFetch.data;
+    }
 
-    if (fetchErr || !booking) {
+    if (!booking) {
+      const laterFetch = await sb
+        .from("later_bookings")
+        .select("*")
+        .eq("id", bookingId)
+        .maybeSingle();
+      if (laterFetch.error) {
+        console.warn(`⚠️ later_bookings fetch failed for booking ${bookingId}:`, laterFetch.error.message);
+      }
+      if (laterFetch.data) {
+        sourceTable = "later_bookings";
+        booking = laterFetch.data;
+      }
+    }
+
+    if (!booking || !sourceTable) {
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    if (booking.status === 'cancelled' || booking.status === 'driver_cancelled' || booking.status === 'driver_cancelled_late') {
+    const normalizedBooking = normalizeLaterBooking(booking, sourceTable);
+    const currentStatus = String(normalizedBooking.status || "").toLowerCase();
+    if (currentStatus === 'cancelled' || currentStatus === 'driver_cancelled' || currentStatus === 'driver_cancelled_late') {
       return res.status(400).json({ error: "Booking already cancelled" });
     }
 
+    const bookingDriverId = normalizedBooking.driver_id || normalizedBooking.assigned_driver_id;
+    const riderId = normalizedBooking.rider_id;
+    const statusForReleasedBooking = sourceTable === "web_booker" ? "marketplace" : "scheduled";
+
     const now = new Date();
-    const pickupTime = new Date(booking.pickup_at || booking.scheduled_time);
+    const pickupTime = new Date(normalizedBooking.pickup_at || "");
+    if (isNaN(pickupTime.getTime())) {
+      return res.status(400).json({ error: "Booking has invalid pickup time" });
+    }
     const msUntilPickup = pickupTime.getTime() - now.getTime();
     const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
     const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
     const pastPickup = msUntilPickup < 0;
-    const estimatedFare = booking.estimated_fare || booking.estimated_price || 0;
+    const estimatedFare = Number(normalizedBooking.estimated_fare || 0);
 
     let cancellationFee = 0;
     let refundAmount = 0;
@@ -1634,86 +1796,84 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
         penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
 
         // Deduct from rider wallet (allowing negative balance)
-        if (booking.rider_id && halfFare > 0) {
+        if (riderId && halfFare > 0) {
           try {
-            const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', booking.rider_id).single();
+            const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', riderId).single();
             const currentBalance = riderRow?.wallet_balance || 0;
             const newBalance = Number((currentBalance - halfFare).toFixed(2));
-            await sb.from('users').update({ wallet_balance: newBalance }).eq('id', booking.rider_id);
+            await sb.from('users').update({ wallet_balance: newBalance }).eq('id', riderId);
             // Record wallet transaction
             await sb.from('wallet_transactions').insert({
-              user_id: booking.rider_id,
+              user_id: riderId,
               ride_id: null,
               amount: halfFare,
               type: 'debit',
-              description: `100% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${booking.id}`,
+              description: `100% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${bookingId}`,
             });
-            console.log(`💸 Late cancel: rider ${booking.rider_id} charged 100% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
+            console.log(`💸 Late cancel: rider ${riderId} charged 100% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
           } catch (walletErr) {
             console.error('Failed to charge rider wallet for late cancel:', walletErr);
           }
         }
 
         // Credit driver earnings with the 100% cancellation fee (no platform commission)
-        if (booking.driver_id && halfFare > 0) {
+        if (bookingDriverId && halfFare > 0) {
           try {
-            const { data: driverData, error: driverFetchErr } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
+            const { data: driverData, error: driverFetchErr } = await sb.from('drivers').select('total_earnings').eq('id', bookingDriverId).single();
             
             if (driverFetchErr) {
-              console.error(`❌ Failed to fetch driver ${booking.driver_id}:`, driverFetchErr);
+              console.error(`❌ Failed to fetch driver ${bookingDriverId}:`, driverFetchErr);
             } else if (!driverData) {
-              console.warn(`⚠️ Driver ${booking.driver_id} not found in database`);
+              console.warn(`⚠️ Driver ${bookingDriverId} not found in database`);
             } else {
               const currentEarnings = Number(driverData?.total_earnings || 0);
               const newEarnings = Number((currentEarnings + Math.abs(halfFare)).toFixed(2));
-              await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id);
+              await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', bookingDriverId);
             }
           } catch (earningsErr) {
-            console.error(`❌ Exception updating driver earnings for driver ${booking.driver_id}:`, earningsErr);
+            console.error(`❌ Exception updating driver earnings for driver ${bookingDriverId}:`, earningsErr);
           }
         } else if (halfFare > 0) {
-          console.warn(`⚠️ No driver assigned to booking ${booking.id} - cannot credit earnings`);
+          console.warn(`⚠️ No driver assigned to booking ${bookingId} - cannot credit earnings`);
         }
       } else {
         // Free cancellation — issue full refund
         refundAmount = estimatedFare > 0 ? estimatedFare : 0;
         penaltyNote = 'Free cancellation — more than 3 hours before pickup.';
         // If they prepaid something, refund it (stub — payment logic would go here)
-        console.log(`✅ Free cancel: rider ${booking.rider_id}, refund would be £${refundAmount}`);
+        console.log(`✅ Free cancel: rider ${riderId}, refund would be £${refundAmount}`);
       }
     } else if (cancelledBy === 'driver') {
       // Driver cancellation within 3 hours: 50% penalty
       if (withinThreeHours || pastPickup) {
         const driverPenalty = estimatedFare * 0.5;
         penaltyNote = `Driver late cancellation — 50% penalty of £${driverPenalty.toFixed(2)} applies.`;
-        // statusToSet = 'scheduled';
-        statusToSet = 'marketplace';
+        statusToSet = statusForReleasedBooking;
         driverCancelType = 'late_cancellation';
         driverPenaltyApplied = true;
         lateCancellationFee = driverPenalty;
         releaseDriverAssignment = true;
-        if ((booking.driver_id || booking.assigned_driver_id) && driverPenalty > 0) {
+        if (bookingDriverId && driverPenalty > 0) {
           try {
             // Add a deduction record for the driver
             await sb.from('driver_deductions').insert({
-              driver_id: booking.driver_id || booking.assigned_driver_id,
+              driver_id: bookingDriverId,
               amount: driverPenalty,
               type: 'late_cancel_penalty',
-              reason: `Late cancellation penalty (50%) for scheduled booking ${booking.id}`,
+              reason: `Late cancellation penalty (50%) for scheduled booking ${bookingId}`,
             });
             // Also deduct from driver's total_earnings
-            const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id || booking.assigned_driver_id).single();
+            const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', bookingDriverId).single();
             const currentEarnings = Number(driverData?.total_earnings || 0);
             const newEarnings = Number((currentEarnings - driverPenalty).toFixed(2));
-            await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id || booking.assigned_driver_id);
+            await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', bookingDriverId);
           } catch (penaltyErr) {
             console.error('Failed to record driver penalty:', penaltyErr);
           }
         }
       } else {
         penaltyNote = 'Driver cancelled more than 3 hours before pickup — no penalty.';
-        // statusToSet = 'scheduled';
-        statusToSet = 'marketplace';
+        statusToSet = statusForReleasedBooking;
         driverCancelType = 'free_cancellation';
         releaseDriverAssignment = true;
       }
@@ -1729,6 +1889,7 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
     if (cancelledBy === 'driver') {
       if (releaseDriverAssignment) {
         updatePayload.driver_id = null;
+        updatePayload.assigned_driver_id = null;
         updatePayload.accepted_by_driver_at = null;
       }
       updatePayload.driver_cancelled_at = now.toISOString();
@@ -1742,36 +1903,18 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
       delete updatePayload[column];
     }
 
-    let data: any = null;
-    let error: any = null;
-    const discoveredMissingColumns: string[] = [];
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      const result = await sb
-        // .from("later_bookings")
-        .from("web_booker")
-        .update(updatePayload)
-        .eq("id", req.params.id as string)
-        .select()
-        .single();
-
-      data = result.data;
-      error = result.error;
-      if (!error) {
-        break;
-      }
-
-      const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
-      if (!missingColumn || !(missingColumn in updatePayload)) {
-        break;
-      }
-
-      missingLaterBookingCancelColumns.add(missingColumn);
-      discoveredMissingColumns.push(missingColumn);
-      delete updatePayload[missingColumn];
-    }
+    let updateResult = await updateLaterBookingWithFallbackColumns(
+      sourceTable,
+      bookingId,
+      updatePayload,
+      missingLaterBookingCancelColumns,
+    );
+    let data = updateResult.data;
+    let error = updateResult.error;
+    const discoveredMissingColumns = updateResult.discoveredMissingColumns;
 
     if (discoveredMissingColumns.length > 0) {
-      console.info(`ℹ️ later_bookings cancel skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
+      console.info(`ℹ️ ${sourceTable} cancel skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
     }
 
     const statusMayBeUnsupported =
@@ -1784,27 +1927,31 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
 
     if (statusMayBeUnsupported) {
       updatePayload.status = 'cancelled';
-      const retry = await sb
-        // .from("later_bookings")
-        .from("web_booker")
-        .update(updatePayload)
-        .eq("id", req.params.id as string)
-        .select()
-        .single();
-
-      data = retry.data;
-      error = retry.error;
+      updateResult = await updateLaterBookingWithFallbackColumns(
+        sourceTable,
+        bookingId,
+        updatePayload,
+        missingLaterBookingCancelColumns,
+      );
+      data = updateResult.data;
+      error = updateResult.error;
     }
 
     if (error) {
       console.error("Supabase cancel booking update error:", error);
       return res.status(500).json({ error: error.message });
     }
+
+    if (!data) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const normalizedUpdatedBooking = normalizeLaterBooking(data, sourceTable);
     io.emit("later-booking:update", {
       type: cancelledBy === 'driver' ? "released" : "cancelled",
-      booking: data,
+      booking: normalizedUpdatedBooking,
     });
-    res.json({ booking: data, withinThreeHours, cancellationFee, penaltyNote });
+    res.json({ booking: normalizedUpdatedBooking, withinThreeHours, cancellationFee, penaltyNote });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to cancel booking" });
   }

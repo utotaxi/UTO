@@ -2868,14 +2868,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
       case 'standard':
       case 'comfort':
       case 'saloon':
-        return ['saloon', 'economy', 'standard', 'comfort'];
+        // Saloon requests can be fulfilled by saloon and larger classes
+        return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'people carrier', 'minibus'];
       case 'people_carrier':
       case 'people carrier':
-        return ['people_carrier', 'minibus'];
+        // People carrier requests can be fulfilled by people carrier and larger
+        return ['people_carrier', 'people carrier', 'minibus'];
       case 'minibus':
+        // Minibus requests must stay minibus-only
         return ['minibus'];
       default:
-        return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'minibus'];
+        return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'people carrier', 'minibus'];
     }
   };
 

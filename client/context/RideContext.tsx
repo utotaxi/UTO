@@ -1403,12 +1403,41 @@ export function RideProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   const calculateDynamicFare = (distanceMiles: number, durationMin: number, rideType: string): number => {
-    const formattedType = rideType.charAt(0).toUpperCase() + rideType.slice(1);
+    const normalizePricingKey = (value: string) =>
+      value.toLowerCase().trim().replace(/[\s-]+/g, "_");
+
+    const resolveVehiclePricing = (pricingMap: any, requestedType: string) => {
+      if (!pricingMap || typeof pricingMap !== "object") return null;
+
+      const directCandidates = [
+        requestedType,
+        requestedType.replace(/_/g, " "),
+        requestedType.charAt(0).toUpperCase() + requestedType.slice(1),
+        requestedType
+          .split("_")
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" "),
+      ];
+
+      for (const candidate of directCandidates) {
+        if (candidate && pricingMap[candidate]) return pricingMap[candidate];
+      }
+
+      const normalizedRequested = normalizePricingKey(requestedType);
+      for (const [key, value] of Object.entries(pricingMap)) {
+        if (normalizePricingKey(String(key)) === normalizedRequested) {
+          return value as any;
+        }
+      }
+
+      return null;
+    };
     
     // Supabase stores pricing under "vehicles" key, not "pricing"
     const vehiclePricing = pricingRules?.vehicles || pricingRules?.pricing;
+    const p = resolveVehiclePricing(vehiclePricing, rideType);
     
-    if (!pricingRules || !vehiclePricing || !vehiclePricing[formattedType] || !vehiclePricing[formattedType].enabled) {
+    if (!pricingRules || !vehiclePricing || !p || p.enabled === false) {
       // Fallback
       const baseFares: any = { saloon: 4.0, people_carrier: 5.0, minibus: 6.0 };
       const perKm: any = { saloon: 1.5, people_carrier: 1.85, minibus: 2.2 };
@@ -1422,7 +1451,6 @@ export function RideProvider({ children }: { children: ReactNode }) {
       return Math.round((base + distanceCost + timeCost) * 100) / 100;
     }
   
-    const p = vehiclePricing[formattedType];
     const mileTiers = pricingRules.mile_tiers || [];
     
     let cost = parseFloat(p.start_price || "0");
@@ -1448,7 +1476,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
         milesRemaining = 0;
       }
       previousTierMiles = tier.after_miles;
-      currentMileRate = parseFloat(p.mile_tier_prices[tier.id] || "0");
+      currentMileRate = parseFloat(p.mile_tier_prices?.[tier.id] || "0");
     }
   
     if (milesRemaining > 0) {
