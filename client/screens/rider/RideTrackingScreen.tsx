@@ -465,946 +465,1886 @@ export default function RideTrackingScreen({ navigation }: any) {
     }
   };
 
-  // If no drivers available and ride has been cancelled, show standalone rebook UI
-  if (noDriversAvailable && !activeRide) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center', padding: Spacing.xl }]}>
-        <View style={[styles.noDriversIcon, { backgroundColor: UTOColors.warning + '20' }]}>
-          <MaterialIcons name="no-transfer" size={36} color={UTOColors.warning} />
-        </View>
-        <ThemedText style={[styles.noDriversTitle, { color: theme.text, marginTop: Spacing.lg }]}>
-          No Drivers Available
-        </ThemedText>
-        <ThemedText style={[styles.noDriversMessage, { color: theme.textSecondary, marginTop: Spacing.sm }]}>
-          Unfortunately we don't have any available drivers at the moment. Please try again shortly.
-        </ThemedText>
-        <Pressable
-          onPress={() => handleRebook()}
-          style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary, marginTop: Spacing.xl }]}
-        >
-          <MaterialIcons name="refresh" size={20} color="#000" />
-          <ThemedText style={styles.rebookButtonText}>Rebook Ride</ThemedText>
-        </Pressable>
-      </View>
-    );
-  }
+//   // If no drivers available and ride has been cancelled, show standalone rebook UI
+//   if (noDriversAvailable && !activeRide) {
+//     return (
+//       <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center', padding: Spacing.xl }]}>
+//         <View style={[styles.noDriversIcon, { backgroundColor: UTOColors.warning + '20' }]}>
+//           <MaterialIcons name="no-transfer" size={36} color={UTOColors.warning} />
+//         </View>
+//         <ThemedText style={[styles.noDriversTitle, { color: theme.text, marginTop: Spacing.lg }]}>
+//           No Drivers Available
+//         </ThemedText>
+//         <ThemedText style={[styles.noDriversMessage, { color: theme.textSecondary, marginTop: Spacing.sm }]}>
+//           Unfortunately we don't have any available drivers at the moment. Please try again shortly.
+//         </ThemedText>
+//         <Pressable
+//           onPress={() => handleRebook()}
+//           style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary, marginTop: Spacing.xl }]}
+//         >
+//           <MaterialIcons name="refresh" size={20} color="#000" />
+//           <ThemedText style={styles.rebookButtonText}>Rebook Ride</ThemedText>
+//         </Pressable>
+//       </View>
+//     );
+//   }
 
-  // When ride is complete and activeRide is cleared, show Rating Modal
-  // instead of returning null. This ensures the modal stays visible.
-  if (!activeRide) {
-    if (pendingRating) {
-      return (
-        <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]}>
-          <RatingModal
-            visible={true}
-            ratedRole="driver"
-            ratedName={pendingRating.driverName || "Driver"}
-            rideId={pendingRating.rideId || ""}
-            onSubmit={handleRatingSubmit}
-            onDismiss={handleRatingDismiss}
-          />
-        </View>
-      );
-    }
-    // Show a brief transition screen instead of null to avoid crash
-    return (
-      <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]} />
-    );
-  }
+//   // When ride is complete and activeRide is cleared, show Rating Modal
+//   // instead of returning null. This ensures the modal stays visible.
+//   if (!activeRide) {
+//     if (pendingRating) {
+//       return (
+//         <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]}>
+//           <RatingModal
+//             visible={true}
+//             ratedRole="driver"
+//             ratedName={pendingRating.driverName || "Driver"}
+//             rideId={pendingRating.rideId || ""}
+//             onSubmit={handleRatingSubmit}
+//             onDismiss={handleRatingDismiss}
+//           />
+//         </View>
+//       );
+//     }
+//     // Show a brief transition screen instead of null to avoid crash
+//     return (
+//       <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]} />
+//     );
+//   }
 
-  const getStatusMessage = () => {
-    const status = rideStatus || activeRide.status;
-    switch (status) {
-      case "pending":
-        return "Finding your driver...";
-      case "accepted":
-        return "Driver is on the way";
-      case "arrived":
-        return "Driver has arrived";
-      case "in_progress":
-        return "On your way to destination";
-      default:
-        return "Processing ride...";
-    }
-  };
+//   const getStatusMessage = () => {
+//     const status = rideStatus || activeRide.status;
+//     switch (status) {
+//       case "pending":
+//         return "Finding your driver...";
+//       case "accepted":
+//         return "Driver is on the way";
+//       case "arrived":
+//         return "Driver has arrived";
+//       case "in_progress":
+//         return "On your way to destination";
+//       default:
+//         return "Processing ride...";
+//     }
+//   };
 
-  const getDropoffTime = () => {
-    if (!activeRide) return "";
-    const now = new Date();
-    const dropoffTime = new Date(now.getTime() + activeRide.durationMinutes * 60000);
-    return dropoffTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+//   const getDropoffTime = () => {
+//     if (!activeRide) return "";
+//     const now = new Date();
+//     const dropoffTime = new Date(now.getTime() + activeRide.durationMinutes * 60000);
+//     return dropoffTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+//   };
 
-  // ✅ ULTRA CLOSE ZOOM
-  const getMapRegion = () => {
-    const points: RoutePoint[] = [
-      {
-        latitude: activeRide.pickupLocation.latitude,
-        longitude: activeRide.pickupLocation.longitude,
-      },
-      {
-        latitude: activeRide.dropoffLocation.latitude,
-        longitude: activeRide.dropoffLocation.longitude,
-      },
-    ];
+//   // ✅ ULTRA CLOSE ZOOM
+//   const getMapRegion = () => {
+//     const points: RoutePoint[] = [
+//       {
+//         latitude: activeRide.pickupLocation.latitude,
+//         longitude: activeRide.pickupLocation.longitude,
+//       },
+//       {
+//         latitude: activeRide.dropoffLocation.latitude,
+//         longitude: activeRide.dropoffLocation.longitude,
+//       },
+//     ];
 
-    if (driverLocation) {
-      points.push({
-        latitude: driverLocation.latitude,
-        longitude: driverLocation.longitude,
-      });
-    }
+//     if (driverLocation) {
+//       points.push({
+//         latitude: driverLocation.latitude,
+//         longitude: driverLocation.longitude,
+//       });
+//     }
 
-    const lats = points.map((p) => p.latitude);
-    const lngs = points.map((p) => p.longitude);
+//     const lats = points.map((p) => p.latitude);
+//     const lngs = points.map((p) => p.longitude);
 
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
+//     const minLat = Math.min(...lats);
+//     const maxLat = Math.max(...lats);
+//     const minLng = Math.min(...lngs);
+//     const maxLng = Math.max(...lngs);
 
-    const centerLat = (minLat + maxLat) / 2;
-    const centerLng = (minLng + maxLng) / 2;
+//     const centerLat = (minLat + maxLat) / 2;
+//     const centerLng = (minLng + maxLng) / 2;
 
-    const latDelta = Math.max((maxLat - minLat) * 1.05, 0.02);
-    const lngDelta = Math.max((maxLng - minLng) * 1.05, 0.02);
+//     const latDelta = Math.max((maxLat - minLat) * 1.05, 0.02);
+//     const lngDelta = Math.max((maxLng - minLng) * 1.05, 0.02);
 
-    return {
-      latitude: centerLat,
-      longitude: centerLng,
-      latitudeDelta: latDelta,
-      longitudeDelta: lngDelta,
-    };
-  };
+//     return {
+//       latitude: centerLat,
+//       longitude: centerLng,
+//       latitudeDelta: latDelta,
+//       longitudeDelta: lngDelta,
+//     };
+//   };
 
-  const getDistanceString = () => {
-    if (driverDistance) return driverDistance.replace("mi", "miles");
+//   const getDistanceString = () => {
+//     if (driverDistance) return driverDistance.replace("mi", "miles");
 
-    // Fallback if APIs fail
-    if (!driverLocation || !activeRide) return null;
-    const R = 3958.8;
-    const dLat = (activeRide.pickupLocation.latitude - driverLocation.latitude) * Math.PI / 180;
-    const dLon = (activeRide.pickupLocation.longitude - driverLocation.longitude) * Math.PI / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(driverLocation.latitude * Math.PI / 180) * Math.cos(activeRide.pickupLocation.latitude * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const miles = R * c;
+//     // Fallback if APIs fail
+//     if (!driverLocation || !activeRide) return null;
+//     const R = 3958.8;
+//     const dLat = (activeRide.pickupLocation.latitude - driverLocation.latitude) * Math.PI / 180;
+//     const dLon = (activeRide.pickupLocation.longitude - driverLocation.longitude) * Math.PI / 180;
+//     const a =
+//       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+//       Math.cos(driverLocation.latitude * Math.PI / 180) * Math.cos(activeRide.pickupLocation.latitude * Math.PI / 180) *
+//       Math.sin(dLon / 2) * Math.sin(dLon / 2);
+//     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//     const miles = R * c;
 
-    if (miles < 0.1) return "Nearby";
-    return `${miles.toFixed(1)} miles`;
-  };
+//     if (miles < 0.1) return "Nearby";
+//     return `${miles.toFixed(1)} miles`;
+//   };
 
-  const currentDriverLocation = driverLocation || {
-    latitude: activeRide.pickupLocation.latitude + 0.005,
-    longitude: activeRide.pickupLocation.longitude + 0.003,
-  };
+//   const currentDriverLocation = driverLocation || {
+//     latitude: activeRide.pickupLocation.latitude + 0.005,
+//     longitude: activeRide.pickupLocation.longitude + 0.003,
+//   };
 
-  const currentStatus = rideStatus || activeRide.status;
+//   const currentStatus = rideStatus || activeRide.status;
 
+//   return (
+//     <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
+//       <MapViewWrapper
+//         style={styles.map}
+//         initialRegion={getMapRegion()}
+//         region={getMapRegion()}
+//         customMapStyle={isDark ? darkMapStyle : []}
+//       >
+//         {routeCoordinates.length > 0 && (
+//           <PolylineWrapper
+//             coordinates={routeCoordinates}
+//             strokeColor="#000000"
+//             strokeWidth={5}
+//           />
+//         )}
+
+//         {/* Driver-to-pickup route — shows driver moving toward rider */}
+//         {driverToPickupRoute.length > 0 && (currentStatus === "accepted" || currentStatus === "arrived") && (
+//           <PolylineWrapper
+//             coordinates={driverToPickupRoute}
+//             strokeColor={UTOColors.rider.primary}
+//             strokeWidth={4}
+//             lineDashPattern={[10, 6]}
+//           />
+//         )}
+
+//         {/* Dummy cars show when finding a driver */}
+//         {currentStatus === "pending" && (
+//           <DummyCars location={activeRide.pickupLocation} />
+//         )}
+
+//         {/* Pickup marker */}
+//         <MarkerWrapper
+//           coordinate={{
+//             latitude: activeRide.pickupLocation.latitude,
+//             longitude: activeRide.pickupLocation.longitude,
+//           }}
+//           title="Pickup"
+//         >
+//           <View style={[styles.markerContainer, { backgroundColor: UTOColors.success }]}>
+//             <MaterialIcons name="person-pin-circle" size={18} color="#FFFFFF" />
+//           </View>
+//         </MarkerWrapper>
+
+//         {/* Dropoff marker */}
+//         <MarkerWrapper
+//           coordinate={{
+//             latitude: activeRide.dropoffLocation.latitude,
+//             longitude: activeRide.dropoffLocation.longitude,
+//           }}
+//           title="Dropoff"
+//         >
+//           <View style={[styles.markerContainer, { backgroundColor: UTOColors.error }]}>
+//             <MaterialIcons name="place" size={18} color="#FFFFFF" />
+//           </View>
+//         </MarkerWrapper>
+
+//         {/* Driver marker */}
+//         <MarkerWrapper
+//           coordinate={currentDriverLocation}
+//           title="Driver"
+//           anchor={{ x: 0.5, y: 0.5 }}
+//           flat
+//         >
+//           <View style={{ transform: [{ rotate: `${driverLocation?.heading || 0}deg` }] }}>
+//             <TopDownCarView />
+//           </View>
+//         </MarkerWrapper>
+//       </MapViewWrapper>
+
+//       {isLoadingRoute && (
+//         <View style={styles.loadingOverlay}>
+//           <ActivityIndicator size="small" color={UTOColors.rider.primary} />
+//           <ThemedText style={styles.loadingText}>Loading route...</ThemedText>
+//         </View>
+//       )}
+
+//       <Animated.View
+//         entering={FadeIn}
+//         style={[
+//           styles.bottomSheet,
+//           Shadows.large,
+//           {
+//             paddingBottom: insets.bottom + Spacing.lg,
+//             backgroundColor: theme.backgroundRoot,
+//             maxHeight: Dimensions.get('window').height * 0.7,
+//           },
+//         ]}
+//       >
+//         <ScrollView
+//           showsVerticalScrollIndicator={false}
+//           bounces={false}
+//           contentContainerStyle={{ paddingBottom: 4 }}
+//         >
+//           <View style={styles.statusSection}>
+//             <View style={styles.statusRow}>
+//               <View style={[styles.statusDot, { backgroundColor: UTOColors.success }]} />
+//               <ThemedText style={styles.statusText}>{getStatusMessage()}</ThemedText>
+//             </View>
+
+//             {currentStatus === "accepted" && (
+//               <View style={styles.etaRow}>
+//                 <ThemedText style={[styles.eta, { color: theme.textSecondary }]}>
+//                   {estimatedArrival ? `${estimatedArrival} away` : "Calculating ETA..."}
+//                 </ThemedText>
+//                 {getDistanceString() && (
+//                   <ThemedText style={[styles.distance, { color: theme.textSecondary }]}>
+//                     • {getDistanceString()}
+//                   </ThemedText>
+//                 )}
+//               </View>
+//             )}
+//             {currentStatus === "in_progress" && (
+//               <View style={styles.etaRow}>
+//                 <ThemedText style={[styles.eta, { color: theme.textSecondary }]}>
+//                   {`${activeRide.durationMinutes} min`} to destination
+//                 </ThemedText>
+//               </View>
+//             )}
+//             {currentStatus === "in_progress" && (
+//               <ThemedText style={[styles.dropoffTime, { color: theme.textSecondary, marginLeft: 18 }]}>
+//                 Estimated dropoff: {getDropoffTime()}
+//               </ThemedText>
+//             )}
+//           </View>
+
+//           {/* ─── Ride Stage Progress Stepper ──────────────────────────── */}
+//           {currentStatus !== "pending" && (
+//             <View style={styles.stageStepper}>
+//               {[
+//                 { key: "accepted", label: "Driver assigned", icon: "person" as const },
+//                 { key: "on_way", label: "On the way", icon: "directions-car" as const },
+//                 { key: "arrived", label: "Arrived", icon: "place" as const },
+//                 { key: "in_progress", label: "Ride started", icon: "navigation" as const },
+//               ].map((stage, index) => {
+//                 const stageOrder = ["accepted", "on_way", "arrived", "in_progress"];
+//                 const currentIdx = currentStatus === "accepted" ? 1 : stageOrder.indexOf(currentStatus);
+//                 const isActive = index <= currentIdx;
+//                 const isCurrent = (currentStatus === "accepted" && index <= 1) || (index === currentIdx);
+//                 return (
+//                   <React.Fragment key={stage.key}>
+//                     <View style={styles.stageItem}>
+//                       <View style={[
+//                         styles.stageCircle,
+//                         {
+//                           backgroundColor: isActive ? UTOColors.rider.primary : theme.backgroundSecondary,
+//                           borderColor: isActive ? UTOColors.rider.primary : theme.border
+//                         },
+//                       ]}>
+//                         <MaterialIcons name={stage.icon} size={12} color={isActive ? "#000" : theme.textSecondary} />
+//                       </View>
+//                       <ThemedText style={[
+//                         styles.stageLabel,
+//                         {
+//                           color: isActive ? theme.text : theme.textSecondary,
+//                           fontWeight: isCurrent ? "700" : "400"
+//                         },
+//                       ]}>{stage.label}</ThemedText>
+//                     </View>
+//                     {index < 3 && (
+//                       <View style={[
+//                         styles.stageLine,
+//                         { backgroundColor: index < currentIdx ? UTOColors.rider.primary : theme.border },
+//                       ]} />
+//                     )}
+//                   </React.Fragment>
+//                 );
+//               })}
+//             </View>
+//           )}
+
+//           {/* ─── Prominent Arrival + PIN Message ──────────────────────── */}
+//           {currentStatus === "arrived" && activeRide.otp && (
+//             <AnimatedView
+//               entering={FadeIn.duration(500)}
+//               style={[
+//                 styles.arrivalCallout,
+//                 { backgroundColor: UTOColors.rider.primary },
+//               ]}
+//             >
+//               <MaterialIcons name="check-circle" size={28} color="#000" />
+//               <ThemedText style={styles.arrivalTitle}>Your driver has arrived</ThemedText>
+//               <ThemedText style={styles.arrivalSubtitle}>Please provide your PIN to start the ride</ThemedText>
+//               <View style={styles.arrivalOtpBox}>
+//                 {activeRide.otp.split("").map((digit, i) => (
+//                   <View key={i} style={styles.arrivalOtpDigit}>
+//                     <ThemedText style={styles.arrivalOtpText}>{digit}</ThemedText>
+//                   </View>
+//                 ))}
+//               </View>
+//             </AnimatedView>
+//           )}
+
+//           {/* ─── Waiting Timer when driver has arrived ───────────────── */}
+//           {currentStatus === "arrived" && waitingSecondsLeft !== null && (
+//             <AnimatedView
+//               entering={FadeIn.duration(400)}
+//               style={[
+//                 styles.waitingTimerContainer,
+//                 {
+//                   backgroundColor: waitingSecondsLeft <= 120
+//                     ? (waitingSecondsLeft <= 60 ? '#EF4444' + '20' : '#F59E0B' + '20')
+//                     : theme.backgroundDefault,
+//                   borderColor: waitingSecondsLeft <= 120
+//                     ? (waitingSecondsLeft <= 60 ? '#EF4444' + '40' : '#F59E0B' + '40')
+//                     : theme.border,
+//                 },
+//                 waitingSecondsLeft <= 60 ? timerPulseStyle : {},
+//               ]}
+//             >
+//               <View style={styles.waitingTimerHeader}>
+//                 <MaterialIcons
+//                   name="timer"
+//                   size={22}
+//                   color={waitingSecondsLeft <= 120
+//                     ? (waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B')
+//                     : UTOColors.rider.primary}
+//                 />
+//                 <ThemedText style={[
+//                   styles.waitingTimerTitle,
+//                   waitingSecondsLeft <= 120 && {
+//                     color: waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B',
+//                   },
+//                 ]}>
+//                   Driver is waiting
+//                 </ThemedText>
+//               </View>
+//               <ThemedText style={[
+//                 styles.waitingTimerDigits,
+//                 {
+//                   color: waitingSecondsLeft <= 120
+//                     ? (waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B')
+//                     : theme.text,
+//                 },
+//               ]}>
+//                 {`${Math.floor(waitingSecondsLeft / 60).toString().padStart(2, '0')}:${(waitingSecondsLeft % 60).toString().padStart(2, '0')}`}
+//               </ThemedText>
+//               <ThemedText style={[styles.waitingTimerWarning, { color: theme.textSecondary }]}>
+//                 {waitingSecondsLeft <= 60
+//                   ? 'Hurry! Ride will be auto-cancelled with a fee'
+//                   : waitingSecondsLeft <= 120
+//                     ? 'Less than 2 min left — please board now'
+//                     : 'Please board within the time or ride will be cancelled with a fee'}
+//               </ThemedText>
+//             </AnimatedView>
+//           )}
+
+//           {currentStatus === "pending" && (
+//             <View style={styles.searchingContainer}>
+//               <View style={[styles.searchingRing, { borderColor: UTOColors.rider.primary + "30" }]}>
+//                 <View style={[styles.searchingRingInner, { borderColor: UTOColors.rider.primary + "60" }]}>
+//                   <AnimatedView style={[styles.searchingPulse, { backgroundColor: UTOColors.rider.primary }, pulseStyle]} />
+//                   <View style={[styles.searchingDot, { backgroundColor: UTOColors.rider.primary }]}>
+//                     <MaterialIcons name="local-taxi" size={20} color="#000" />
+//                   </View>
+//                 </View>
+//               </View>
+//               <ThemedText style={[styles.searchingText, { color: theme.textSecondary }]}>
+//                 Matching you with a nearby driver
+//               </ThemedText>
+//             </View>
+//           )}
+
+//           {currentStatus !== "pending" && (
+//             <>
+//               {currentStatus === "accepted" && activeRide.otp && (
+//                 <View style={[styles.otpContainer, { backgroundColor: theme.backgroundDefault, borderWidth: 1, borderColor: theme.border }]}>
+//                   <ThemedText style={[styles.otpLabel, { color: theme.text }]}>
+//                     Your ride PIN — share with driver on arrival
+//                   </ThemedText>
+//                   <View style={styles.otpBox}>
+//                     {activeRide.otp.split("").map((digit, i) => (
+//                       <View key={i} style={[styles.otpDigit, { backgroundColor: theme.backgroundSecondary }]}>
+//                         <ThemedText style={[styles.otpText, { color: theme.text }]}>{digit}</ThemedText>
+//                       </View>
+//                     ))}
+//                   </View>
+//                 </View>
+//               )}
+
+//               <View style={[styles.driverCard, { backgroundColor: theme.backgroundDefault }]}>
+//                 <View style={[styles.driverAvatar, { backgroundColor: theme.backgroundSecondary }]}>
+//                   <MaterialIcons name="person" size={24} color={theme.textSecondary} />
+//                 </View>
+//                 <View style={styles.driverInfo}>
+//                   <ThemedText style={styles.driverName}>{activeRide.driverName}</ThemedText>
+//                   <View style={styles.vehicleRow}>
+//                     <ThemedText style={[styles.vehicleInfo, { color: theme.textSecondary }]}>
+//                       {activeRide.vehicleInfo}
+//                     </ThemedText>
+//                     <View style={[styles.ratingBadge, { backgroundColor: UTOColors.warning + "20" }]}>
+//                       <MaterialIcons name="star" size={12} color={UTOColors.warning} />
+//                       <ThemedText style={[styles.rating, { color: UTOColors.warning }]}>
+//                         {activeRide.driverRating?.toFixed(1)}
+//                       </ThemedText>
+//                     </View>
+//                   </View>
+//                   <ThemedText style={[styles.licensePlate, { color: theme.text }]}>
+//                     {activeRide.licensePlate}
+//                   </ThemedText>
+//                 </View>
+//                 <View style={styles.contactButtons}>
+//                   <Pressable
+//                     onPress={handleCall}
+//                     style={[styles.contactButton, { backgroundColor: theme.backgroundSecondary }]}
+//                   >
+//                     <MaterialIcons name="phone" size={18} color={UTOColors.rider.primary} />
+//                   </Pressable>
+//                   <Pressable
+//                     onPress={handleMessage}
+//                     style={[styles.contactButton, { backgroundColor: theme.backgroundSecondary }]}
+//                   >
+//                     <MaterialIcons name="chat" size={18} color={UTOColors.rider.primary} />
+//                   </Pressable>
+//                 </View>
+//               </View>
+//             </>
+//           )}
+
+//           <View style={styles.tripDetails}>
+//             <View style={styles.routeContainer}>
+//               <View style={styles.routeIndicator}>
+//                 <View style={[styles.routeDot, { backgroundColor: UTOColors.success }]} />
+//                 <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+//                 <View style={[styles.routeDot, { backgroundColor: UTOColors.error }]} />
+//               </View>
+//               <View style={styles.addresses}>
+//                 <ThemedText style={styles.address} numberOfLines={1}>
+//                   {activeRide.pickupLocation.address}
+//                 </ThemedText>
+//                 <ThemedText style={styles.address} numberOfLines={1}>
+//                   {activeRide.dropoffLocation.address}
+//                 </ThemedText>
+//               </View>
+//               <ThemedText style={styles.farePrice}>
+//                 {formatPrice(activeRide.farePrice)}
+//               </ThemedText>
+//             </View>
+
+//             {currentStatus !== "completed" && (
+//               <Pressable style={styles.paymentSwitchButton} onPress={() => {
+//                 if (!activeRide) return;
+//                 const currentMethod = activeRide.paymentMethod || "cash";
+//                 const newMethod = currentMethod === "card" ? "cash" : "card";
+//                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+//                 if (typeof updateRidePaymentMethod === 'function') {
+//                   updateRidePaymentMethod(activeRide.id, newMethod);
+//                 }
+//               }}>
+//                 <View style={styles.paymentSwitchRow}>
+//                   <MaterialIcons
+//                     name={activeRide.paymentMethod === 'card' ? 'credit-card' : 'payments'}
+//                     size={18}
+//                     color={theme.textSecondary}
+//                   />
+//                   <ThemedText style={{ color: theme.textSecondary, marginLeft: 8 }}>
+//                     Paying with {activeRide.paymentMethod === 'card' ? 'Card' : 'Cash'}
+//                   </ThemedText>
+//                 </View>
+//                 <ThemedText style={{ color: UTOColors.rider.primary, fontWeight: '600' }}>Change</ThemedText>
+//               </Pressable>
+//             )}
+//           </View>
+
+//           {(currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "at_pickup" || currentStatus === "arrived") && !noDriversAvailable && (
+//             <AnimatedPressable
+//               onPress={handleCancel}
+//               onPressIn={() => (cancelScale.value = withSpring(0.98))}
+//               onPressOut={() => (cancelScale.value = withSpring(1))}
+//               style={[
+//                 styles.cancelButton,
+//                 { backgroundColor: UTOColors.error + "15" },
+//                 cancelAnimatedStyle,
+//               ]}
+//             >
+//               <ThemedText style={[styles.cancelButtonText, { color: UTOColors.error }]}>
+//                 Cancel Ride
+//               </ThemedText>
+//             </AnimatedPressable>
+//           )}
+
+//           {/* ─── No Drivers Available — Rebook ─────────────────────────── */}
+//           {noDriversAvailable && (
+//             <AnimatedView entering={FadeIn.duration(400)} style={styles.noDriversContainer}>
+//               <View style={[styles.noDriversIcon, { backgroundColor: UTOColors.warning + '20' }]}>
+//                 <MaterialIcons name="no-transfer" size={36} color={UTOColors.warning} />
+//               </View>
+//               <ThemedText style={[styles.noDriversTitle, { color: theme.text }]}>
+//                 No Drivers Available
+//               </ThemedText>
+//               <ThemedText style={[styles.noDriversMessage, { color: theme.textSecondary }]}>
+//                 Unfortunately we don't have any available drivers at the moment. Please try again shortly.
+//               </ThemedText>
+//               <Pressable
+//                 onPress={() => handleRebook()}
+//                 style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary }]}
+//               >
+//                 <MaterialIcons name="refresh" size={20} color="#000" />
+//                 <ThemedText style={styles.rebookButtonText}>Rebook Ride</ThemedText>
+//               </Pressable>
+//             </AnimatedView>
+//           )}
+//         </ScrollView>
+//       </Animated.View>
+//     </View>
+//   );
+// }
+
+// const styles = StyleSheet.create({
+//   container: { flex: 1 },
+//   map: { flex: 1 },
+//   loadingOverlay: {
+//     position: "absolute",
+//     top: 60,
+//     alignSelf: "center",
+//     backgroundColor: "rgba(0,0,0,0.7)",
+//     paddingHorizontal: Spacing.lg,
+//     paddingVertical: Spacing.sm,
+//     borderRadius: BorderRadius.full,
+//     flexDirection: "row",
+//     alignItems: "center",
+//     gap: Spacing.sm,
+//   },
+//   loadingText: { color: "#FFFFFF", fontSize: 12 },
+//   markerContainer: {
+//     width: 36,
+//     height: 36,
+//     borderRadius: 18,
+//     alignItems: "center",
+//     justifyContent: "center",
+//     borderWidth: 2,
+//     borderColor: "#FFFFFF",
+//   },
+//   driverMarkerContainer: {
+//     width: 50,
+//     height: 50,
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   driverPulse: {
+//     position: "absolute",
+//     width: 50,
+//     height: 50,
+//     borderRadius: 25,
+//   },
+//   driverMarker: {
+//     width: 36,
+//     height: 36,
+//     borderRadius: 18,
+//     alignItems: "center",
+//     justifyContent: "center",
+//     borderWidth: 3,
+//     borderColor: "#FFFFFF",
+//   },
+//   bottomSheet: {
+//     position: "absolute",
+//     bottom: 0,
+//     left: 0,
+//     right: 0,
+//     paddingHorizontal: Spacing.lg,
+//     paddingTop: Spacing.xl,
+//     borderTopLeftRadius: BorderRadius.xl,
+//     borderTopRightRadius: BorderRadius.xl,
+//   },
+//   statusSection: { marginBottom: Spacing.lg },
+//   statusRow: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     marginBottom: 4,
+//   },
+//   statusDot: {
+//     width: 10,
+//     height: 10,
+//     borderRadius: 5,
+//     marginRight: Spacing.sm,
+//   },
+//   statusText: { fontSize: 18, fontWeight: "600" },
+//   eta: { fontSize: 14 },
+//   etaRow: {
+//     flexDirection: 'row',
+//     alignItems: 'center',
+//     marginLeft: 18,
+//     gap: 4,
+//   },
+//   distance: { fontSize: 14 },
+//   driverCard: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     padding: Spacing.lg,
+//     borderRadius: BorderRadius.lg,
+//     marginBottom: Spacing.lg,
+//   },
+//   driverAvatar: {
+//     width: 50,
+//     height: 50,
+//     borderRadius: 25,
+//     alignItems: "center",
+//     justifyContent: "center",
+//     marginRight: Spacing.md,
+//   },
+//   driverInfo: { flex: 1 },
+//   driverName: {
+//     fontSize: 16,
+//     fontWeight: "600",
+//     marginBottom: 2,
+//   },
+//   vehicleRow: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     gap: Spacing.sm,
+//     marginBottom: 2,
+//   },
+//   vehicleInfo: { fontSize: 13 },
+//   ratingBadge: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     paddingHorizontal: 6,
+//     paddingVertical: 2,
+//     borderRadius: BorderRadius.full,
+//     gap: 4,
+//   },
+//   rating: { fontSize: 11, fontWeight: "600" },
+//   licensePlate: {
+//     fontSize: 14,
+//     fontWeight: "700",
+//     letterSpacing: 1,
+//   },
+//   contactButtons: {
+//     flexDirection: "row",
+//     gap: Spacing.sm,
+//   },
+//   contactButton: {
+//     width: 40,
+//     height: 40,
+//     borderRadius: 20,
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   tripDetails: { marginBottom: Spacing.lg },
+//   routeContainer: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//   },
+//   routeIndicator: {
+//     width: 20,
+//     alignItems: "center",
+//     marginRight: Spacing.md,
+//   },
+//   routeDot: {
+//     width: 10,
+//     height: 10,
+//     borderRadius: 5,
+//   },
+//   routeLine: {
+//     width: 2,
+//     height: 24,
+//     marginVertical: 4,
+//   },
+//   paymentSwitchButton: {
+//     flexDirection: 'row',
+//     alignItems: 'center',
+//     justifyContent: 'space-between',
+//     marginTop: Spacing.md,
+//     paddingTop: Spacing.md,
+//     borderTopWidth: 1,
+//     borderTopColor: '#33333333',
+//   },
+//   paymentSwitchRow: {
+//     flexDirection: 'row',
+//     alignItems: 'center',
+//   },
+//   addresses: {
+//     flex: 1,
+//     justifyContent: "space-between",
+//     height: 48,
+//   },
+//   address: { fontSize: 14 },
+//   farePrice: {
+//     fontSize: 20,
+//     fontWeight: "700",
+//     marginLeft: Spacing.md,
+//   },
+//   otpContainer: {
+//     padding: Spacing.md,
+//     borderRadius: BorderRadius.lg,
+//     marginBottom: Spacing.lg,
+//     alignItems: "center",
+//   },
+//   otpLabel: {
+//     color: "#000000",
+//     fontSize: 14,
+//     fontWeight: "600",
+//     marginBottom: Spacing.sm,
+//   },
+//   otpBox: {
+//     flexDirection: "row",
+//     gap: Spacing.sm,
+//   },
+//   otpDigit: {
+//     width: 32,
+//     height: 40,
+//     borderRadius: BorderRadius.md,
+//     backgroundColor: "#FFFFFF",
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   otpText: {
+//     fontSize: 20,
+//     fontWeight: "700",
+//     color: "#000000",
+//   },
+//   cancelButton: {
+//     width: "100%",
+//     padding: Spacing.lg,
+//     borderRadius: BorderRadius.lg,
+//     alignItems: "center",
+//   },
+//   cancelButtonText: {
+//     fontSize: 16,
+//     fontWeight: "600",
+//   },
+//   dropoffTime: {
+//     fontSize: 14,
+//     marginTop: 2,
+//   },
+//   searchingContainer: {
+//     alignItems: "center",
+//     paddingVertical: Spacing.lg,
+//     marginBottom: Spacing.md,
+//   },
+//   searchingRing: {
+//     width: 80,
+//     height: 80,
+//     borderRadius: 40,
+//     borderWidth: 2,
+//     alignItems: "center",
+//     justifyContent: "center",
+//     marginBottom: Spacing.md,
+//   },
+//   searchingRingInner: {
+//     width: 60,
+//     height: 60,
+//     borderRadius: 30,
+//     borderWidth: 2,
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   searchingPulse: {
+//     position: "absolute",
+//     width: 44,
+//     height: 44,
+//     borderRadius: 22,
+//   },
+//   searchingDot: {
+//     width: 40,
+//     height: 40,
+//     borderRadius: 20,
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   searchingText: {
+//     fontSize: 14,
+//     textAlign: "center",
+//   },
+//   // ─── Waiting Timer Styles ─────────────────────────────
+//   waitingTimerContainer: {
+//     borderRadius: 16,
+//     borderWidth: 1,
+//     padding: 16,
+//     marginBottom: 16,
+//     alignItems: "center",
+//   },
+//   waitingTimerHeader: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     gap: 8,
+//     marginBottom: 8,
+//   },
+//   waitingTimerTitle: {
+//     fontSize: 15,
+//     fontWeight: "600",
+//   },
+//   waitingTimerDigits: {
+//     fontSize: 42,
+//     fontWeight: "800",
+//     fontVariant: ["tabular-nums"] as any,
+//     letterSpacing: 2,
+//     marginVertical: 4,
+//     lineHeight: 50,
+//     includeFontPadding: false,
+//   },
+//   waitingTimerWarning: {
+//     fontSize: 12,
+//     textAlign: "center",
+//     marginTop: 4,
+//   },
+//   // ─── Ride Stage Stepper Styles ──────────────────────────
+//   stageStepper: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     justifyContent: "center",
+//     marginBottom: Spacing.lg,
+//     paddingHorizontal: Spacing.sm,
+//   },
+//   stageItem: {
+//     alignItems: "center",
+//     gap: 4,
+//   },
+//   stageCircle: {
+//     width: 28,
+//     height: 28,
+//     borderRadius: 14,
+//     alignItems: "center",
+//     justifyContent: "center",
+//     borderWidth: 2,
+//   },
+//   stageLabel: {
+//     fontSize: 9,
+//     textAlign: "center",
+//     maxWidth: 60,
+//   },
+//   stageLine: {
+//     height: 2,
+//     width: 20,
+//     marginHorizontal: 2,
+//     marginBottom: 16,
+//   },
+//   // ─── Arrival Callout Styles ─────────────────────────────
+//   arrivalCallout: {
+//     borderRadius: BorderRadius.lg,
+//     padding: Spacing.lg,
+//     marginBottom: Spacing.lg,
+//     alignItems: "center",
+//     gap: 6,
+//   },
+//   arrivalTitle: {
+//     fontSize: 18,
+//     fontWeight: "700",
+//     color: "#000000",
+//   },
+//   arrivalSubtitle: {
+//     fontSize: 14,
+//     color: "#000000",
+//     opacity: 0.7,
+//   },
+//   arrivalOtpBox: {
+//     flexDirection: "row",
+//     gap: Spacing.sm,
+//     marginTop: Spacing.sm,
+//   },
+//   arrivalOtpDigit: {
+//     width: 44,
+//     height: 52,
+//     borderRadius: BorderRadius.md,
+//     backgroundColor: "#FFFFFF",
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   arrivalOtpText: {
+//     fontSize: 24,
+//     fontWeight: "800",
+//     color: "#000000",
+//   },
+//   // ─── No Drivers / Rebook Styles ─────────────────────────
+//   noDriversContainer: {
+//     alignItems: "center",
+//     paddingVertical: Spacing.xl,
+//     gap: Spacing.md,
+//   },
+//   noDriversIcon: {
+//     width: 72,
+//     height: 72,
+//     borderRadius: 36,
+//     alignItems: "center",
+//     justifyContent: "center",
+//     marginBottom: Spacing.sm,
+//   },
+//   noDriversTitle: {
+//     fontSize: 20,
+//     fontWeight: "700",
+//     textAlign: "center",
+//   },
+//   noDriversMessage: {
+//     fontSize: 14,
+//     textAlign: "center",
+//     paddingHorizontal: Spacing.lg,
+//     lineHeight: 20,
+//   },
+//   rebookButton: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     justifyContent: "center",
+//     gap: Spacing.sm,
+//     paddingVertical: Spacing.md,
+//     paddingHorizontal: Spacing.xl,
+//     borderRadius: BorderRadius.lg,
+//     marginTop: Spacing.md,
+//     width: "100%",
+//   },
+//   rebookButtonText: {
+//     fontSize: 16,
+//     fontWeight: "700",
+//     color: "#000000",
+//   },
+// });
+
+// If no drivers available and ride has been cancelled, show standalone rebook UI
+if (noDriversAvailable && !activeRide) {
   return (
-    <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
-      <MapViewWrapper
-        style={styles.map}
-        initialRegion={getMapRegion()}
-        region={getMapRegion()}
-        customMapStyle={isDark ? darkMapStyle : []}
+    <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center', padding: Spacing.xl }]}>
+      <View style={[styles.noDriversIcon, { backgroundColor: UTOColors.warning + '20' }]}>
+        <MaterialIcons name="no-transfer" size={36} color={UTOColors.warning} />
+      </View>
+      <ThemedText style={[styles.noDriversTitle, { color: theme.text, marginTop: Spacing.lg }]}>
+        No Drivers Available
+      </ThemedText>
+      <ThemedText style={[styles.noDriversMessage, { color: theme.textSecondary, marginTop: Spacing.sm }]}>
+        Unfortunately we don't have any available drivers at the moment. Please try again shortly.
+      </ThemedText>
+      <Pressable
+        onPress={() => handleRebook()}
+        style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary, marginTop: Spacing.xl }]}
       >
-        {routeCoordinates.length > 0 && (
-          <PolylineWrapper
-            coordinates={routeCoordinates}
-            strokeColor="#000000"
-            strokeWidth={5}
-          />
-        )}
-
-        {/* Driver-to-pickup route — shows driver moving toward rider */}
-        {driverToPickupRoute.length > 0 && (currentStatus === "accepted" || currentStatus === "arrived") && (
-          <PolylineWrapper
-            coordinates={driverToPickupRoute}
-            strokeColor={UTOColors.rider.primary}
-            strokeWidth={4}
-            lineDashPattern={[10, 6]}
-          />
-        )}
-
-        {/* Dummy cars show when finding a driver */}
-        {currentStatus === "pending" && (
-          <DummyCars location={activeRide.pickupLocation} />
-        )}
-
-        {/* Pickup marker */}
-        <MarkerWrapper
-          coordinate={{
-            latitude: activeRide.pickupLocation.latitude,
-            longitude: activeRide.pickupLocation.longitude,
-          }}
-          title="Pickup"
-        >
-          <View style={[styles.markerContainer, { backgroundColor: UTOColors.success }]}>
-            <MaterialIcons name="person-pin-circle" size={18} color="#FFFFFF" />
-          </View>
-        </MarkerWrapper>
-
-        {/* Dropoff marker */}
-        <MarkerWrapper
-          coordinate={{
-            latitude: activeRide.dropoffLocation.latitude,
-            longitude: activeRide.dropoffLocation.longitude,
-          }}
-          title="Dropoff"
-        >
-          <View style={[styles.markerContainer, { backgroundColor: UTOColors.error }]}>
-            <MaterialIcons name="place" size={18} color="#FFFFFF" />
-          </View>
-        </MarkerWrapper>
-
-        {/* Driver marker */}
-        <MarkerWrapper
-          coordinate={currentDriverLocation}
-          title="Driver"
-          anchor={{ x: 0.5, y: 0.5 }}
-          flat
-        >
-          <View style={{ transform: [{ rotate: `${driverLocation?.heading || 0}deg` }] }}>
-            <TopDownCarView />
-          </View>
-        </MarkerWrapper>
-      </MapViewWrapper>
-
-      {isLoadingRoute && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="small" color={UTOColors.rider.primary} />
-          <ThemedText style={styles.loadingText}>Loading route...</ThemedText>
-        </View>
-      )}
-
-      <Animated.View
-        entering={FadeIn}
-        style={[
-          styles.bottomSheet,
-          Shadows.large,
-          {
-            paddingBottom: insets.bottom + Spacing.lg,
-            backgroundColor: theme.backgroundRoot,
-            maxHeight: Dimensions.get('window').height * 0.7,
-          },
-        ]}
-      >
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-          contentContainerStyle={{ paddingBottom: 4 }}
-        >
-          <View style={styles.statusSection}>
-            <View style={styles.statusRow}>
-              <View style={[styles.statusDot, { backgroundColor: UTOColors.success }]} />
-              <ThemedText style={styles.statusText}>{getStatusMessage()}</ThemedText>
-            </View>
-
-            {currentStatus === "accepted" && (
-              <View style={styles.etaRow}>
-                <ThemedText style={[styles.eta, { color: theme.textSecondary }]}>
-                  {estimatedArrival ? `${estimatedArrival} away` : "Calculating ETA..."}
-                </ThemedText>
-                {getDistanceString() && (
-                  <ThemedText style={[styles.distance, { color: theme.textSecondary }]}>
-                    • {getDistanceString()}
-                  </ThemedText>
-                )}
-              </View>
-            )}
-            {currentStatus === "in_progress" && (
-              <View style={styles.etaRow}>
-                <ThemedText style={[styles.eta, { color: theme.textSecondary }]}>
-                  {`${activeRide.durationMinutes} min`} to destination
-                </ThemedText>
-              </View>
-            )}
-            {currentStatus === "in_progress" && (
-              <ThemedText style={[styles.dropoffTime, { color: theme.textSecondary, marginLeft: 18 }]}>
-                Estimated dropoff: {getDropoffTime()}
-              </ThemedText>
-            )}
-          </View>
-
-          {/* ─── Ride Stage Progress Stepper ──────────────────────────── */}
-          {currentStatus !== "pending" && (
-            <View style={styles.stageStepper}>
-              {[
-                { key: "accepted", label: "Driver assigned", icon: "person" as const },
-                { key: "on_way", label: "On the way", icon: "directions-car" as const },
-                { key: "arrived", label: "Arrived", icon: "place" as const },
-                { key: "in_progress", label: "Ride started", icon: "navigation" as const },
-              ].map((stage, index) => {
-                const stageOrder = ["accepted", "on_way", "arrived", "in_progress"];
-                const currentIdx = currentStatus === "accepted" ? 1 : stageOrder.indexOf(currentStatus);
-                const isActive = index <= currentIdx;
-                const isCurrent = (currentStatus === "accepted" && index <= 1) || (index === currentIdx);
-                return (
-                  <React.Fragment key={stage.key}>
-                    <View style={styles.stageItem}>
-                      <View style={[
-                        styles.stageCircle,
-                        {
-                          backgroundColor: isActive ? UTOColors.rider.primary : theme.backgroundSecondary,
-                          borderColor: isActive ? UTOColors.rider.primary : theme.border
-                        },
-                      ]}>
-                        <MaterialIcons name={stage.icon} size={12} color={isActive ? "#000" : theme.textSecondary} />
-                      </View>
-                      <ThemedText style={[
-                        styles.stageLabel,
-                        {
-                          color: isActive ? theme.text : theme.textSecondary,
-                          fontWeight: isCurrent ? "700" : "400"
-                        },
-                      ]}>{stage.label}</ThemedText>
-                    </View>
-                    {index < 3 && (
-                      <View style={[
-                        styles.stageLine,
-                        { backgroundColor: index < currentIdx ? UTOColors.rider.primary : theme.border },
-                      ]} />
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </View>
-          )}
-
-          {/* ─── Prominent Arrival + PIN Message ──────────────────────── */}
-          {currentStatus === "arrived" && activeRide.otp && (
-            <AnimatedView
-              entering={FadeIn.duration(500)}
-              style={[
-                styles.arrivalCallout,
-                { backgroundColor: UTOColors.rider.primary },
-              ]}
-            >
-              <MaterialIcons name="check-circle" size={28} color="#000" />
-              <ThemedText style={styles.arrivalTitle}>Your driver has arrived</ThemedText>
-              <ThemedText style={styles.arrivalSubtitle}>Please provide your PIN to start the ride</ThemedText>
-              <View style={styles.arrivalOtpBox}>
-                {activeRide.otp.split("").map((digit, i) => (
-                  <View key={i} style={styles.arrivalOtpDigit}>
-                    <ThemedText style={styles.arrivalOtpText}>{digit}</ThemedText>
-                  </View>
-                ))}
-              </View>
-            </AnimatedView>
-          )}
-
-          {/* ─── Waiting Timer when driver has arrived ───────────────── */}
-          {currentStatus === "arrived" && waitingSecondsLeft !== null && (
-            <AnimatedView
-              entering={FadeIn.duration(400)}
-              style={[
-                styles.waitingTimerContainer,
-                {
-                  backgroundColor: waitingSecondsLeft <= 120
-                    ? (waitingSecondsLeft <= 60 ? '#EF4444' + '20' : '#F59E0B' + '20')
-                    : theme.backgroundDefault,
-                  borderColor: waitingSecondsLeft <= 120
-                    ? (waitingSecondsLeft <= 60 ? '#EF4444' + '40' : '#F59E0B' + '40')
-                    : theme.border,
-                },
-                waitingSecondsLeft <= 60 ? timerPulseStyle : {},
-              ]}
-            >
-              <View style={styles.waitingTimerHeader}>
-                <MaterialIcons
-                  name="timer"
-                  size={22}
-                  color={waitingSecondsLeft <= 120
-                    ? (waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B')
-                    : UTOColors.rider.primary}
-                />
-                <ThemedText style={[
-                  styles.waitingTimerTitle,
-                  waitingSecondsLeft <= 120 && {
-                    color: waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B',
-                  },
-                ]}>
-                  Driver is waiting
-                </ThemedText>
-              </View>
-              <ThemedText style={[
-                styles.waitingTimerDigits,
-                {
-                  color: waitingSecondsLeft <= 120
-                    ? (waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B')
-                    : theme.text,
-                },
-              ]}>
-                {`${Math.floor(waitingSecondsLeft / 60).toString().padStart(2, '0')}:${(waitingSecondsLeft % 60).toString().padStart(2, '0')}`}
-              </ThemedText>
-              <ThemedText style={[styles.waitingTimerWarning, { color: theme.textSecondary }]}>
-                {waitingSecondsLeft <= 60
-                  ? 'Hurry! Ride will be auto-cancelled with a fee'
-                  : waitingSecondsLeft <= 120
-                    ? 'Less than 2 min left — please board now'
-                    : 'Please board within the time or ride will be cancelled with a fee'}
-              </ThemedText>
-            </AnimatedView>
-          )}
-
-          {currentStatus === "pending" && (
-            <View style={styles.searchingContainer}>
-              <View style={[styles.searchingRing, { borderColor: UTOColors.rider.primary + "30" }]}>
-                <View style={[styles.searchingRingInner, { borderColor: UTOColors.rider.primary + "60" }]}>
-                  <AnimatedView style={[styles.searchingPulse, { backgroundColor: UTOColors.rider.primary }, pulseStyle]} />
-                  <View style={[styles.searchingDot, { backgroundColor: UTOColors.rider.primary }]}>
-                    <MaterialIcons name="local-taxi" size={20} color="#000" />
-                  </View>
-                </View>
-              </View>
-              <ThemedText style={[styles.searchingText, { color: theme.textSecondary }]}>
-                Matching you with a nearby driver
-              </ThemedText>
-            </View>
-          )}
-
-          {currentStatus !== "pending" && (
-            <>
-              {currentStatus === "accepted" && activeRide.otp && (
-                <View style={[styles.otpContainer, { backgroundColor: theme.backgroundDefault, borderWidth: 1, borderColor: theme.border }]}>
-                  <ThemedText style={[styles.otpLabel, { color: theme.text }]}>
-                    Your ride PIN — share with driver on arrival
-                  </ThemedText>
-                  <View style={styles.otpBox}>
-                    {activeRide.otp.split("").map((digit, i) => (
-                      <View key={i} style={[styles.otpDigit, { backgroundColor: theme.backgroundSecondary }]}>
-                        <ThemedText style={[styles.otpText, { color: theme.text }]}>{digit}</ThemedText>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              <View style={[styles.driverCard, { backgroundColor: theme.backgroundDefault }]}>
-                <View style={[styles.driverAvatar, { backgroundColor: theme.backgroundSecondary }]}>
-                  <MaterialIcons name="person" size={24} color={theme.textSecondary} />
-                </View>
-                <View style={styles.driverInfo}>
-                  <ThemedText style={styles.driverName}>{activeRide.driverName}</ThemedText>
-                  <View style={styles.vehicleRow}>
-                    <ThemedText style={[styles.vehicleInfo, { color: theme.textSecondary }]}>
-                      {activeRide.vehicleInfo}
-                    </ThemedText>
-                    <View style={[styles.ratingBadge, { backgroundColor: UTOColors.warning + "20" }]}>
-                      <MaterialIcons name="star" size={12} color={UTOColors.warning} />
-                      <ThemedText style={[styles.rating, { color: UTOColors.warning }]}>
-                        {activeRide.driverRating?.toFixed(1)}
-                      </ThemedText>
-                    </View>
-                  </View>
-                  <ThemedText style={[styles.licensePlate, { color: theme.text }]}>
-                    {activeRide.licensePlate}
-                  </ThemedText>
-                </View>
-                <View style={styles.contactButtons}>
-                  <Pressable
-                    onPress={handleCall}
-                    style={[styles.contactButton, { backgroundColor: theme.backgroundSecondary }]}
-                  >
-                    <MaterialIcons name="phone" size={18} color={UTOColors.rider.primary} />
-                  </Pressable>
-                  <Pressable
-                    onPress={handleMessage}
-                    style={[styles.contactButton, { backgroundColor: theme.backgroundSecondary }]}
-                  >
-                    <MaterialIcons name="chat" size={18} color={UTOColors.rider.primary} />
-                  </Pressable>
-                </View>
-              </View>
-            </>
-          )}
-
-          <View style={styles.tripDetails}>
-            <View style={styles.routeContainer}>
-              <View style={styles.routeIndicator}>
-                <View style={[styles.routeDot, { backgroundColor: UTOColors.success }]} />
-                <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
-                <View style={[styles.routeDot, { backgroundColor: UTOColors.error }]} />
-              </View>
-              <View style={styles.addresses}>
-                <ThemedText style={styles.address} numberOfLines={1}>
-                  {activeRide.pickupLocation.address}
-                </ThemedText>
-                <ThemedText style={styles.address} numberOfLines={1}>
-                  {activeRide.dropoffLocation.address}
-                </ThemedText>
-              </View>
-              <ThemedText style={styles.farePrice}>
-                {formatPrice(activeRide.farePrice)}
-              </ThemedText>
-            </View>
-
-            {currentStatus !== "completed" && (
-              <Pressable style={styles.paymentSwitchButton} onPress={() => {
-                if (!activeRide) return;
-                const currentMethod = activeRide.paymentMethod || "cash";
-                const newMethod = currentMethod === "card" ? "cash" : "card";
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                if (typeof updateRidePaymentMethod === 'function') {
-                  updateRidePaymentMethod(activeRide.id, newMethod);
-                }
-              }}>
-                <View style={styles.paymentSwitchRow}>
-                  <MaterialIcons
-                    name={activeRide.paymentMethod === 'card' ? 'credit-card' : 'payments'}
-                    size={18}
-                    color={theme.textSecondary}
-                  />
-                  <ThemedText style={{ color: theme.textSecondary, marginLeft: 8 }}>
-                    Paying with {activeRide.paymentMethod === 'card' ? 'Card' : 'Cash'}
-                  </ThemedText>
-                </View>
-                <ThemedText style={{ color: UTOColors.rider.primary, fontWeight: '600' }}>Change</ThemedText>
-              </Pressable>
-            )}
-          </View>
-
-          {(currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "at_pickup" || currentStatus === "arrived") && !noDriversAvailable && (
-            <AnimatedPressable
-              onPress={handleCancel}
-              onPressIn={() => (cancelScale.value = withSpring(0.98))}
-              onPressOut={() => (cancelScale.value = withSpring(1))}
-              style={[
-                styles.cancelButton,
-                { backgroundColor: UTOColors.error + "15" },
-                cancelAnimatedStyle,
-              ]}
-            >
-              <ThemedText style={[styles.cancelButtonText, { color: UTOColors.error }]}>
-                Cancel Ride
-              </ThemedText>
-            </AnimatedPressable>
-          )}
-
-          {/* ─── No Drivers Available — Rebook ─────────────────────────── */}
-          {noDriversAvailable && (
-            <AnimatedView entering={FadeIn.duration(400)} style={styles.noDriversContainer}>
-              <View style={[styles.noDriversIcon, { backgroundColor: UTOColors.warning + '20' }]}>
-                <MaterialIcons name="no-transfer" size={36} color={UTOColors.warning} />
-              </View>
-              <ThemedText style={[styles.noDriversTitle, { color: theme.text }]}>
-                No Drivers Available
-              </ThemedText>
-              <ThemedText style={[styles.noDriversMessage, { color: theme.textSecondary }]}>
-                Unfortunately we don't have any available drivers at the moment. Please try again shortly.
-              </ThemedText>
-              <Pressable
-                onPress={() => handleRebook()}
-                style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary }]}
-              >
-                <MaterialIcons name="refresh" size={20} color="#000" />
-                <ThemedText style={styles.rebookButtonText}>Rebook Ride</ThemedText>
-              </Pressable>
-            </AnimatedView>
-          )}
-        </ScrollView>
-      </Animated.View>
+        <MaterialIcons name="refresh" size={20} color="#000" />
+        <ThemedText style={styles.rebookButtonText}>Rebook Ride</ThemedText>
+      </Pressable>
     </View>
   );
 }
 
+// When ride is complete and activeRide is cleared, show Rating Modal
+// instead of returning null. This ensures the modal stays visible.
+if (!activeRide) {
+  if (pendingRating) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]}>
+        <RatingModal
+          visible={true}
+          ratedRole="driver"
+          ratedName={pendingRating.driverName || "Driver"}
+          rideId={pendingRating.rideId || ""}
+          onSubmit={handleRatingSubmit}
+          onDismiss={handleRatingDismiss}
+        />
+      </View>
+    );
+  }
+  // Show a brief transition screen instead of null to avoid crash
+  return (
+    <View style={[styles.container, { backgroundColor: theme.backgroundRoot, justifyContent: 'center', alignItems: 'center' }]} />
+  );
+}
+
+const getStatusMessage = () => {
+  const status = rideStatus || activeRide.status;
+  switch (status) {
+    case "pending":
+      return "Finding your driver...";
+    case "accepted":
+      return "Driver is on the way";
+    case "arrived":
+      return "Driver has arrived";
+    case "in_progress":
+      return "On your way to destination";
+    default:
+      return "Processing ride...";
+  }
+};
+
+const getDropoffTime = () => {
+  if (!activeRide) return "";
+  const now = new Date();
+  const dropoffTime = new Date(now.getTime() + activeRide.durationMinutes * 60000);
+  return dropoffTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+// ✅ ULTRA CLOSE ZOOM
+const getMapRegion = () => {
+  const points: RoutePoint[] = [
+    {
+      latitude: activeRide.pickupLocation.latitude,
+      longitude: activeRide.pickupLocation.longitude,
+    },
+    {
+      latitude: activeRide.dropoffLocation.latitude,
+      longitude: activeRide.dropoffLocation.longitude,
+    },
+  ];
+
+  if (driverLocation) {
+    points.push({
+      latitude: driverLocation.latitude,
+      longitude: driverLocation.longitude,
+    });
+  }
+
+  const lats = points.map((p) => p.latitude);
+  const lngs = points.map((p) => p.longitude);
+
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLng = (minLng + maxLng) / 2;
+
+  const latDelta = Math.max((maxLat - minLat) * 1.05, 0.02);
+  const lngDelta = Math.max((maxLng - minLng) * 1.05, 0.02);
+
+  return {
+    latitude: centerLat,
+    longitude: centerLng,
+    latitudeDelta: latDelta,
+    longitudeDelta: lngDelta,
+  };
+};
+
+const getDistanceString = () => {
+  if (driverDistance) return driverDistance.replace("mi", "miles");
+
+  // Fallback if APIs fail
+  if (!driverLocation || !activeRide) return null;
+  const R = 3958.8;
+  const dLat = (activeRide.pickupLocation.latitude - driverLocation.latitude) * Math.PI / 180;
+  const dLon = (activeRide.pickupLocation.longitude - driverLocation.longitude) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(driverLocation.latitude * Math.PI / 180) * Math.cos(activeRide.pickupLocation.latitude * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const miles = R * c;
+
+  if (miles < 0.1) return "Nearby";
+  return `${miles.toFixed(1)} miles`;
+};
+
+const currentDriverLocation = driverLocation || {
+  latitude: activeRide.pickupLocation.latitude + 0.005,
+  longitude: activeRide.pickupLocation.longitude + 0.003,
+};
+
+const currentStatus = rideStatus || activeRide.status;
+
+return (
+  <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
+    <MapViewWrapper
+      style={styles.map}
+      initialRegion={getMapRegion()}
+      region={getMapRegion()}
+      customMapStyle={isDark ? darkMapStyle : []}
+    >
+      {routeCoordinates.length > 0 && (
+        <PolylineWrapper
+          coordinates={routeCoordinates}
+          strokeColor="#000000"
+          strokeWidth={5}
+        />
+      )}
+
+      {/* Driver-to-pickup route — shows driver moving toward rider */}
+      {driverToPickupRoute.length > 0 && (currentStatus === "accepted" || currentStatus === "arrived") && (
+        <PolylineWrapper
+          coordinates={driverToPickupRoute}
+          strokeColor={UTOColors.rider.primary}
+          strokeWidth={4}
+          lineDashPattern={[10, 6]}
+        />
+      )}
+
+      {/* Dummy cars show when finding a driver */}
+      {currentStatus === "pending" && (
+        <DummyCars location={activeRide.pickupLocation} />
+      )}
+
+      {/* Pickup marker */}
+      <MarkerWrapper
+        coordinate={{
+          latitude: activeRide.pickupLocation.latitude,
+          longitude: activeRide.pickupLocation.longitude,
+        }}
+        title="Pickup"
+      >
+        <View style={[styles.markerContainer, { backgroundColor: UTOColors.success }]}>
+          <MaterialIcons name="person-pin-circle" size={18} color="#FFFFFF" />
+        </View>
+      </MarkerWrapper>
+
+      {/* Dropoff marker */}
+      <MarkerWrapper
+        coordinate={{
+          latitude: activeRide.dropoffLocation.latitude,
+          longitude: activeRide.dropoffLocation.longitude,
+        }}
+        title="Dropoff"
+      >
+        <View style={[styles.markerContainer, { backgroundColor: UTOColors.error }]}>
+          <MaterialIcons name="place" size={18} color="#FFFFFF" />
+        </View>
+      </MarkerWrapper>
+
+      {/* Driver marker */}
+      <MarkerWrapper
+        coordinate={currentDriverLocation}
+        title="Driver"
+        anchor={{ x: 0.5, y: 0.5 }}
+        flat
+      >
+        <View style={{ transform: [{ rotate: `${driverLocation?.heading || 0}deg` }] }}>
+          <TopDownCarView />
+        </View>
+      </MarkerWrapper>
+    </MapViewWrapper>
+
+    {isLoadingRoute && (
+      <View style={styles.loadingOverlay}>
+        <ActivityIndicator size="small" color={UTOColors.rider.primary} />
+        <ThemedText style={styles.loadingText}>Loading route...</ThemedText>
+      </View>
+    )}
+
+    <Animated.View
+      entering={FadeIn}
+      style={[
+        styles.bottomSheet,
+        Shadows.large,
+        {
+          paddingBottom: insets.bottom + Spacing.lg,
+          backgroundColor: theme.backgroundRoot,
+          maxHeight: Dimensions.get('window').height * 0.7,
+        },
+      ]}
+    >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+        contentContainerStyle={{ paddingBottom: 4 }}
+      >
+      <View style={styles.statusSection}>
+        <View style={styles.statusRow}>
+          <View style={[styles.statusDot, { backgroundColor: UTOColors.success }]} />
+          <ThemedText style={styles.statusText}>{getStatusMessage()}</ThemedText>
+        </View>
+
+        {currentStatus === "accepted" && (
+          <View style={styles.etaRow}>
+            <ThemedText style={[styles.eta, { color: theme.textSecondary }]}>
+              {estimatedArrival ? `${estimatedArrival} away` : "Calculating ETA..."}
+            </ThemedText>
+            {getDistanceString() && (
+              <ThemedText style={[styles.distance, { color: theme.textSecondary }]}>
+                • {getDistanceString()}
+              </ThemedText>
+            )}
+          </View>
+        )}
+        {currentStatus === "in_progress" && (
+          <View style={styles.etaRow}>
+            <ThemedText style={[styles.eta, { color: theme.textSecondary }]}>
+              {`${activeRide.durationMinutes} min`} to destination
+            </ThemedText>
+          </View>
+        )}
+        {currentStatus === "in_progress" && (
+          <ThemedText style={[styles.dropoffTime, { color: theme.textSecondary, marginLeft: 18 }]}>
+            Estimated dropoff: {getDropoffTime()}
+          </ThemedText>
+        )}
+      </View>
+
+      {/* ─── Ride Stage Progress Stepper ──────────────────────────── */}
+      {currentStatus !== "pending" && (
+        <View style={styles.stageStepper}>
+          {[
+            { key: "accepted", label: "Driver assigned", icon: "person" as const },
+            { key: "on_way", label: "On the way", icon: "directions-car" as const },
+            { key: "arrived", label: "Arrived", icon: "place" as const },
+            { key: "in_progress", label: "Ride started", icon: "navigation" as const },
+          ].map((stage, index) => {
+            const stageOrder = ["accepted", "on_way", "arrived", "in_progress"];
+            const currentIdx = currentStatus === "accepted" ? 1 : stageOrder.indexOf(currentStatus);
+            const isActive = index <= currentIdx;
+            const isCurrent = (currentStatus === "accepted" && index <= 1) || (index === currentIdx);
+            return (
+              <React.Fragment key={stage.key}>
+                <View style={styles.stageItem}>
+                  <View style={[
+                    styles.stageCircle,
+                    { backgroundColor: isActive ? UTOColors.rider.primary : theme.backgroundSecondary,
+                      borderColor: isActive ? UTOColors.rider.primary : theme.border },
+                  ]}>
+                    <MaterialIcons name={stage.icon} size={12} color={isActive ? "#000" : theme.textSecondary} />
+                  </View>
+                  <ThemedText style={[
+                    styles.stageLabel,
+                    { color: isActive ? theme.text : theme.textSecondary,
+                      fontWeight: isCurrent ? "700" : "400" },
+                  ]}>{stage.label}</ThemedText>
+                </View>
+                {index < 3 && (
+                  <View style={[
+                    styles.stageLine,
+                    { backgroundColor: index < currentIdx ? UTOColors.rider.primary : theme.border },
+                  ]} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </View>
+      )}
+
+      {/* ─── Prominent Arrival + PIN Message ──────────────────────── */}
+      {currentStatus === "arrived" && activeRide.otp && (
+        <AnimatedView
+          entering={FadeIn.duration(500)}
+          style={[
+            styles.arrivalCallout,
+            { backgroundColor: UTOColors.rider.primary },
+          ]}
+        >
+          <MaterialIcons name="check-circle" size={28} color="#000" />
+          <ThemedText style={styles.arrivalTitle}>Your driver has arrived</ThemedText>
+          <ThemedText style={styles.arrivalSubtitle}>Please provide your PIN to start the ride</ThemedText>
+          <View style={styles.arrivalOtpBox}>
+            {activeRide.otp.split("").map((digit, i) => (
+              <View key={i} style={styles.arrivalOtpDigit}>
+                <ThemedText style={styles.arrivalOtpText}>{digit}</ThemedText>
+              </View>
+            ))}
+          </View>
+        </AnimatedView>
+      )}
+
+      {/* ─── Waiting Timer when driver has arrived ───────────────── */}
+      {currentStatus === "arrived" && waitingSecondsLeft !== null && (
+        <AnimatedView
+          entering={FadeIn.duration(400)}
+          style={[
+            styles.waitingTimerContainer,
+            {
+              backgroundColor: waitingSecondsLeft <= 120
+                ? (waitingSecondsLeft <= 60 ? '#EF4444' + '20' : '#F59E0B' + '20')
+                : theme.backgroundDefault,
+              borderColor: waitingSecondsLeft <= 120
+                ? (waitingSecondsLeft <= 60 ? '#EF4444' + '40' : '#F59E0B' + '40')
+                : theme.border,
+            },
+            waitingSecondsLeft <= 60 ? timerPulseStyle : {},
+          ]}
+        >
+          <View style={styles.waitingTimerHeader}>
+            <MaterialIcons
+              name="timer"
+              size={22}
+              color={waitingSecondsLeft <= 120
+                ? (waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B')
+                : UTOColors.rider.primary}
+            />
+            <ThemedText style={[
+              styles.waitingTimerTitle,
+              waitingSecondsLeft <= 120 && {
+                color: waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B',
+              },
+            ]}>
+              Driver is waiting
+            </ThemedText>
+          </View>
+          <ThemedText style={[
+            styles.waitingTimerDigits,
+            {
+              color: waitingSecondsLeft <= 120
+                ? (waitingSecondsLeft <= 60 ? '#EF4444' : '#F59E0B')
+                : theme.text,
+            },
+          ]}>
+            {`${Math.floor(waitingSecondsLeft / 60).toString().padStart(2, '0')}:${(waitingSecondsLeft % 60).toString().padStart(2, '0')}`}
+          </ThemedText>
+          <ThemedText style={[styles.waitingTimerWarning, { color: theme.textSecondary }]}>
+            {waitingSecondsLeft <= 60
+              ? 'Hurry! Ride will be auto-cancelled with a fee'
+              : waitingSecondsLeft <= 120
+                ? 'Less than 2 min left — please board now'
+                : 'Please board within the time or ride will be cancelled with a fee'}
+          </ThemedText>
+        </AnimatedView>
+      )}
+
+      {currentStatus === "pending" && (
+        <View style={styles.searchingContainer}>
+          <View style={[styles.searchingRing, { borderColor: UTOColors.rider.primary + "30" }]}>
+            <View style={[styles.searchingRingInner, { borderColor: UTOColors.rider.primary + "60" }]}>
+              <AnimatedView style={[styles.searchingPulse, { backgroundColor: UTOColors.rider.primary }, pulseStyle]} />
+              <View style={[styles.searchingDot, { backgroundColor: UTOColors.rider.primary }]}>
+                <MaterialIcons name="local-taxi" size={20} color="#000" />
+              </View>
+            </View>
+          </View>
+          <ThemedText style={[styles.searchingText, { color: theme.textSecondary }]}>
+            Matching you with a nearby driver
+          </ThemedText>
+        </View>
+      )}
+
+      {currentStatus !== "pending" && (
+        <>
+          {currentStatus === "accepted" && activeRide.otp && (
+            <View style={[styles.otpContainer, { backgroundColor: theme.backgroundDefault, borderWidth: 1, borderColor: theme.border }]}>
+              <ThemedText style={[styles.otpLabel, { color: theme.text }]}>
+                Your ride PIN — share with driver on arrival
+              </ThemedText>
+              <View style={styles.otpBox}>
+                {activeRide.otp.split("").map((digit, i) => (
+                  <View key={i} style={[styles.otpDigit, { backgroundColor: theme.backgroundSecondary }]}>
+                    <ThemedText style={[styles.otpText, { color: theme.text }]}>{digit}</ThemedText>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          <View style={[styles.driverCard, { backgroundColor: theme.backgroundDefault }]}>
+            <View style={[styles.driverAvatar, { backgroundColor: theme.backgroundSecondary }]}>
+              <MaterialIcons name="person" size={24} color={theme.textSecondary} />
+            </View>
+            <View style={styles.driverInfo}>
+              <ThemedText style={styles.driverName}>{activeRide.driverName}</ThemedText>
+              <View style={styles.vehicleRow}>
+                <ThemedText style={[styles.vehicleInfo, { color: theme.textSecondary }]}>
+                  {activeRide.vehicleInfo}
+                </ThemedText>
+                <View style={[styles.ratingBadge, { backgroundColor: UTOColors.warning + "20" }]}>
+                  <MaterialIcons name="star" size={12} color={UTOColors.warning} />
+                  <ThemedText style={[styles.rating, { color: UTOColors.warning }]}>
+                    {activeRide.driverRating?.toFixed(1)}
+                  </ThemedText>
+                </View>
+              </View>
+              <ThemedText style={[styles.licensePlate, { color: theme.text }]}>
+                {activeRide.licensePlate}
+              </ThemedText>
+            </View>
+            <View style={styles.contactButtons}>
+              <Pressable
+                onPress={handleCall}
+                style={[styles.contactButton, { backgroundColor: theme.backgroundSecondary }]}
+              >
+                <MaterialIcons name="phone" size={18} color={UTOColors.rider.primary} />
+              </Pressable>
+              <Pressable
+                onPress={handleMessage}
+                style={[styles.contactButton, { backgroundColor: theme.backgroundSecondary }]}
+              >
+                <MaterialIcons name="chat" size={18} color={UTOColors.rider.primary} />
+              </Pressable>
+            </View>
+          </View>
+        </>
+      )}
+
+      <View style={styles.tripDetails}>
+        <View style={styles.routeContainer}>
+          <View style={styles.routeIndicator}>
+            <View style={[styles.routeDot, { backgroundColor: UTOColors.success }]} />
+            <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+            <View style={[styles.routeDot, { backgroundColor: UTOColors.error }]} />
+          </View>
+          <View style={styles.addresses}>
+            <ThemedText style={styles.address} numberOfLines={1}>
+              {activeRide.pickupLocation.address}
+            </ThemedText>
+            <ThemedText style={styles.address} numberOfLines={1}>
+              {activeRide.dropoffLocation.address}
+            </ThemedText>
+          </View>
+          <ThemedText style={styles.farePrice}>
+            {formatPrice(activeRide.farePrice - (activeRide.discountAmount || 0))}
+          </ThemedText>
+        </View>
+        
+        {currentStatus !== "completed" && (
+          <Pressable style={styles.paymentSwitchButton} onPress={() => {
+            if (!activeRide) return;
+            const currentMethod = activeRide.paymentMethod || "cash";
+            const newMethod = currentMethod === "card" ? "cash" : "card";
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            if (typeof updateRidePaymentMethod === 'function') {
+              updateRidePaymentMethod(activeRide.id, newMethod);
+            }
+          }}>
+            <View style={styles.paymentSwitchRow}>
+              <MaterialIcons 
+                name={activeRide.paymentMethod === 'card' ? 'credit-card' : 'payments'} 
+                size={18} 
+                color={theme.textSecondary} 
+              />
+              <ThemedText style={{ color: theme.textSecondary, marginLeft: 8 }}>
+                Paying with {activeRide.paymentMethod === 'card' ? 'Card' : 'Cash'}
+              </ThemedText>
+            </View>
+            <ThemedText style={{ color: UTOColors.rider.primary, fontWeight: '600' }}>Change</ThemedText>
+          </Pressable>
+        )}
+      </View>
+
+      {(currentStatus === "pending" || currentStatus === "accepted" || currentStatus === "at_pickup" || currentStatus === "arrived") && !noDriversAvailable && (
+        <AnimatedPressable
+          onPress={handleCancel}
+          onPressIn={() => (cancelScale.value = withSpring(0.98))}
+          onPressOut={() => (cancelScale.value = withSpring(1))}
+          style={[
+            styles.cancelButton,
+            { backgroundColor: UTOColors.error + "15" },
+            cancelAnimatedStyle,
+          ]}
+        >
+          <ThemedText style={[styles.cancelButtonText, { color: UTOColors.error }]}>
+            Cancel Ride
+          </ThemedText>
+        </AnimatedPressable>
+      )}
+
+      {/* ─── No Drivers Available — Rebook ─────────────────────────── */}
+      {noDriversAvailable && (
+        <AnimatedView entering={FadeIn.duration(400)} style={styles.noDriversContainer}>
+          <View style={[styles.noDriversIcon, { backgroundColor: UTOColors.warning + '20' }]}>
+            <MaterialIcons name="no-transfer" size={36} color={UTOColors.warning} />
+          </View>
+          <ThemedText style={[styles.noDriversTitle, { color: theme.text }]}>
+            No Drivers Available
+          </ThemedText>
+          <ThemedText style={[styles.noDriversMessage, { color: theme.textSecondary }]}>
+            Unfortunately we don't have any available drivers at the moment. Please try again shortly.
+          </ThemedText>
+          <Pressable
+            onPress={() => handleRebook()}
+            style={[styles.rebookButton, { backgroundColor: UTOColors.rider.primary }]}
+          >
+            <MaterialIcons name="refresh" size={20} color="#000" />
+            <ThemedText style={styles.rebookButtonText}>Rebook Ride</ThemedText>
+          </Pressable>
+        </AnimatedView>
+      )}
+      </ScrollView>
+    </Animated.View>
+  </View>
+);
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  map: { flex: 1 },
-  loadingOverlay: {
-    position: "absolute",
-    top: 60,
-    alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-  },
-  loadingText: { color: "#FFFFFF", fontSize: 12 },
-  markerContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-  },
-  driverMarkerContainer: {
-    width: 50,
-    height: 50,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  driverPulse: {
-    position: "absolute",
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-  },
-  driverMarker: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 3,
-    borderColor: "#FFFFFF",
-  },
-  bottomSheet: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xl,
-    borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl,
-  },
-  statusSection: { marginBottom: Spacing.lg },
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: Spacing.sm,
-  },
-  statusText: { fontSize: 18, fontWeight: "600" },
-  eta: { fontSize: 14 },
-  etaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 18,
-    gap: 4,
-  },
-  distance: { fontSize: 14 },
-  driverCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.lg,
-    marginBottom: Spacing.lg,
-  },
-  driverAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: Spacing.md,
-  },
-  driverInfo: { flex: 1 },
-  driverName: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 2,
-  },
-  vehicleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    marginBottom: 2,
-  },
-  vehicleInfo: { fontSize: 13 },
-  ratingBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
-    gap: 4,
-  },
-  rating: { fontSize: 11, fontWeight: "600" },
-  licensePlate: {
-    fontSize: 14,
-    fontWeight: "700",
-    letterSpacing: 1,
-  },
-  contactButtons: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-  },
-  contactButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tripDetails: { marginBottom: Spacing.lg },
-  routeContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  routeIndicator: {
-    width: 20,
-    alignItems: "center",
-    marginRight: Spacing.md,
-  },
-  routeDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  routeLine: {
-    width: 2,
-    height: 24,
-    marginVertical: 4,
-  },
-  paymentSwitchButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: '#33333333',
-  },
-  paymentSwitchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  addresses: {
-    flex: 1,
-    justifyContent: "space-between",
-    height: 48,
-  },
-  address: { fontSize: 14 },
-  farePrice: {
-    fontSize: 20,
-    fontWeight: "700",
-    marginLeft: Spacing.md,
-  },
-  otpContainer: {
-    padding: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    marginBottom: Spacing.lg,
-    alignItems: "center",
-  },
-  otpLabel: {
-    color: "#000000",
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: Spacing.sm,
-  },
-  otpBox: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-  },
-  otpDigit: {
-    width: 32,
-    height: 40,
-    borderRadius: BorderRadius.md,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  otpText: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#000000",
-  },
-  cancelButton: {
-    width: "100%",
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.lg,
-    alignItems: "center",
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  dropoffTime: {
-    fontSize: 14,
-    marginTop: 2,
-  },
-  searchingContainer: {
-    alignItems: "center",
-    paddingVertical: Spacing.lg,
-    marginBottom: Spacing.md,
-  },
-  searchingRing: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.md,
-  },
-  searchingRingInner: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  searchingPulse: {
-    position: "absolute",
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
-  searchingDot: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  searchingText: {
-    fontSize: 14,
-    textAlign: "center",
-  },
-  // ─── Waiting Timer Styles ─────────────────────────────
-  waitingTimerContainer: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
-    marginBottom: 16,
-    alignItems: "center",
-  },
-  waitingTimerHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
-  },
-  waitingTimerTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  waitingTimerDigits: {
-    fontSize: 42,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"] as any,
-    letterSpacing: 2,
-    marginVertical: 4,
-    lineHeight: 50,
-    includeFontPadding: false,
-  },
-  waitingTimerWarning: {
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  // ─── Ride Stage Stepper Styles ──────────────────────────
-  stageStepper: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.lg,
-    paddingHorizontal: Spacing.sm,
-  },
-  stageItem: {
-    alignItems: "center",
-    gap: 4,
-  },
-  stageCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-  },
-  stageLabel: {
-    fontSize: 9,
-    textAlign: "center",
-    maxWidth: 60,
-  },
-  stageLine: {
-    height: 2,
-    width: 20,
-    marginHorizontal: 2,
-    marginBottom: 16,
-  },
-  // ─── Arrival Callout Styles ─────────────────────────────
-  arrivalCallout: {
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    marginBottom: Spacing.lg,
-    alignItems: "center",
-    gap: 6,
-  },
-  arrivalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#000000",
-  },
-  arrivalSubtitle: {
-    fontSize: 14,
-    color: "#000000",
-    opacity: 0.7,
-  },
-  arrivalOtpBox: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  arrivalOtpDigit: {
-    width: 44,
-    height: 52,
-    borderRadius: BorderRadius.md,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  arrivalOtpText: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#000000",
-  },
-  // ─── No Drivers / Rebook Styles ─────────────────────────
-  noDriversContainer: {
-    alignItems: "center",
-    paddingVertical: Spacing.xl,
-    gap: Spacing.md,
-  },
-  noDriversIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.sm,
-  },
-  noDriversTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  noDriversMessage: {
-    fontSize: 14,
-    textAlign: "center",
-    paddingHorizontal: Spacing.lg,
-    lineHeight: 20,
-  },
-  rebookButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-    borderRadius: BorderRadius.lg,
-    marginTop: Spacing.md,
-    width: "100%",
-  },
-  rebookButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#000000",
-  },
+container: { flex: 1 },
+map: { flex: 1 },
+loadingOverlay: {
+  position: "absolute",
+  top: 60,
+  alignSelf: "center",
+  backgroundColor: "rgba(0,0,0,0.7)",
+  paddingHorizontal: Spacing.lg,
+  paddingVertical: Spacing.sm,
+  borderRadius: BorderRadius.full,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: Spacing.sm,
+},
+loadingText: { color: "#FFFFFF", fontSize: 12 },
+markerContainer: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  borderWidth: 2,
+  borderColor: "#FFFFFF",
+},
+driverMarkerContainer: {
+  width: 50,
+  height: 50,
+  alignItems: "center",
+  justifyContent: "center",
+},
+driverPulse: {
+  position: "absolute",
+  width: 50,
+  height: 50,
+  borderRadius: 25,
+},
+driverMarker: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  borderWidth: 3,
+  borderColor: "#FFFFFF",
+},
+bottomSheet: {
+  position: "absolute",
+  bottom: 0,
+  left: 0,
+  right: 0,
+  paddingHorizontal: Spacing.lg,
+  paddingTop: Spacing.xl,
+  borderTopLeftRadius: BorderRadius.xl,
+  borderTopRightRadius: BorderRadius.xl,
+},
+statusSection: { marginBottom: Spacing.lg },
+statusRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginBottom: 4,
+},
+statusDot: {
+  width: 10,
+  height: 10,
+  borderRadius: 5,
+  marginRight: Spacing.sm,
+},
+statusText: { fontSize: 18, fontWeight: "600" },
+eta: { fontSize: 14 },
+etaRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  marginLeft: 18,
+  gap: 4,
+},
+distance: { fontSize: 14 },
+driverCard: {
+  flexDirection: "row",
+  alignItems: "center",
+  padding: Spacing.lg,
+  borderRadius: BorderRadius.lg,
+  marginBottom: Spacing.lg,
+},
+driverAvatar: {
+  width: 50,
+  height: 50,
+  borderRadius: 25,
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: Spacing.md,
+},
+driverInfo: { flex: 1 },
+driverName: {
+  fontSize: 16,
+  fontWeight: "600",
+  marginBottom: 2,
+},
+vehicleRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: Spacing.sm,
+  marginBottom: 2,
+},
+vehicleInfo: { fontSize: 13 },
+ratingBadge: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingHorizontal: 6,
+  paddingVertical: 2,
+  borderRadius: BorderRadius.full,
+  gap: 4,
+},
+rating: { fontSize: 11, fontWeight: "600" },
+licensePlate: {
+  fontSize: 14,
+  fontWeight: "700",
+  letterSpacing: 1,
+},
+contactButtons: {
+  flexDirection: "row",
+  gap: Spacing.sm,
+},
+contactButton: {
+  width: 40,
+  height: 40,
+  borderRadius: 20,
+  alignItems: "center",
+  justifyContent: "center",
+},
+tripDetails: { marginBottom: Spacing.lg },
+routeContainer: {
+  flexDirection: "row",
+  alignItems: "center",
+},
+routeIndicator: {
+  width: 20,
+  alignItems: "center",
+  marginRight: Spacing.md,
+},
+routeDot: {
+  width: 10,
+  height: 10,
+  borderRadius: 5,
+},
+routeLine: {
+  width: 2,
+  height: 24,
+  marginVertical: 4,
+},
+paymentSwitchButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginTop: Spacing.md,
+  paddingTop: Spacing.md,
+  borderTopWidth: 1,
+  borderTopColor: '#33333333',
+},
+paymentSwitchRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+},
+addresses: {
+  flex: 1,
+  justifyContent: "space-between",
+  height: 48,
+},
+address: { fontSize: 14 },
+farePrice: {
+  fontSize: 20,
+  fontWeight: "700",
+  marginLeft: Spacing.md,
+},
+otpContainer: {
+  padding: Spacing.md,
+  borderRadius: BorderRadius.lg,
+  marginBottom: Spacing.lg,
+  alignItems: "center",
+},
+otpLabel: {
+  color: "#000000",
+  fontSize: 14,
+  fontWeight: "600",
+  marginBottom: Spacing.sm,
+},
+otpBox: {
+  flexDirection: "row",
+  gap: Spacing.sm,
+},
+otpDigit: {
+  width: 32,
+  height: 40,
+  borderRadius: BorderRadius.md,
+  backgroundColor: "#FFFFFF",
+  alignItems: "center",
+  justifyContent: "center",
+},
+otpText: {
+  fontSize: 20,
+  fontWeight: "700",
+  color: "#000000",
+},
+cancelButton: {
+  width: "100%",
+  padding: Spacing.lg,
+  borderRadius: BorderRadius.lg,
+  alignItems: "center",
+},
+cancelButtonText: {
+  fontSize: 16,
+  fontWeight: "600",
+},
+dropoffTime: {
+  fontSize: 14,
+  marginTop: 2,
+},
+searchingContainer: {
+  alignItems: "center",
+  paddingVertical: Spacing.lg,
+  marginBottom: Spacing.md,
+},
+searchingRing: {
+  width: 80,
+  height: 80,
+  borderRadius: 40,
+  borderWidth: 2,
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: Spacing.md,
+},
+searchingRingInner: {
+  width: 60,
+  height: 60,
+  borderRadius: 30,
+  borderWidth: 2,
+  alignItems: "center",
+  justifyContent: "center",
+},
+searchingPulse: {
+  position: "absolute",
+  width: 44,
+  height: 44,
+  borderRadius: 22,
+},
+searchingDot: {
+  width: 40,
+  height: 40,
+  borderRadius: 20,
+  alignItems: "center",
+  justifyContent: "center",
+},
+searchingText: {
+  fontSize: 14,
+  textAlign: "center",
+},
+// ─── Waiting Timer Styles ─────────────────────────────
+waitingTimerContainer: {
+  borderRadius: 16,
+  borderWidth: 1,
+  padding: 16,
+  marginBottom: 16,
+  alignItems: "center",
+},
+waitingTimerHeader: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  marginBottom: 8,
+},
+waitingTimerTitle: {
+  fontSize: 15,
+  fontWeight: "600",
+},
+waitingTimerDigits: {
+  fontSize: 42,
+  fontWeight: "800",
+  fontVariant: ["tabular-nums"] as any,
+  letterSpacing: 2,
+  marginVertical: 4,
+  lineHeight: 50,
+  includeFontPadding: false,
+},
+waitingTimerWarning: {
+  fontSize: 12,
+  textAlign: "center",
+  marginTop: 4,
+},
+// ─── Ride Stage Stepper Styles ──────────────────────────
+stageStepper: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: Spacing.lg,
+  paddingHorizontal: Spacing.sm,
+},
+stageItem: {
+  alignItems: "center",
+  gap: 4,
+},
+stageCircle: {
+  width: 28,
+  height: 28,
+  borderRadius: 14,
+  alignItems: "center",
+  justifyContent: "center",
+  borderWidth: 2,
+},
+stageLabel: {
+  fontSize: 9,
+  textAlign: "center",
+  maxWidth: 60,
+},
+stageLine: {
+  height: 2,
+  width: 20,
+  marginHorizontal: 2,
+  marginBottom: 16,
+},
+// ─── Arrival Callout Styles ─────────────────────────────
+arrivalCallout: {
+  borderRadius: BorderRadius.lg,
+  padding: Spacing.lg,
+  marginBottom: Spacing.lg,
+  alignItems: "center",
+  gap: 6,
+},
+arrivalTitle: {
+  fontSize: 18,
+  fontWeight: "700",
+  color: "#000000",
+},
+arrivalSubtitle: {
+  fontSize: 14,
+  color: "#000000",
+  opacity: 0.7,
+},
+arrivalOtpBox: {
+  flexDirection: "row",
+  gap: Spacing.sm,
+  marginTop: Spacing.sm,
+},
+arrivalOtpDigit: {
+  width: 44,
+  height: 52,
+  borderRadius: BorderRadius.md,
+  backgroundColor: "#FFFFFF",
+  alignItems: "center",
+  justifyContent: "center",
+},
+arrivalOtpText: {
+  fontSize: 24,
+  fontWeight: "800",
+  color: "#000000",
+},
+// ─── No Drivers / Rebook Styles ─────────────────────────
+noDriversContainer: {
+  alignItems: "center",
+  paddingVertical: Spacing.xl,
+  gap: Spacing.md,
+},
+noDriversIcon: {
+  width: 72,
+  height: 72,
+  borderRadius: 36,
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: Spacing.sm,
+},
+noDriversTitle: {
+  fontSize: 20,
+  fontWeight: "700",
+  textAlign: "center",
+},
+noDriversMessage: {
+  fontSize: 14,
+  textAlign: "center",
+  paddingHorizontal: Spacing.lg,
+  lineHeight: 20,
+},
+rebookButton: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: Spacing.sm,
+  paddingVertical: Spacing.md,
+  paddingHorizontal: Spacing.xl,
+  borderRadius: BorderRadius.lg,
+  marginTop: Spacing.md,
+  width: "100%",
+},
+rebookButtonText: {
+  fontSize: 16,
+  fontWeight: "700",
+  color: "#000000",
+},
 });

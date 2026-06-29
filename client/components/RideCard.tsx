@@ -1,3 +1,4 @@
+//client/components/RideCard.tsx
 import React from "react";
 import { StyleSheet, View, Pressable } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -114,10 +115,10 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
         </View>
         <View style={styles.addresses}>
           <ThemedText style={[styles.address, { color: isDark ? "#FFFFFF" : theme.text }]} numberOfLines={1}>
-            {ride.pickupLocation.address}
+            {ride.pickupLocation?.address}
           </ThemedText>
           <ThemedText style={[styles.address, { color: isDark ? "#FFFFFF" : theme.text }]} numberOfLines={1}>
-            {ride.dropoffLocation.address}
+            {ride.dropoffLocation?.address}
           </ThemedText>
         </View>
       </View>

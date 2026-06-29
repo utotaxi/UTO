@@ -1289,137 +1289,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!code) return res.status(400).json({ error: "Coupon code is required" });
 
       const { data: coupon, error } = await sb
-        .from("discount_coupons")
-        .select("*")
-        .eq("code", code.toUpperCase().trim())
-        .eq("is_active", true)
-        .single();
+      .from("coupons")
+      .select("*")
+      .eq("code", code.toUpperCase().trim())
+      // .eq("is_active", true)
+      .single();
 
-      if (error || !coupon) {
-        return res.status(404).json({ error: "Invalid or expired coupon code" });
-      }
-
-      // Check expiry
-      if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
-        return res.status(400).json({ error: "This coupon has expired" });
-      }
-
-      // Check usage limit
-      if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
-        return res.status(400).json({ error: "This coupon has reached its maximum usage limit" });
-      }
-
-      // Check minimum fare
-      if (coupon.min_fare && fareAmount && fareAmount < coupon.min_fare) {
-        return res.status(400).json({ error: `Minimum fare of £${coupon.min_fare} required for this coupon` });
-      }
-
-      // Calculate discount
-      let discountAmount = 0;
-      if (coupon.discount_type === 'percentage') {
-        discountAmount = fareAmount ? (fareAmount * coupon.discount_amount / 100) : 0;
-      } else {
-        discountAmount = coupon.discount_amount;
-      }
-
-      // Don't let discount exceed fare
-      if (fareAmount && discountAmount > fareAmount) {
-        discountAmount = fareAmount;
-      }
-
-      res.json({
-        valid: true,
-        coupon: {
-          code: coupon.code,
-          discountType: coupon.discount_type,
-          discountValue: coupon.discount_amount,
-          discountAmount: parseFloat(discountAmount.toFixed(2)),
-          description: coupon.discount_type === 'percentage'
-            ? `${coupon.discount_amount}% off`
-            : `£${coupon.discount_amount} off`,
-        },
-      });
-    } catch (err: any) {
-      console.error("Coupon validation error:", err);
-      res.status(500).json({ error: "Failed to validate coupon" });
+    if (error || !coupon) {
+      return res.status(404).json({ error: "Invalid or expired coupon code" });
     }
-  });
 
-  const missingLaterBookingColumns = new Set<string>();
-  const missingLaterBookingCancelColumns = new Set<string>();
+    // Check expiry
+    if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+      return res.status(400).json({ error: "This coupon has expired" });
+    }
 
-  app.post("/api/later-bookings", async (req: Request, res: Response) => {
-    try {
-      const {
-        riderId, pickupAddress, pickupLatitude, pickupLongitude,
-        dropoffAddress, dropoffLatitude, dropoffLongitude, pickupAt, dropoffBy,
-        vehicleType, estimatedFare, distanceMiles: clientDistanceMiles, durationMinutes: clientDurationMinutes,
-        flightNumber, isRoundTrip, bookingType, passengers, luggage,
-        couponCode, discountAmount,
-        returnPickupAddress, returnPickupLatitude, returnPickupLongitude,
-        returnDropoffAddress, returnDropoffLatitude, returnDropoffLongitude,
-      } = req.body;
+    // Check usage limit
+    if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
+      return res.status(400).json({ error: "This coupon has reached its maximum usage limit" });
+    }
 
-      if (!riderId || !pickupAddress || !dropoffAddress || !pickupAt) {
-        return res.status(400).json({ error: "Missing required fields" });
+    // Check minimum fare
+    if (coupon.min_fare && fareAmount && fareAmount < coupon.min_fare) {
+      return res.status(400).json({ error: `Minimum fare of £${coupon.min_fare} required for this coupon` });
+    }
+
+    // Calculate discount
+    let discountAmount = 0;
+    if (coupon.discount_type === 'percentage' || 1 == 1) {
+      discountAmount = fareAmount ? (fareAmount * coupon.discount / 100) : 0;
+    } else {
+      discountAmount = coupon.discount;
+    }
+    
+    // Don't let discount exceed fare
+    if (fareAmount && discountAmount > fareAmount) {
+      discountAmount = fareAmount;
+    }
+
+    res.json({
+      valid: true,
+      coupon: {
+        code: coupon.code,
+        discountType: coupon.discount_type || (coupon.discount ? 'percentage' : 'fixed'),
+        discountValue: coupon.discount_amount || coupon.discount || 0,
+        discountAmount: parseFloat(discountAmount.toFixed(2)),
+        description: (coupon.discount_type === 'percentage' || coupon.discount) ? `${coupon.discount_amount || coupon.discount}% off` : `£${coupon.discount_amount} off`,
+      },
+    });
+  } catch (err: any) {
+    console.error("Coupon validation error:", err);
+    res.status(500).json({ error: "Failed to validate coupon" });
+  }
+});
+
+const missingLaterBookingColumns = new Set<string>();
+const missingLaterBookingCancelColumns = new Set<string>();
+
+app.post("/api/later-bookings", async (req: Request, res: Response) => {
+  try {
+    const {
+      riderId, pickupAddress, pickupLatitude, pickupLongitude,
+      dropoffAddress, dropoffLatitude, dropoffLongitude, pickupAt, dropoffBy,
+      vehicleType, estimatedFare, distanceMiles: clientDistanceMiles, durationMinutes: clientDurationMinutes,
+      flightNumber, isRoundTrip, bookingType, passengers, luggage,
+      couponCode, discountAmount,
+      returnPickupAddress, returnPickupLatitude, returnPickupLongitude,
+      returnDropoffAddress, returnDropoffLatitude, returnDropoffLongitude,
+    } = req.body;
+
+    if (!riderId || !pickupAddress || !dropoffAddress || !pickupAt) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const pickupTime = new Date(pickupAt);
+    const dropoffTime = dropoffBy ? new Date(dropoffBy) : null;
+    const now = new Date();
+
+    if (isNaN(pickupTime.getTime())) {
+      return res.status(400).json({ error: "Invalid date format" });
+    }
+
+    if (pickupTime <= now) {
+      return res.status(400).json({ error: `Pickup time (${pickupAt}) must be in the future` });
+    }
+
+    const timeDiffMs = pickupTime.getTime() - now.getTime();
+    if (timeDiffMs < 4 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: "Bookings must be made at least 4 hours in advance" });
+    }
+
+    const maxDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+    maxDate.setHours(23, 59, 59, 999);
+    if (pickupTime > maxDate) {
+      return res.status(400).json({ error: "Pickup time cannot be more than 365 days in the future" });
+    }
+
+    if (dropoffTime) {
+      const gapMs = dropoffTime.getTime() - pickupTime.getTime();
+      if (gapMs < 30 * 60 * 1000) {
+        return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs/60000)} min)` });
       }
+    }
 
-      const pickupTime = new Date(pickupAt);
-      const dropoffTime = dropoffBy ? new Date(dropoffBy) : null;
-      const now = new Date();
-
-      if (isNaN(pickupTime.getTime())) {
-        return res.status(400).json({ error: "Invalid date format" });
-      }
-
-      if (pickupTime <= now) {
-        return res.status(400).json({ error: `Pickup time (${pickupAt}) must be in the future` });
-      }
-
-      const timeDiffMs = pickupTime.getTime() - now.getTime();
-      if (timeDiffMs < 4 * 60 * 60 * 1000) {
-        return res.status(400).json({ error: "Bookings must be made at least 4 hours in advance" });
-      }
-
-      const maxDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
-      maxDate.setHours(23, 59, 59, 999);
-      if (pickupTime > maxDate) {
-        return res.status(400).json({ error: "Pickup time cannot be more than 365 days in the future" });
-      }
-
-      if (dropoffTime) {
-        const gapMs = dropoffTime.getTime() - pickupTime.getTime();
-        if (gapMs < 30 * 60 * 1000) {
-          return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs / 60000)} min)` });
+    // If a coupon was applied, increment its used_count
+    if (couponCode) {
+      const normalizedCouponCode = couponCode?.toUpperCase()?.trim();
+      const { error: couponRpcError } = await sb.rpc('increment_coupon_usage', { coupon_code: normalizedCouponCode });
+      if (couponRpcError) {
+      const { data: couponData } = await sb
+        .from("coupons")
+        .select("used_count")
+        .eq("code", normalizedCouponCode)
+        .single();
+      if (couponData) {
+        await sb
+          .from("coupons")
+          .update({ used_count: (couponData.used_count || 0) + 1 })
+          .eq("code", normalizedCouponCode);
         }
       }
+    }
 
-      // If a coupon was applied, increment its used_count
-      if (couponCode) {
-        const normalizedCouponCode = couponCode?.toUpperCase()?.trim();
-        const { error: couponRpcError } = await sb.rpc('increment_coupon_usage', { coupon_code: normalizedCouponCode });
-        if (couponRpcError) {
-          const { data: couponData } = await sb
-            .from("discount_coupons")
-            .select("used_count")
-            .eq("code", normalizedCouponCode)
-            .single();
-          if (couponData) {
-            await sb
-              .from("discount_coupons")
-              .update({ used_count: (couponData.used_count || 0) + 1 })
-              .eq("code", normalizedCouponCode);
-          }
-        }
-      }
+    let finalDropoffTime = dropoffTime;
+    if (!finalDropoffTime) {
+      const mins = clientDurationMinutes || 30;
+      finalDropoffTime = new Date(pickupTime.getTime() + mins * 60000);
+    }
 
-      let finalDropoffTime = dropoffTime;
-      if (!finalDropoffTime) {
-        const mins = clientDurationMinutes || 30;
-        finalDropoffTime = new Date(pickupTime.getTime() + mins * 60000);
-      }
-
-      const insertData: any = {
+    const insertData: any = {
         rider_id: riderId,
         pickup_address: pickupAddress,
         pickup_latitude: pickupLatitude ?? null,
@@ -1447,861 +1445,1888 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return_dropoff_address: returnDropoffAddress ?? null,
         return_dropoff_latitude: returnDropoffLatitude ?? null,
         return_dropoff_longitude: returnDropoffLongitude ?? null,
-      };
+    };
 
-      for (const column of missingLaterBookingColumns) {
-        delete insertData[column];
-      }
+    for (const column of missingLaterBookingColumns) {
+      delete insertData[column];
+    }
 
-      let data: any = null;
-      let error: any = null;
-      const discoveredMissingColumns: string[] = [];
-      for (let attempt = 0; attempt < 25; attempt += 1) {
-        const result = await sb
-          .from("later_bookings")
-          .insert(insertData)
-          .select()
-          .single();
+    let data: any = null;
+    let error: any = null;
+    const discoveredMissingColumns: string[] = [];
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const result = await sb
+        .from("later_bookings")
+        .insert(insertData)
+        .select()
+        .single();
 
-        data = result.data;
-        error = result.error;
-        if (!error) {
-          break;
-        }
-
-        const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
-        if (!missingColumn || !(missingColumn in insertData)) {
-          break;
-        }
-
-        missingLaterBookingColumns.add(missingColumn);
-        discoveredMissingColumns.push(missingColumn);
-        delete insertData[missingColumn];
-      }
-
-      if (discoveredMissingColumns.length > 0) {
-        console.info(`ℹ️ later_bookings insert skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
-      }
-
+      data = result.data;
+      error = result.error;
       if (!error) {
+        break;
+      }
+
+      const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
+      if (!missingColumn || !(missingColumn in insertData)) {
+        break;
+      }
+
+      missingLaterBookingColumns.add(missingColumn);
+      discoveredMissingColumns.push(missingColumn);
+      delete insertData[missingColumn];
+    }
+
+    if (discoveredMissingColumns.length > 0) {
+      console.info(`ℹ️ later_bookings insert skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
+    }
+
+    if (!error) {
         error = null;
-      }
-
-      if (error) {
-        console.error("Supabase insert error:", error);
-        return res.status(500).json({ error: error.message || "Database error" });
-      }
-      io.emit("later-booking:update", { type: "created", booking: data });
-      res.status(201).json({ booking: data });
-    } catch (error: any) {
-      console.error("Create later booking error:", error);
-      res.status(500).json({ error: error?.message || "Failed to create booking" });
     }
-  });
 
-  app.get("/api/later-bookings", async (req: Request, res: Response) => {
-    try {
-      const { driverId } = req.query;
-
-      let query = sb
-        .from("later_bookings")
-        .select("*")
-        .order("pickup_at", { ascending: true });
-
-      if (driverId) {
-        const nowIso = new Date().toISOString();
-        // Driver sees unassigned scheduled rides (in the future) OR rides that they previously accepted
-        query = query.or(`and(status.eq.scheduled,pickup_at.gte.${nowIso}),and(status.eq.driver_accepted,driver_id.eq.${driverId}),and(status.eq.cancelled,driver_id.eq.${driverId})`);
-      } else {
-        query = query.in("status", ["scheduled", "driver_accepted"]);
-      }
-
-      const { data, error } = await query;
-
-      if (error) return res.status(500).json({ error: error.message });
-      res.json({ bookings: data || [] });
-    } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
+    if (error) {
+      console.error("Supabase insert error:", error);
+      return res.status(500).json({ error: error.message || "Database error" });
     }
-  });
+    io.emit("later-booking:update", { type: "created", booking: data });
+    res.status(201).json({ booking: data });
+  } catch (error: any) {
+    console.error("Create later booking error:", error);
+    res.status(500).json({ error: error?.message || "Failed to create booking" });
+  }
+});
 
-  app.get("/api/later-bookings/rider/:riderId", async (req: Request, res: Response) => {
-    try {
-      const { data, error } = await sb
-        .from("later_bookings")
-        .select("*")
-        .eq("rider_id", req.params.riderId as string)
-        .order("pickup_at", { ascending: true });
+app.get("/api/later-bookings", async (req: Request, res: Response) => {
+  try {
+    const { driverId } = req.query;
 
-      if (error) return res.status(500).json({ error: error.message });
-      res.json({ bookings: data || [] });
-    } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
+    let query = sb
+      .from("web_booker")
+      // .from("later_bookings")
+      .select("*")
+      // .order("pickup_at", { ascending: true });
+      .order("scheduled_time", { ascending: true });
+    if (driverId) {
+      const nowIso = new Date().toISOString();
+      // Driver sees unassigned scheduled rides (in the future) OR rides that they previously accepted
+      // query = query.or(`and(status.eq.scheduled,pickup_at.gte.${nowIso}),and(status.eq.driver_accepted,driver_id.eq.${driverId}),and(status.eq.cancelled,driver_id.eq.${driverId})`);
+      query = query.or(`and(status.eq.marketplace,scheduled_time.gte.${nowIso}),and(status.eq.driver_accepted,assigned_driver_id.eq.${driverId}),and(status.eq.cancelled,assigned_driver_id.eq.${driverId})`);
+    } else {
+      // query = query.in("status", ["scheduled", "driver_accepted"]);
+      query = query.in("status", ["marketplace", "driver_accepted"]);
     }
-  });
+    const { data, error } = await query;
 
-  app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) => {
-    try {
-      const { driverId } = req.body;
-      const updateData: any = {
-        status: "driver_accepted",
-        updated_at: new Date().toISOString(),
-        accepted_by_driver_at: new Date().toISOString()
-      };
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ bookings: data || [] });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
+  }
+});
 
-      if (driverId) {
-        updateData.driver_id = driverId;
-      }
+app.get("/api/later-bookings/rider/:riderId", async (req: Request, res: Response) => {
+  try {
+    const { data, error } = await sb
+      // .from("later_bookings")
+      .from("web_booker")
+      .select("*")
+      // .eq("rider_id", req.params.riderId as string)
+      .eq("assigned_driver_id", req.params.riderId as string)
+      // .order("pickup_at", { ascending: true });
+      .order("scheduled_time", { ascending: true });
 
-      let { data, error } = await sb
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ bookings: data || [] });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
+  }
+});
+
+app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) => {
+  try {
+    const { driverId } = req.body;
+    const updateData: any = { 
+      status: "driver_accepted", 
+      // updated_at: new Date().toISOString(),
+      // accepted_by_driver_at: new Date().toISOString()
+    };
+    
+    if (driverId) {
+      // updateData.driver_id = driverId;
+      updateData.assigned_driver_id = driverId;
+    }
+
+    let { data, error } = await sb
+      .from("web_booker")
+      // .from("later_bookings")
+      .update(updateData)
+      .eq("id", req.params.id as string)
+      .select()
+      .single();
+
+    // If accepted_by_driver_at column doesn't exist, retry without it
+    if (error && error.message?.includes("accepted_by_driver_at")) {
+      console.warn("⚠️ accepted_by_driver_at column missing, retrying without it");
+      delete updateData.accepted_by_driver_at;
+      const retry = await sb
         .from("later_bookings")
         .update(updateData)
         .eq("id", req.params.id as string)
         .select()
         .single();
-
-      // If accepted_by_driver_at column doesn't exist, retry without it
-      if (error && error.message?.includes("accepted_by_driver_at")) {
-        console.warn("⚠️ accepted_by_driver_at column missing, retrying without it");
-        delete updateData.accepted_by_driver_at;
-        const retry = await sb
-          .from("later_bookings")
-          .update(updateData)
-          .eq("id", req.params.id as string)
-          .select()
-          .single();
-        data = retry.data;
-        error = retry.error;
-      }
-
-      if (error) return res.status(500).json({ error: error.message });
-      io.emit("later-booking:update", { type: "accepted", booking: data });
-      res.json({ booking: data });
-    } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to accept booking" });
+      data = retry.data;
+      error = retry.error;
     }
-  });
 
-  app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) => {
-    try {
-      const { cancelledBy, reason } = req.body || {}; // 'rider' | 'driver'
+    if (error) return res.status(500).json({ error: error.message });
+    io.emit("later-booking:update", { type: "accepted", booking: data });
+    res.json({ booking: data });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || "Failed to accept booking" });
+  }
+});
 
-      // ── Fetch current booking ──
-      const { data: booking, error: fetchErr } = await sb
-        .from("later_bookings")
-        .select("*")
-        .eq("id", req.params.id as string)
-        .single();
+app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) => {
+  try {
+    const { cancelledBy, reason } = req.body || {}; // 'rider' | 'driver'
 
-      if (fetchErr || !booking) {
-        return res.status(404).json({ error: "Booking not found" });
-      }
+    // ── Fetch current booking ──
+    const { data: booking, error: fetchErr } = await sb
+      // .from("later_bookings")
+      .from("web_booker")
+      .select("*")
+      .eq("id", req.params.id as string)
+      .single();
 
-      if (booking.status === 'cancelled' || booking.status === 'driver_cancelled' || booking.status === 'driver_cancelled_late') {
-        return res.status(400).json({ error: "Booking already cancelled" });
-      }
+    if (fetchErr || !booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
 
-      const now = new Date();
-      const pickupTime = new Date(booking.pickup_at);
-      const msUntilPickup = pickupTime.getTime() - now.getTime();
-      const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
-      const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
-      const pastPickup = msUntilPickup < 0;
-      const estimatedFare = booking.estimated_fare || 0;
+    if (booking.status === 'cancelled' || booking.status === 'driver_cancelled' || booking.status === 'driver_cancelled_late') {
+      return res.status(400).json({ error: "Booking already cancelled" });
+    }
 
-      let cancellationFee = 0;
-      let refundAmount = 0;
-      let penaltyNote = '';
+    const now = new Date();
+    const pickupTime = new Date(booking.pickup_at || booking.scheduled_time);
+    const msUntilPickup = pickupTime.getTime() - now.getTime();
+    const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+    const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
+    const pastPickup = msUntilPickup < 0;
+    const estimatedFare = booking.estimated_fare || booking.estimated_price || 0;
 
-      // Tracking fields
-      let statusToSet = 'cancelled';
-      let driverCancelType = null;
-      let driverPenaltyApplied = false;
-      let lateCancellationFee = 0;
-      let releaseDriverAssignment = false;
+    let cancellationFee = 0;
+    let refundAmount = 0;
+    let penaltyNote = '';
+    
+    // Tracking fields
+    let statusToSet = 'cancelled';
+    let driverCancelType = null;
+    let driverPenaltyApplied = false;
+    let lateCancellationFee = 0;
+    let releaseDriverAssignment = false;
 
-      if (cancelledBy === 'rider') {
-        if (withinThreeHours || pastPickup) {
-          // Charge 100% cancellation fee for late cancellation
-          const halfFare = estimatedFare * 1;
-          cancellationFee = halfFare;
-          penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
+    if (cancelledBy === 'rider') {
+      if (withinThreeHours || pastPickup) {
+        // Charge 100% cancellation fee for late cancellation
+        const halfFare = estimatedFare * 1;
+        cancellationFee = halfFare;
+        penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
 
-          // Deduct from rider wallet (allowing negative balance)
-          if (booking.rider_id && halfFare > 0) {
-            try {
-              const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', booking.rider_id).single();
-              const currentBalance = riderRow?.wallet_balance || 0;
-              const newBalance = Number((currentBalance - halfFare).toFixed(2));
-              await sb.from('users').update({ wallet_balance: newBalance }).eq('id', booking.rider_id);
-              // Record wallet transaction
-              await sb.from('wallet_transactions').insert({
-                user_id: booking.rider_id,
-                ride_id: null,
-                amount: halfFare,
-                type: 'debit',
-                description: `100% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${booking.id}`,
-              });
-              console.log(`💸 Late cancel: rider ${booking.rider_id} charged 100% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
-            } catch (walletErr) {
-              console.error('Failed to charge rider wallet for late cancel:', walletErr);
-            }
+        // Deduct from rider wallet (allowing negative balance)
+        if (booking.rider_id && halfFare > 0) {
+          try {
+            const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', booking.rider_id).single();
+            const currentBalance = riderRow?.wallet_balance || 0;
+            const newBalance = Number((currentBalance - halfFare).toFixed(2));
+            await sb.from('users').update({ wallet_balance: newBalance }).eq('id', booking.rider_id);
+            // Record wallet transaction
+            await sb.from('wallet_transactions').insert({
+              user_id: booking.rider_id,
+              ride_id: null,
+              amount: halfFare,
+              type: 'debit',
+              description: `100% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${booking.id}`,
+            });
+            console.log(`💸 Late cancel: rider ${booking.rider_id} charged 100% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
+          } catch (walletErr) {
+            console.error('Failed to charge rider wallet for late cancel:', walletErr);
           }
-
-          // Credit driver earnings with the 100% cancellation fee (no platform commission)
-          if (booking.driver_id && halfFare > 0) {
-            try {
-              const { data: driverData, error: driverFetchErr } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
-
-              if (driverFetchErr) {
-                console.error(`❌ Failed to fetch driver ${booking.driver_id}:`, driverFetchErr);
-              } else if (!driverData) {
-                console.warn(`⚠️ Driver ${booking.driver_id} not found in database`);
-              } else {
-                const currentEarnings = Number(driverData?.total_earnings || 0);
-                const newEarnings = Number((currentEarnings + Math.abs(halfFare)).toFixed(2));
-                await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id);
-              }
-            } catch (earningsErr) {
-              console.error(`❌ Exception updating driver earnings for driver ${booking.driver_id}:`, earningsErr);
-            }
-          } else if (halfFare > 0) {
-            console.warn(`⚠️ No driver assigned to booking ${booking.id} - cannot credit earnings`);
-          }
-        } else {
-          // Free cancellation — issue full refund
-          refundAmount = estimatedFare > 0 ? estimatedFare : 0;
-          penaltyNote = 'Free cancellation — more than 3 hours before pickup.';
-          // If they prepaid something, refund it (stub — payment logic would go here)
-          console.log(`✅ Free cancel: rider ${booking.rider_id}, refund would be £${refundAmount}`);
         }
-      } else if (cancelledBy === 'driver') {
-        // Driver cancellation within 3 hours: 50% penalty
-        if (withinThreeHours || pastPickup) {
-          const driverPenalty = estimatedFare * 0.5;
-          penaltyNote = `Driver late cancellation — 50% penalty of £${driverPenalty.toFixed(2)} applies.`;
-          statusToSet = 'scheduled';
-          driverCancelType = 'late_cancellation';
-          driverPenaltyApplied = true;
-          lateCancellationFee = driverPenalty;
-          releaseDriverAssignment = true;
 
-          if (booking.driver_id && driverPenalty > 0) {
-            try {
-              // Add a deduction record for the driver
-              await sb.from('driver_deductions').insert({
-                driver_id: booking.driver_id,
-                amount: driverPenalty,
-                type: 'late_cancel_penalty',
-                reason: `Late cancellation penalty (50%) for scheduled booking ${booking.id}`,
-              });
-
-              // Also deduct from driver's total_earnings
-              const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
+        // Credit driver earnings with the 100% cancellation fee (no platform commission)
+        if (booking.driver_id && halfFare > 0) {
+          try {
+            const { data: driverData, error: driverFetchErr } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
+            
+            if (driverFetchErr) {
+              console.error(`❌ Failed to fetch driver ${booking.driver_id}:`, driverFetchErr);
+            } else if (!driverData) {
+              console.warn(`⚠️ Driver ${booking.driver_id} not found in database`);
+            } else {
               const currentEarnings = Number(driverData?.total_earnings || 0);
-              const newEarnings = Number((currentEarnings - driverPenalty).toFixed(2));
+              const newEarnings = Number((currentEarnings + Math.abs(halfFare)).toFixed(2));
               await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id);
-
-            } catch (penaltyErr) {
-              console.error('Failed to record driver penalty:', penaltyErr);
             }
+          } catch (earningsErr) {
+            console.error(`❌ Exception updating driver earnings for driver ${booking.driver_id}:`, earningsErr);
           }
-        } else {
-          penaltyNote = 'Driver cancelled more than 3 hours before pickup — no penalty.';
-          statusToSet = 'scheduled';
-          driverCancelType = 'free_cancellation';
-          releaseDriverAssignment = true;
+        } else if (halfFare > 0) {
+          console.warn(`⚠️ No driver assigned to booking ${booking.id} - cannot credit earnings`);
         }
+      } else {
+        // Free cancellation — issue full refund
+        refundAmount = estimatedFare > 0 ? estimatedFare : 0;
+        penaltyNote = 'Free cancellation — more than 3 hours before pickup.';
+        // If they prepaid something, refund it (stub — payment logic would go here)
+        console.log(`✅ Free cancel: rider ${booking.rider_id}, refund would be £${refundAmount}`);
       }
-
-      const updatePayload: any = {
-        status: statusToSet,
-        updated_at: now.toISOString(),
-        cancellation_fee: cancellationFee,
-        cancellation_note: penaltyNote,
-        cancelled_by: cancelledBy || 'rider',
-      };
-
-      if (cancelledBy === 'driver') {
-        if (releaseDriverAssignment) {
-          updatePayload.driver_id = null;
-          updatePayload.accepted_by_driver_at = null;
+    } else if (cancelledBy === 'driver') {
+      // Driver cancellation within 3 hours: 50% penalty
+      if (withinThreeHours || pastPickup) {
+        const driverPenalty = estimatedFare * 0.5;
+        penaltyNote = `Driver late cancellation — 50% penalty of £${driverPenalty.toFixed(2)} applies.`;
+        // statusToSet = 'scheduled';
+        statusToSet = 'marketplace';
+        driverCancelType = 'late_cancellation';
+        driverPenaltyApplied = true;
+        lateCancellationFee = driverPenalty;
+        releaseDriverAssignment = true;
+        if ((booking.driver_id || booking.assigned_driver_id) && driverPenalty > 0) {
+          try {
+            // Add a deduction record for the driver
+            await sb.from('driver_deductions').insert({
+              driver_id: booking.driver_id || booking.assigned_driver_id,
+              amount: driverPenalty,
+              type: 'late_cancel_penalty',
+              reason: `Late cancellation penalty (50%) for scheduled booking ${booking.id}`,
+            });
+            // Also deduct from driver's total_earnings
+            const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id || booking.assigned_driver_id).single();
+            const currentEarnings = Number(driverData?.total_earnings || 0);
+            const newEarnings = Number((currentEarnings - driverPenalty).toFixed(2));
+            await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id || booking.assigned_driver_id);
+          } catch (penaltyErr) {
+            console.error('Failed to record driver penalty:', penaltyErr);
+          }
         }
-        updatePayload.driver_cancelled_at = now.toISOString();
-        updatePayload.driver_cancel_reason = reason || null;
-        updatePayload.driver_cancel_type = driverCancelType;
-        updatePayload.late_cancellation_fee = lateCancellationFee;
-        updatePayload.driver_penalty_applied = driverPenaltyApplied;
+      } else {
+        penaltyNote = 'Driver cancelled more than 3 hours before pickup — no penalty.';
+        // statusToSet = 'scheduled';
+        statusToSet = 'marketplace';
+        driverCancelType = 'free_cancellation';
+        releaseDriverAssignment = true;
       }
-
-      for (const column of missingLaterBookingCancelColumns) {
-        delete updatePayload[column];
-      }
-
-      let data: any = null;
-      let error: any = null;
-      const discoveredMissingColumns: string[] = [];
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        const result = await sb
-          .from("later_bookings")
-          .update(updatePayload)
-          .eq("id", req.params.id as string)
-          .select()
-          .single();
-
-        data = result.data;
-        error = result.error;
-        if (!error) {
-          break;
-        }
-
-        const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
-        if (!missingColumn || !(missingColumn in updatePayload)) {
-          break;
-        }
-
-        missingLaterBookingCancelColumns.add(missingColumn);
-        discoveredMissingColumns.push(missingColumn);
-        delete updatePayload[missingColumn];
-      }
-
-      if (discoveredMissingColumns.length > 0) {
-        console.info(`ℹ️ later_bookings cancel skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
-      }
-
-      const statusMayBeUnsupported =
-        error &&
-        cancelledBy === 'driver' &&
-        updatePayload.status !== 'cancelled' &&
-        (error.code === '23514' ||
-          error.message?.toLowerCase().includes('status') ||
-          error.message?.toLowerCase().includes('constraint'));
-
-      if (statusMayBeUnsupported) {
-        updatePayload.status = 'cancelled';
-        const retry = await sb
-          .from("later_bookings")
-          .update(updatePayload)
-          .eq("id", req.params.id as string)
-          .select()
-          .single();
-
-        data = retry.data;
-        error = retry.error;
-      }
-
-      if (error) {
-        console.error("Supabase cancel booking update error:", error);
-        return res.status(500).json({ error: error.message });
-      }
-      io.emit("later-booking:update", {
-        type: cancelledBy === 'driver' ? "released" : "cancelled",
-        booking: data,
-      });
-      res.json({ booking: data, withinThreeHours, cancellationFee, penaltyNote });
-    } catch (error: any) {
-      res.status(500).json({ error: error?.message || "Failed to cancel booking" });
     }
-  });
 
-  app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { riderRating, driverRating, riderComment, driverComment, ratedBy } = req.body;
-
-      const updateData: any = {};
-
-      if (ratedBy === "driver") {
-        if (riderRating !== undefined) updateData.rider_rating = riderRating;
-        // if (riderComment !== undefined) updateData.rider_comment = riderComment; // Column doesn't exist
-      } else if (ratedBy === "rider") {
-        if (driverRating !== undefined) updateData.driver_rating = driverRating;
-        // if (driverComment !== undefined) updateData.driver_comment = driverComment; // Column doesn't exist
+    const updatePayload: any = {
+      status: statusToSet,
+      updated_at: now.toISOString(),
+      cancellation_fee: cancellationFee,
+      cancellation_note: penaltyNote,
+      cancelled_by: cancelledBy || 'rider',
+    };
+    if (cancelledBy === 'driver') {
+      if (releaseDriverAssignment) {
+        updatePayload.driver_id = null;
+        updatePayload.accepted_by_driver_at = null;
       }
+      updatePayload.driver_cancelled_at = now.toISOString();
+      updatePayload.driver_cancel_reason = reason || null;
+      updatePayload.driver_cancel_type = driverCancelType;
+      updatePayload.late_cancellation_fee = lateCancellationFee;
+      updatePayload.driver_penalty_applied = driverPenaltyApplied;
+    }
 
-      const { data, error } = await supabase
-        .from("rides")
-        .update(updateData)
-        .eq("id", id)
+    for (const column of missingLaterBookingCancelColumns) {
+      delete updatePayload[column];
+    }
+
+    let data: any = null;
+    let error: any = null;
+    const discoveredMissingColumns: string[] = [];
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const result = await sb
+        // .from("later_bookings")
+        .from("web_booker")
+        .update(updatePayload)
+        .eq("id", req.params.id as string)
         .select()
         .single();
 
-      if (error) {
-        console.error("Supabase update error saving rating:", error);
-        return res.status(500).json({ error: "Database error saving rating" });
+      data = result.data;
+      error = result.error;
+      if (!error) {
+        break;
       }
 
-      res.json({ success: true, ride: data });
-    } catch (error: any) {
-      console.error("Save rating error:", error);
-      res.status(500).json({ error: error?.message || "Failed to save rating" });
+      const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
+      if (!missingColumn || !(missingColumn in updatePayload)) {
+        break;
+      }
+
+      missingLaterBookingCancelColumns.add(missingColumn);
+      discoveredMissingColumns.push(missingColumn);
+      delete updatePayload[missingColumn];
     }
-  });
 
-  // ─── Scheduled Bookings Escalation Engine ───
-  // Runs every minute to evaluate scheduled bookings that haven't been accepted yet.
-  setInterval(async () => {
-    try {
-      const { data: scheduledRides, error } = await supabase
-        .from('later_bookings')
-        .select('*')
-        .eq('status', 'scheduled')
-        .gte('pickup_at', new Date().toISOString());
-
-      if (error || !scheduledRides) return;
-
-      const now = new Date().getTime();
-
-      for (const ride of scheduledRides) {
-        const pickupTime = new Date(ride.pickup_at).getTime();
-        const minsUntilPickup = (pickupTime - now) / 60000;
-
-        // 15 Minutes -> URGENT ASAP Priority Job
-        if (minsUntilPickup <= 15) {
-          // Broadcast to all online drivers as an urgent ride
-          io.emit('ride:urgent_scheduled', {
-            ...ride,
-            id: `urgent_sched_${ride.id}`, // prefix to avoid UI clashes if needed, or pass as is
-            isUrgentScheduled: true,
-            title: 'URGENT SCHEDULED RIDE',
-            subtitle: 'Pickup soon',
-          });
-          continue;
-        }
-
-        // 30 Minutes -> Urgent Push
-        if (minsUntilPickup <= 30 && minsUntilPickup > 29) { // Run once when crossing 30
-          // (In a real scenario, this uses Expo Push Notifications to available drivers)
-          console.log(`[ESCALATION] Urgent Push for scheduled ride ${ride.id} (30 mins until pickup)`);
-        }
-
-        // 60 Minutes -> Standard Push
-        if (minsUntilPickup <= 60 && minsUntilPickup > 59) { // Run once when crossing 60
-          console.log(`[ESCALATION] Push for scheduled ride ${ride.id} (60 mins until pickup)`);
-        }
-      }
-    } catch (err) {
-      console.error('Escalation engine error:', err);
+    if (discoveredMissingColumns.length > 0) {
+      console.info(`ℹ️ later_bookings cancel skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
     }
-  }, 60000); // 1 minute interval
 
-  // ─── Driver Payout Methods ────────────────────────────────────────
-  app.get("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
-    try {
-      const { data, error } = await sb
-        .from("driver_payout_methods")
-        .select("*")
-        .eq("driver_id", req.params.driverId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+    const statusMayBeUnsupported =
+      error &&
+      cancelledBy === 'driver' &&
+      updatePayload.status !== 'cancelled' &&
+      (error.code === '23514' ||
+        error.message?.toLowerCase().includes('status') ||
+        error.message?.toLowerCase().includes('constraint'));
 
-      if (error) {
-        // No rows found is not a real error
-        if (error.code === 'PGRST116') {
-          return res.json(null);
-        }
-        return res.status(500).json({ error: error.message });
-      }
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to fetch payout method" });
-    }
-  });
-
-  app.post("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
-    try {
-      const { account_name, account_no, sort_code, bank_provider } = req.body;
-      if (!account_name || !account_no || !sort_code || !bank_provider) {
-        return res.status(400).json({ error: "All fields are required" });
-      }
-
-      const { data, error } = await sb
-        .from("driver_payout_methods")
-        .insert({
-          driver_id: req.params.driverId,
-          account_name,
-          account_no,
-          sort_code,
-          bank_provider,
-        })
+    if (statusMayBeUnsupported) {
+      updatePayload.status = 'cancelled';
+      const retry = await sb
+        // .from("later_bookings")
+        .from("web_booker")
+        .update(updatePayload)
+        .eq("id", req.params.id as string)
         .select()
         .single();
 
-      if (error) return res.status(500).json({ error: error.message });
-      res.status(201).json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to create payout method" });
+      data = retry.data;
+      error = retry.error;
     }
-  });
 
-  app.put("/api/driver-payout-methods/:driverId/:id", async (req: Request, res: Response) => {
-    try {
-      const { account_name, account_no, sort_code, bank_provider } = req.body;
-
-      const { data, error } = await sb
-        .from("driver_payout_methods")
-        .update({
-          account_name,
-          account_no,
-          sort_code,
-          bank_provider,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", req.params.id)
-        .eq("driver_id", req.params.driverId)
-        .select()
-        .single();
-
-      if (error) return res.status(500).json({ error: error.message });
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to update payout method" });
+    if (error) {
+      console.error("Supabase cancel booking update error:", error);
+      return res.status(500).json({ error: error.message });
     }
-  });
+    io.emit("later-booking:update", {
+      type: cancelledBy === 'driver' ? "released" : "cancelled",
+      booking: data,
+    });
+    res.json({ booking: data, withinThreeHours, cancellationFee, penaltyNote });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || "Failed to cancel booking" });
+  }
+});
 
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // ════════════════ RIDER PAYOUT METHODS & WITHDRAWALS (NEW) ════════════════════
-  // ═══════════════════════════════════════════════════════════════════════════════
+app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { riderRating, driverRating, riderComment, driverComment, ratedBy } = req.body;
 
-  // Get rider payout method
-  app.get("/api/rider-payout-methods/:userId", async (req: Request, res: Response) => {
-    try {
-      const { data, error } = await sb
-        .from("rider_payout_methods")
-        .select("*")
-        .eq("user_id", req.params.userId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-
-      if (error) {
-        // No rows found is not a real error
-        if (error.code === 'PGRST116') {
-          return res.json(null);
-        }
-        return res.status(500).json({ error: error.message });
-      }
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to fetch payout method" });
+    const updateData: any = {};
+    
+    if (ratedBy === "driver") {
+      if (riderRating !== undefined) updateData.rider_rating = riderRating;
+      // if (riderComment !== undefined) updateData.rider_comment = riderComment; // Column doesn't exist
+    } else if (ratedBy === "rider") {
+      if (driverRating !== undefined) updateData.driver_rating = driverRating;
+      // if (driverComment !== undefined) updateData.driver_comment = driverComment; // Column doesn't exist
     }
-  });
 
-  // Create rider payout method
-  app.post("/api/rider-payout-methods/:userId", async (req: Request, res: Response) => {
-    try {
-      const { account_name, account_no, sort_code, bank_provider } = req.body;
-      if (!account_name || !account_no || !sort_code || !bank_provider) {
-        return res.status(400).json({ error: "All fields are required" });
-      }
+    const { data, error } = await supabase
+      .from("rides")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
 
-      const { data, error } = await sb
-        .from("rider_payout_methods")
-        .insert({
-          user_id: req.params.userId,
-          account_name,
-          account_no,
-          sort_code,
-          bank_provider,
-        })
-        .select()
-        .single();
-
-      if (error) return res.status(500).json({ error: error.message });
-      res.status(201).json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to create payout method" });
+    if (error) {
+      console.error("Supabase update error saving rating:", error);
+      return res.status(500).json({ error: "Database error saving rating" });
     }
-  });
 
-  // Update rider payout method
-  app.put("/api/rider-payout-methods/:userId/:id", async (req: Request, res: Response) => {
-    try {
-      const { account_name, account_no, sort_code, bank_provider } = req.body;
+    res.json({ success: true, ride: data });
+  } catch (error: any) {
+    console.error("Save rating error:", error);
+    res.status(500).json({ error: error?.message || "Failed to save rating" });
+  }
+});
 
-      const { data, error } = await sb
-        .from("rider_payout_methods")
-        .update({
-          account_name,
-          account_no,
-          sort_code,
-          bank_provider,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", req.params.id)
-        .eq("user_id", req.params.userId)
-        .select()
-        .single();
+// ─── Scheduled Bookings Escalation Engine ───
+// Runs every minute to evaluate scheduled bookings that haven't been accepted yet.
+setInterval(async () => {
+  try {
+    const { data: scheduledRides, error } = await supabase
+      .from('later_bookings')
+      .select('*')
+      .eq('status', 'scheduled')
+      .gte('pickup_at', new Date().toISOString());
 
-      if (error) return res.status(500).json({ error: error.message });
-      res.json(data);
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to update payout method" });
-    }
-  });
+    if (error || !scheduledRides) return;
 
-  // Request withdrawal (debit from wallet, create withdrawal record)
-  app.post("/api/withdrawals/:userId", async (req: Request, res: Response) => {
-    try {
-      const { amount, payout_method_id } = req.body;
-      const userId = req.params.userId;
+    const now = new Date().getTime();
 
-      if (!amount || amount <= 0) {
-        return res.status(400).json({ error: "Amount must be greater than 0" });
+    for (const ride of scheduledRides) {
+      const pickupTime = new Date(ride.pickup_at).getTime();
+      const minsUntilPickup = (pickupTime - now) / 60000;
+
+      // 15 Minutes -> URGENT ASAP Priority Job
+      if (minsUntilPickup <= 15) {
+        // Broadcast to all online drivers as an urgent ride
+        io.emit('ride:urgent_scheduled', {
+          ...ride,
+          id: `urgent_sched_${ride.id}`, // prefix to avoid UI clashes if needed, or pass as is
+          isUrgentScheduled: true,
+          title: 'URGENT SCHEDULED RIDE',
+          subtitle: 'Pickup soon',
+        });
+        continue;
       }
 
-      // Get user's current wallet balance
-      const { data: userData, error: userError } = await sb
-        .from("users")
-        .select("wallet_balance")
-        .eq("id", userId)
-        .single();
-
-      if (userError || !userData) {
-        return res.status(404).json({ error: "User not found" });
+      // 30 Minutes -> Urgent Push
+      if (minsUntilPickup <= 30 && minsUntilPickup > 29) { // Run once when crossing 30
+        // (In a real scenario, this uses Expo Push Notifications to available drivers)
+        console.log(`[ESCALATION] Urgent Push for scheduled ride ${ride.id} (30 mins until pickup)`);
       }
 
-      const currentBalance = userData.wallet_balance || 0;
-      if (currentBalance < amount) {
-        return res.status(400).json({ error: "Insufficient wallet balance" });
+      // 60 Minutes -> Standard Push
+      if (minsUntilPickup <= 60 && minsUntilPickup > 59) { // Run once when crossing 60
+        console.log(`[ESCALATION] Push for scheduled ride ${ride.id} (60 mins until pickup)`);
       }
+    }
+  } catch (err) {
+    console.error('Escalation engine error:', err);
+  }
+}, 60000); // 1 minute interval
 
-      // Create withdrawal record
-      const { data: withdrawalData, error: withdrawalError } = await sb
-        .from("withdrawals")
+// ─── Driver Payout Methods ────────────────────────────────────────
+app.get("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
+  try {
+    const { data, error } = await sb
+      .from("driver_payout_methods")
+      .select("*")
+      .eq("driver_id", req.params.driverId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) {
+      // No rows found is not a real error
+      if (error.code === 'PGRST116') {
+        return res.json(null);
+      }
+      return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch payout method" });
+  }
+});
+
+app.post("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
+  try {
+    const { account_name, account_no, sort_code, bank_provider } = req.body;
+    if (!account_name || !account_no || !sort_code || !bank_provider) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    const { data, error } = await sb
+      .from("driver_payout_methods")
+      .insert({
+        driver_id: req.params.driverId,
+        account_name,
+        account_no,
+        sort_code,
+        bank_provider,
+      })
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to create payout method" });
+  }
+});
+
+app.put("/api/driver-payout-methods/:driverId/:id", async (req: Request, res: Response) => {
+  try {
+    const { account_name, account_no, sort_code, bank_provider } = req.body;
+
+    const { data, error } = await sb
+      .from("driver_payout_methods")
+      .update({
+        account_name,
+        account_no,
+        sort_code,
+        bank_provider,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", req.params.id)
+      .eq("driver_id", req.params.driverId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to update payout method" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════ RIDER PAYOUT METHODS & WITHDRAWALS (NEW) ════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Get rider payout method
+app.get("/api/rider-payout-methods/:userId", async (req: Request, res: Response) => {
+  try {
+    const { data, error } = await sb
+      .from("rider_payout_methods")
+      .select("*")
+      .eq("user_id", req.params.userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) {
+      // No rows found is not a real error
+      if (error.code === 'PGRST116') {
+        return res.json(null);
+      }
+      return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch payout method" });
+  }
+});
+
+// Create rider payout method
+app.post("/api/rider-payout-methods/:userId", async (req: Request, res: Response) => {
+  try {
+    const { account_name, account_no, sort_code, bank_provider } = req.body;
+    if (!account_name || !account_no || !sort_code || !bank_provider) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    const { data, error } = await sb
+      .from("rider_payout_methods")
+      .insert({
+        user_id: req.params.userId,
+        account_name,
+        account_no,
+        sort_code,
+        bank_provider,
+      })
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to create payout method" });
+  }
+});
+
+// Update rider payout method
+app.put("/api/rider-payout-methods/:userId/:id", async (req: Request, res: Response) => {
+  try {
+    const { account_name, account_no, sort_code, bank_provider } = req.body;
+
+    const { data, error } = await sb
+      .from("rider_payout_methods")
+      .update({
+        account_name,
+        account_no,
+        sort_code,
+        bank_provider,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", req.params.id)
+      .eq("user_id", req.params.userId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to update payout method" });
+  }
+});
+
+// Request withdrawal (debit from wallet, create withdrawal record)
+app.post("/api/withdrawals/:userId", async (req: Request, res: Response) => {
+  try {
+    const { amount, payout_method_id } = req.body;
+    const userId = req.params.userId;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Amount must be greater than 0" });
+    }
+
+    // Get user's current wallet balance
+    const { data: userData, error: userError } = await sb
+      .from("users")
+      .select("wallet_balance")
+      .eq("id", userId)
+      .single();
+
+    if (userError || !userData) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const currentBalance = userData.wallet_balance || 0;
+    if (currentBalance < amount) {
+      return res.status(400).json({ error: "Insufficient wallet balance" });
+    }
+
+    // Create withdrawal record
+    const { data: withdrawalData, error: withdrawalError } = await sb
+      .from("withdrawals")
+      .insert({
+        user_id: userId,
+        payout_method_id,
+        amount,
+        status: "pending",
+      })
+      .select()
+      .single();
+
+    if (withdrawalError) {
+      return res.status(500).json({ error: withdrawalError.message });
+    }
+
+    // Debit wallet
+    const newBalance = currentBalance - amount;
+    const { error: updateError } = await sb
+      .from("users")
+      .update({ wallet_balance: newBalance })
+      .eq("id", userId);
+
+    if (updateError) {
+      return res.status(500).json({ error: "Failed to update wallet" });
+    }
+
+    // Record withdrawal transaction
+    try {
+      await sb
+        .from("wallet_transactions")
         .insert({
           user_id: userId,
-          payout_method_id,
           amount,
-          status: "pending",
-        })
-        .select()
-        .single();
+          type: "debit",
+          description: `Withdrawal request - £${amount.toFixed(2)}`,
+        });
+    } catch (e: any) {
+      console.warn("Failed to record withdrawal transaction:", e?.message);
+    }
 
-      if (withdrawalError) {
-        return res.status(500).json({ error: withdrawalError.message });
-      }
+    res.status(201).json({
+      withdrawal: withdrawalData,
+      newBalance,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to process withdrawal" });
+  }
+});
 
-      // Debit wallet
-      const newBalance = currentBalance - amount;
-      const { error: updateError } = await sb
+// Get user's withdrawal history
+app.get("/api/withdrawals/:userId", async (req: Request, res: Response) => {
+  try {
+    const { data, error } = await sb
+      .from("withdrawals")
+      .select("*")
+      .eq("user_id", req.params.userId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json({ withdrawals: data || [] });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch withdrawals" });
+  }
+});
+
+// Approve/Complete a withdrawal
+app.post("/api/withdrawals/:withdrawalId/approve", async (req: Request, res: Response) => {
+  try {
+    const { withdrawalId } = req.params;
+    const { transactionId } = req.body;
+
+    // Get withdrawal details
+    const { data: withdrawal, error: fetchError } = await sb
+      .from("withdrawals")
+      .select("*")
+      .eq("id", withdrawalId)
+      .single();
+
+    if (fetchError || !withdrawal) {
+      return res.status(404).json({ error: "Withdrawal not found" });
+    }
+
+    // Update withdrawal status to completed
+    const { error: updateError } = await sb
+      .from("withdrawals")
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        transaction_id: transactionId || null,
+      })
+      .eq("id", withdrawalId);
+
+    if (updateError) {
+      return res.status(500).json({ error: updateError.message });
+    }
+
+    console.log(`✅ Withdrawal ${withdrawalId} approved - amount £${withdrawal.amount}, user: ${withdrawal.user_id}`);
+    res.json({ success: true, message: "Withdrawal approved" });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to approve withdrawal" });
+  }
+});
+
+// Cancel a withdrawal (and refund wallet)
+app.post("/api/withdrawals/:withdrawalId/cancel", async (req: Request, res: Response) => {
+  try {
+    const { withdrawalId } = req.params;
+    const { reason } = req.body;
+
+    // Get withdrawal details
+    const { data: withdrawal, error: fetchError } = await sb
+      .from("withdrawals")
+      .select("*")
+      .eq("id", withdrawalId)
+      .single();
+
+    if (fetchError || !withdrawal) {
+      return res.status(404).json({ error: "Withdrawal not found" });
+    }
+
+    if (withdrawal.status !== "pending") {
+      return res.status(400).json({ error: "Only pending withdrawals can be cancelled" });
+    }
+
+    // Update withdrawal status to cancelled
+    const { error: updateError } = await sb
+      .from("withdrawals")
+      .update({
+        status: "cancelled",
+        notes: reason || "Cancelled",
+      })
+      .eq("id", withdrawalId);
+
+    if (updateError) {
+      return res.status(500).json({ error: updateError.message });
+    }
+
+    // Refund the wallet
+    const { data: userData, error: userError } = await sb
+      .from("users")
+      .select("wallet_balance")
+      .eq("id", withdrawal.user_id)
+      .single();
+
+    if (!userError && userData) {
+      const newBalance = (userData.wallet_balance || 0) + withdrawal.amount;
+      await sb
         .from("users")
         .update({ wallet_balance: newBalance })
-        .eq("id", userId);
+        .eq("id", withdrawal.user_id);
 
-      if (updateError) {
-        return res.status(500).json({ error: "Failed to update wallet" });
-      }
-
-      // Record withdrawal transaction
-      try {
-        await sb
-          .from("wallet_transactions")
-          .insert({
-            user_id: userId,
-            amount,
-            type: "debit",
-            description: `Withdrawal request - £${amount.toFixed(2)}`,
-          });
-      } catch (e: any) {
-        console.warn("Failed to record withdrawal transaction:", e?.message);
-      }
-
-      res.status(201).json({
-        withdrawal: withdrawalData,
-        newBalance,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to process withdrawal" });
+      // Record refund transaction
+      await sb
+        .from("wallet_transactions")
+        .insert({
+          user_id: withdrawal.user_id,
+          amount: withdrawal.amount,
+          type: "credit",
+          description: `Withdrawal cancelled - £${withdrawal.amount.toFixed(2)} refunded`,
+        });
     }
-  });
 
-  // Get user's withdrawal history
-  app.get("/api/withdrawals/:userId", async (req: Request, res: Response) => {
-    try {
-      const { data, error } = await sb
-        .from("withdrawals")
-        .select("*")
-        .eq("user_id", req.params.userId)
-        .order("created_at", { ascending: false });
+    console.log(`❌ Withdrawal ${withdrawalId} cancelled - amount £${withdrawal.amount} refunded, user: ${withdrawal.user_id}`);
+    res.json({ success: true, message: "Withdrawal cancelled and wallet refunded" });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to cancel withdrawal" });
+  }
+});
 
-      if (error) {
-        return res.status(500).json({ error: error.message });
-      }
+// Get all pending withdrawals (for admin)
+app.get("/api/withdrawals/pending/all", async (req: Request, res: Response) => {
+  try {
+    const { data, error } = await sb
+      .from("withdrawals")
+      .select("*, user:users(email, full_name, wallet_balance)")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true });
 
-      res.json({ withdrawals: data || [] });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to fetch withdrawals" });
+    if (error) {
+      return res.status(500).json({ error: error.message });
     }
-  });
 
-  // Approve/Complete a withdrawal
-  app.post("/api/withdrawals/:withdrawalId/approve", async (req: Request, res: Response) => {
-    try {
-      const { withdrawalId } = req.params;
-      const { transactionId } = req.body;
+    res.json({ pending: data || [] });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch pending withdrawals" });
+  }
+});
 
-      // Get withdrawal details
-      const { data: withdrawal, error: fetchError } = await sb
-        .from("withdrawals")
-        .select("*")
-        .eq("id", withdrawalId)
-        .single();
-
-      if (fetchError || !withdrawal) {
-        return res.status(404).json({ error: "Withdrawal not found" });
-      }
-
-      // Update withdrawal status to completed
-      const { error: updateError } = await sb
-        .from("withdrawals")
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-          transaction_id: transactionId || null,
-        })
-        .eq("id", withdrawalId);
-
-      if (updateError) {
-        return res.status(500).json({ error: updateError.message });
-      }
-
-      console.log(`✅ Withdrawal ${withdrawalId} approved - amount £${withdrawal.amount}, user: ${withdrawal.user_id}`);
-      res.json({ success: true, message: "Withdrawal approved" });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to approve withdrawal" });
-    }
-  });
-
-  // Cancel a withdrawal (and refund wallet)
-  app.post("/api/withdrawals/:withdrawalId/cancel", async (req: Request, res: Response) => {
-    try {
-      const { withdrawalId } = req.params;
-      const { reason } = req.body;
-
-      // Get withdrawal details
-      const { data: withdrawal, error: fetchError } = await sb
-        .from("withdrawals")
-        .select("*")
-        .eq("id", withdrawalId)
-        .single();
-
-      if (fetchError || !withdrawal) {
-        return res.status(404).json({ error: "Withdrawal not found" });
-      }
-
-      if (withdrawal.status !== "pending") {
-        return res.status(400).json({ error: "Only pending withdrawals can be cancelled" });
-      }
-
-      // Update withdrawal status to cancelled
-      const { error: updateError } = await sb
-        .from("withdrawals")
-        .update({
-          status: "cancelled",
-          notes: reason || "Cancelled",
-        })
-        .eq("id", withdrawalId);
-
-      if (updateError) {
-        return res.status(500).json({ error: updateError.message });
-      }
-
-      // Refund the wallet
-      const { data: userData, error: userError } = await sb
-        .from("users")
-        .select("wallet_balance")
-        .eq("id", withdrawal.user_id)
-        .single();
-
-      if (!userError && userData) {
-        const newBalance = (userData.wallet_balance || 0) + withdrawal.amount;
-        await sb
-          .from("users")
-          .update({ wallet_balance: newBalance })
-          .eq("id", withdrawal.user_id);
-
-        // Record refund transaction
-        await sb
-          .from("wallet_transactions")
-          .insert({
-            user_id: withdrawal.user_id,
-            amount: withdrawal.amount,
-            type: "credit",
-            description: `Withdrawal cancelled - £${withdrawal.amount.toFixed(2)} refunded`,
-          });
-      }
-
-      console.log(`❌ Withdrawal ${withdrawalId} cancelled - amount £${withdrawal.amount} refunded, user: ${withdrawal.user_id}`);
-      res.json({ success: true, message: "Withdrawal cancelled and wallet refunded" });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to cancel withdrawal" });
-    }
-  });
-
-  // Get all pending withdrawals (for admin)
-  app.get("/api/withdrawals/pending/all", async (req: Request, res: Response) => {
-    try {
-      const { data, error } = await sb
-        .from("withdrawals")
-        .select("*, user:users(email, full_name, wallet_balance)")
-        .eq("status", "pending")
-        .order("created_at", { ascending: true });
-
-      if (error) {
-        return res.status(500).json({ error: error.message });
-      }
-
-      res.json({ pending: data || [] });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || "Failed to fetch pending withdrawals" });
-    }
-  });
-
-  return httpServer;
+return httpServer;
 
 
 }
 
 // Decode Google's encoded polyline format
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
-  const points: { latitude: number; longitude: number }[] = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
+const points: { latitude: number; longitude: number }[] = [];
+let index = 0;
+let lat = 0;
+let lng = 0;
 
-  while (index < encoded.length) {
-    let b;
-    let shift = 0;
-    let result = 0;
+while (index < encoded.length) {
+  let b;
+  let shift = 0;
+  let result = 0;
 
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
+  do {
+    b = encoded.charCodeAt(index++) - 63;
+    result |= (b & 0x1f) << shift;
+    shift += 5;
+  } while (b >= 0x20);
 
-    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
-    lat += dlat;
+  const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+  lat += dlat;
 
-    shift = 0;
-    result = 0;
+  shift = 0;
+  result = 0;
 
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
+  do {
+    b = encoded.charCodeAt(index++) - 63;
+    result |= (b & 0x1f) << shift;
+    shift += 5;
+  } while (b >= 0x20);
 
-    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
-    lng += dlng;
+  const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+  lng += dlng;
 
-    points.push({
-      latitude: lat / 1e5,
-      longitude: lng / 1e5,
-    });
-  }
-
-  return points;
+  points.push({
+    latitude: lat / 1e5,
+    longitude: lng / 1e5,
+  });
 }
+
+return points;
+}
+
+
+//       const { data: coupon, error } = await sb
+//         .from("discount_coupons")
+//         .select("*")
+//         .eq("code", code.toUpperCase().trim())
+//         .eq("is_active", true)
+//         .single();
+
+//       if (error || !coupon) {
+//         return res.status(404).json({ error: "Invalid or expired coupon code" });
+//       }
+
+//       // Check expiry
+//       if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+//         return res.status(400).json({ error: "This coupon has expired" });
+//       }
+
+//       // Check usage limit
+//       if (coupon.max_uses !== null && coupon.used_count >= coupon.max_uses) {
+//         return res.status(400).json({ error: "This coupon has reached its maximum usage limit" });
+//       }
+
+//       // Check minimum fare
+//       if (coupon.min_fare && fareAmount && fareAmount < coupon.min_fare) {
+//         return res.status(400).json({ error: `Minimum fare of £${coupon.min_fare} required for this coupon` });
+//       }
+
+//       // Calculate discount
+//       let discountAmount = 0;
+//       if (coupon.discount_type === 'percentage') {
+//         discountAmount = fareAmount ? (fareAmount * coupon.discount_amount / 100) : 0;
+//       } else {
+//         discountAmount = coupon.discount_amount;
+//       }
+
+//       // Don't let discount exceed fare
+//       if (fareAmount && discountAmount > fareAmount) {
+//         discountAmount = fareAmount;
+//       }
+
+//       res.json({
+//         valid: true,
+//         coupon: {
+//           code: coupon.code,
+//           discountType: coupon.discount_type,
+//           discountValue: coupon.discount_amount,
+//           discountAmount: parseFloat(discountAmount.toFixed(2)),
+//           description: coupon.discount_type === 'percentage'
+//             ? `${coupon.discount_amount}% off`
+//             : `£${coupon.discount_amount} off`,
+//         },
+//       });
+//     } catch (err: any) {
+//       console.error("Coupon validation error:", err);
+//       res.status(500).json({ error: "Failed to validate coupon" });
+//     }
+//   });
+
+//   const missingLaterBookingColumns = new Set<string>();
+//   const missingLaterBookingCancelColumns = new Set<string>();
+
+//   app.post("/api/later-bookings", async (req: Request, res: Response) => {
+//     try {
+//       const {
+//         riderId, pickupAddress, pickupLatitude, pickupLongitude,
+//         dropoffAddress, dropoffLatitude, dropoffLongitude, pickupAt, dropoffBy,
+//         vehicleType, estimatedFare, distanceMiles: clientDistanceMiles, durationMinutes: clientDurationMinutes,
+//         flightNumber, isRoundTrip, bookingType, passengers, luggage,
+//         couponCode, discountAmount,
+//         returnPickupAddress, returnPickupLatitude, returnPickupLongitude,
+//         returnDropoffAddress, returnDropoffLatitude, returnDropoffLongitude,
+//       } = req.body;
+
+//       if (!riderId || !pickupAddress || !dropoffAddress || !pickupAt) {
+//         return res.status(400).json({ error: "Missing required fields" });
+//       }
+
+//       const pickupTime = new Date(pickupAt);
+//       const dropoffTime = dropoffBy ? new Date(dropoffBy) : null;
+//       const now = new Date();
+
+//       if (isNaN(pickupTime.getTime())) {
+//         return res.status(400).json({ error: "Invalid date format" });
+//       }
+
+//       if (pickupTime <= now) {
+//         return res.status(400).json({ error: `Pickup time (${pickupAt}) must be in the future` });
+//       }
+
+//       const timeDiffMs = pickupTime.getTime() - now.getTime();
+//       if (timeDiffMs < 4 * 60 * 60 * 1000) {
+//         return res.status(400).json({ error: "Bookings must be made at least 4 hours in advance" });
+//       }
+
+//       const maxDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+//       maxDate.setHours(23, 59, 59, 999);
+//       if (pickupTime > maxDate) {
+//         return res.status(400).json({ error: "Pickup time cannot be more than 365 days in the future" });
+//       }
+
+//       if (dropoffTime) {
+//         const gapMs = dropoffTime.getTime() - pickupTime.getTime();
+//         if (gapMs < 30 * 60 * 1000) {
+//           return res.status(400).json({ error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs / 60000)} min)` });
+//         }
+//       }
+
+//       // If a coupon was applied, increment its used_count
+//       if (couponCode) {
+//         const normalizedCouponCode = couponCode?.toUpperCase()?.trim();
+//         const { error: couponRpcError } = await sb.rpc('increment_coupon_usage', { coupon_code: normalizedCouponCode });
+//         if (couponRpcError) {
+//           const { data: couponData } = await sb
+//             .from("discount_coupons")
+//             .select("used_count")
+//             .eq("code", normalizedCouponCode)
+//             .single();
+//           if (couponData) {
+//             await sb
+//               .from("discount_coupons")
+//               .update({ used_count: (couponData.used_count || 0) + 1 })
+//               .eq("code", normalizedCouponCode);
+//           }
+//         }
+//       }
+
+//       let finalDropoffTime = dropoffTime;
+//       if (!finalDropoffTime) {
+//         const mins = clientDurationMinutes || 30;
+//         finalDropoffTime = new Date(pickupTime.getTime() + mins * 60000);
+//       }
+
+//       const insertData: any = {
+//         rider_id: riderId,
+//         pickup_address: pickupAddress,
+//         pickup_latitude: pickupLatitude ?? null,
+//         pickup_longitude: pickupLongitude ?? null,
+//         dropoff_address: dropoffAddress,
+//         dropoff_latitude: dropoffLatitude ?? null,
+//         dropoff_longitude: dropoffLongitude ?? null,
+//         pickup_at: pickupTime.toISOString(),
+//         dropoff_by: finalDropoffTime.toISOString(),
+//         status: "scheduled",
+//         vehicle_type: vehicleType || 'saloon',
+//         estimated_fare: estimatedFare ?? null,
+//         distance_miles: clientDistanceMiles ?? null,
+//         duration_minutes: clientDurationMinutes ?? null,
+//         flight_number: flightNumber ?? null,
+//         is_round_trip: isRoundTrip ?? false,
+//         booking_type: bookingType || 'standard',
+//         passengers: passengers ?? 1,
+//         luggage: luggage ?? 0,
+//         coupon_code: couponCode ?? null,
+//         discount_amount: discountAmount ?? 0,
+//         return_pickup_address: returnPickupAddress ?? null,
+//         return_pickup_latitude: returnPickupLatitude ?? null,
+//         return_pickup_longitude: returnPickupLongitude ?? null,
+//         return_dropoff_address: returnDropoffAddress ?? null,
+//         return_dropoff_latitude: returnDropoffLatitude ?? null,
+//         return_dropoff_longitude: returnDropoffLongitude ?? null,
+//       };
+
+//       for (const column of missingLaterBookingColumns) {
+//         delete insertData[column];
+//       }
+
+//       let data: any = null;
+//       let error: any = null;
+//       const discoveredMissingColumns: string[] = [];
+//       for (let attempt = 0; attempt < 25; attempt += 1) {
+//         const result = await sb
+//           .from("later_bookings")
+//           .insert(insertData)
+//           .select()
+//           .single();
+
+//         data = result.data;
+//         error = result.error;
+//         if (!error) {
+//           break;
+//         }
+
+//         const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
+//         if (!missingColumn || !(missingColumn in insertData)) {
+//           break;
+//         }
+
+//         missingLaterBookingColumns.add(missingColumn);
+//         discoveredMissingColumns.push(missingColumn);
+//         delete insertData[missingColumn];
+//       }
+
+//       if (discoveredMissingColumns.length > 0) {
+//         console.info(`ℹ️ later_bookings insert skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
+//       }
+
+//       if (!error) {
+//         error = null;
+//       }
+
+//       if (error) {
+//         console.error("Supabase insert error:", error);
+//         return res.status(500).json({ error: error.message || "Database error" });
+//       }
+//       io.emit("later-booking:update", { type: "created", booking: data });
+//       res.status(201).json({ booking: data });
+//     } catch (error: any) {
+//       console.error("Create later booking error:", error);
+//       res.status(500).json({ error: error?.message || "Failed to create booking" });
+//     }
+//   });
+
+//   app.get("/api/later-bookings", async (req: Request, res: Response) => {
+//     try {
+//       const { driverId } = req.query;
+
+//       let query = sb
+//         .from("later_bookings")
+//         .select("*")
+//         .order("pickup_at", { ascending: true });
+
+//       if (driverId) {
+//         const nowIso = new Date().toISOString();
+//         // Driver sees unassigned scheduled rides (in the future) OR rides that they previously accepted
+//         query = query.or(`and(status.eq.scheduled,pickup_at.gte.${nowIso}),and(status.eq.driver_accepted,driver_id.eq.${driverId}),and(status.eq.cancelled,driver_id.eq.${driverId})`);
+//       } else {
+//         query = query.in("status", ["scheduled", "driver_accepted"]);
+//       }
+
+//       const { data, error } = await query;
+
+//       if (error) return res.status(500).json({ error: error.message });
+//       res.json({ bookings: data || [] });
+//     } catch (error: any) {
+//       res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
+//     }
+//   });
+
+//   app.get("/api/later-bookings/rider/:riderId", async (req: Request, res: Response) => {
+//     try {
+//       const { data, error } = await sb
+//         .from("later_bookings")
+//         .select("*")
+//         .eq("rider_id", req.params.riderId as string)
+//         .order("pickup_at", { ascending: true });
+
+//       if (error) return res.status(500).json({ error: error.message });
+//       res.json({ bookings: data || [] });
+//     } catch (error: any) {
+//       res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
+//     }
+//   });
+
+//   app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) => {
+//     try {
+//       const { driverId } = req.body;
+//       const updateData: any = {
+//         status: "driver_accepted",
+//         updated_at: new Date().toISOString(),
+//         accepted_by_driver_at: new Date().toISOString()
+//       };
+
+//       if (driverId) {
+//         updateData.driver_id = driverId;
+//       }
+
+//       let { data, error } = await sb
+//         .from("later_bookings")
+//         .update(updateData)
+//         .eq("id", req.params.id as string)
+//         .select()
+//         .single();
+
+//       // If accepted_by_driver_at column doesn't exist, retry without it
+//       if (error && error.message?.includes("accepted_by_driver_at")) {
+//         console.warn("⚠️ accepted_by_driver_at column missing, retrying without it");
+//         delete updateData.accepted_by_driver_at;
+//         const retry = await sb
+//           .from("later_bookings")
+//           .update(updateData)
+//           .eq("id", req.params.id as string)
+//           .select()
+//           .single();
+//         data = retry.data;
+//         error = retry.error;
+//       }
+
+//       if (error) return res.status(500).json({ error: error.message });
+//       io.emit("later-booking:update", { type: "accepted", booking: data });
+//       res.json({ booking: data });
+//     } catch (error: any) {
+//       res.status(500).json({ error: error?.message || "Failed to accept booking" });
+//     }
+//   });
+
+//   app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) => {
+//     try {
+//       const { cancelledBy, reason } = req.body || {}; // 'rider' | 'driver'
+
+//       // ── Fetch current booking ──
+//       const { data: booking, error: fetchErr } = await sb
+//         .from("later_bookings")
+//         .select("*")
+//         .eq("id", req.params.id as string)
+//         .single();
+
+//       if (fetchErr || !booking) {
+//         return res.status(404).json({ error: "Booking not found" });
+//       }
+
+//       if (booking.status === 'cancelled' || booking.status === 'driver_cancelled' || booking.status === 'driver_cancelled_late') {
+//         return res.status(400).json({ error: "Booking already cancelled" });
+//       }
+
+//       const now = new Date();
+//       const pickupTime = new Date(booking.pickup_at);
+//       const msUntilPickup = pickupTime.getTime() - now.getTime();
+//       const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+//       const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
+//       const pastPickup = msUntilPickup < 0;
+//       const estimatedFare = booking.estimated_fare || 0;
+
+//       let cancellationFee = 0;
+//       let refundAmount = 0;
+//       let penaltyNote = '';
+
+//       // Tracking fields
+//       let statusToSet = 'cancelled';
+//       let driverCancelType = null;
+//       let driverPenaltyApplied = false;
+//       let lateCancellationFee = 0;
+//       let releaseDriverAssignment = false;
+
+//       if (cancelledBy === 'rider') {
+//         if (withinThreeHours || pastPickup) {
+//           // Charge 100% cancellation fee for late cancellation
+//           const halfFare = estimatedFare * 1;
+//           cancellationFee = halfFare;
+//           penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
+
+//           // Deduct from rider wallet (allowing negative balance)
+//           if (booking.rider_id && halfFare > 0) {
+//             try {
+//               const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', booking.rider_id).single();
+//               const currentBalance = riderRow?.wallet_balance || 0;
+//               const newBalance = Number((currentBalance - halfFare).toFixed(2));
+//               await sb.from('users').update({ wallet_balance: newBalance }).eq('id', booking.rider_id);
+//               // Record wallet transaction
+//               await sb.from('wallet_transactions').insert({
+//                 user_id: booking.rider_id,
+//                 ride_id: null,
+//                 amount: halfFare,
+//                 type: 'debit',
+//                 description: `100% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${booking.id}`,
+//               });
+//               console.log(`💸 Late cancel: rider ${booking.rider_id} charged 100% fee £${halfFare} (wallet: ${currentBalance} → ${newBalance})`);
+//             } catch (walletErr) {
+//               console.error('Failed to charge rider wallet for late cancel:', walletErr);
+//             }
+//           }
+
+//           // Credit driver earnings with the 100% cancellation fee (no platform commission)
+//           if (booking.driver_id && halfFare > 0) {
+//             try {
+//               const { data: driverData, error: driverFetchErr } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
+
+//               if (driverFetchErr) {
+//                 console.error(`❌ Failed to fetch driver ${booking.driver_id}:`, driverFetchErr);
+//               } else if (!driverData) {
+//                 console.warn(`⚠️ Driver ${booking.driver_id} not found in database`);
+//               } else {
+//                 const currentEarnings = Number(driverData?.total_earnings || 0);
+//                 const newEarnings = Number((currentEarnings + Math.abs(halfFare)).toFixed(2));
+//                 await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id);
+//               }
+//             } catch (earningsErr) {
+//               console.error(`❌ Exception updating driver earnings for driver ${booking.driver_id}:`, earningsErr);
+//             }
+//           } else if (halfFare > 0) {
+//             console.warn(`⚠️ No driver assigned to booking ${booking.id} - cannot credit earnings`);
+//           }
+//         } else {
+//           // Free cancellation — issue full refund
+//           refundAmount = estimatedFare > 0 ? estimatedFare : 0;
+//           penaltyNote = 'Free cancellation — more than 3 hours before pickup.';
+//           // If they prepaid something, refund it (stub — payment logic would go here)
+//           console.log(`✅ Free cancel: rider ${booking.rider_id}, refund would be £${refundAmount}`);
+//         }
+//       } else if (cancelledBy === 'driver') {
+//         // Driver cancellation within 3 hours: 50% penalty
+//         if (withinThreeHours || pastPickup) {
+//           const driverPenalty = estimatedFare * 0.5;
+//           penaltyNote = `Driver late cancellation — 50% penalty of £${driverPenalty.toFixed(2)} applies.`;
+//           statusToSet = 'scheduled';
+//           driverCancelType = 'late_cancellation';
+//           driverPenaltyApplied = true;
+//           lateCancellationFee = driverPenalty;
+//           releaseDriverAssignment = true;
+
+//           if (booking.driver_id && driverPenalty > 0) {
+//             try {
+//               // Add a deduction record for the driver
+//               await sb.from('driver_deductions').insert({
+//                 driver_id: booking.driver_id,
+//                 amount: driverPenalty,
+//                 type: 'late_cancel_penalty',
+//                 reason: `Late cancellation penalty (50%) for scheduled booking ${booking.id}`,
+//               });
+
+//               // Also deduct from driver's total_earnings
+//               const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', booking.driver_id).single();
+//               const currentEarnings = Number(driverData?.total_earnings || 0);
+//               const newEarnings = Number((currentEarnings - driverPenalty).toFixed(2));
+//               await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', booking.driver_id);
+
+//             } catch (penaltyErr) {
+//               console.error('Failed to record driver penalty:', penaltyErr);
+//             }
+//           }
+//         } else {
+//           penaltyNote = 'Driver cancelled more than 3 hours before pickup — no penalty.';
+//           statusToSet = 'scheduled';
+//           driverCancelType = 'free_cancellation';
+//           releaseDriverAssignment = true;
+//         }
+//       }
+
+//       const updatePayload: any = {
+//         status: statusToSet,
+//         updated_at: now.toISOString(),
+//         cancellation_fee: cancellationFee,
+//         cancellation_note: penaltyNote,
+//         cancelled_by: cancelledBy || 'rider',
+//       };
+
+//       if (cancelledBy === 'driver') {
+//         if (releaseDriverAssignment) {
+//           updatePayload.driver_id = null;
+//           updatePayload.accepted_by_driver_at = null;
+//         }
+//         updatePayload.driver_cancelled_at = now.toISOString();
+//         updatePayload.driver_cancel_reason = reason || null;
+//         updatePayload.driver_cancel_type = driverCancelType;
+//         updatePayload.late_cancellation_fee = lateCancellationFee;
+//         updatePayload.driver_penalty_applied = driverPenaltyApplied;
+//       }
+
+//       for (const column of missingLaterBookingCancelColumns) {
+//         delete updatePayload[column];
+//       }
+
+//       let data: any = null;
+//       let error: any = null;
+//       const discoveredMissingColumns: string[] = [];
+//       for (let attempt = 0; attempt < 12; attempt += 1) {
+//         const result = await sb
+//           .from("later_bookings")
+//           .update(updatePayload)
+//           .eq("id", req.params.id as string)
+//           .select()
+//           .single();
+
+//         data = result.data;
+//         error = result.error;
+//         if (!error) {
+//           break;
+//         }
+
+//         const missingColumn = error.message?.match(/Could not find the '([^']+)' column/)?.[1];
+//         if (!missingColumn || !(missingColumn in updatePayload)) {
+//           break;
+//         }
+
+//         missingLaterBookingCancelColumns.add(missingColumn);
+//         discoveredMissingColumns.push(missingColumn);
+//         delete updatePayload[missingColumn];
+//       }
+
+//       if (discoveredMissingColumns.length > 0) {
+//         console.info(`ℹ️ later_bookings cancel skipped missing optional columns: ${discoveredMissingColumns.join(", ")}`);
+//       }
+
+//       const statusMayBeUnsupported =
+//         error &&
+//         cancelledBy === 'driver' &&
+//         updatePayload.status !== 'cancelled' &&
+//         (error.code === '23514' ||
+//           error.message?.toLowerCase().includes('status') ||
+//           error.message?.toLowerCase().includes('constraint'));
+
+//       if (statusMayBeUnsupported) {
+//         updatePayload.status = 'cancelled';
+//         const retry = await sb
+//           .from("later_bookings")
+//           .update(updatePayload)
+//           .eq("id", req.params.id as string)
+//           .select()
+//           .single();
+
+//         data = retry.data;
+//         error = retry.error;
+//       }
+
+//       if (error) {
+//         console.error("Supabase cancel booking update error:", error);
+//         return res.status(500).json({ error: error.message });
+//       }
+//       io.emit("later-booking:update", {
+//         type: cancelledBy === 'driver' ? "released" : "cancelled",
+//         booking: data,
+//       });
+//       res.json({ booking: data, withinThreeHours, cancellationFee, penaltyNote });
+//     } catch (error: any) {
+//       res.status(500).json({ error: error?.message || "Failed to cancel booking" });
+//     }
+//   });
+
+//   app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
+//     try {
+//       const { id } = req.params;
+//       const { riderRating, driverRating, riderComment, driverComment, ratedBy } = req.body;
+
+//       const updateData: any = {};
+
+//       if (ratedBy === "driver") {
+//         if (riderRating !== undefined) updateData.rider_rating = riderRating;
+//         // if (riderComment !== undefined) updateData.rider_comment = riderComment; // Column doesn't exist
+//       } else if (ratedBy === "rider") {
+//         if (driverRating !== undefined) updateData.driver_rating = driverRating;
+//         // if (driverComment !== undefined) updateData.driver_comment = driverComment; // Column doesn't exist
+//       }
+
+//       const { data, error } = await supabase
+//         .from("rides")
+//         .update(updateData)
+//         .eq("id", id)
+//         .select()
+//         .single();
+
+//       if (error) {
+//         console.error("Supabase update error saving rating:", error);
+//         return res.status(500).json({ error: "Database error saving rating" });
+//       }
+
+//       res.json({ success: true, ride: data });
+//     } catch (error: any) {
+//       console.error("Save rating error:", error);
+//       res.status(500).json({ error: error?.message || "Failed to save rating" });
+//     }
+//   });
+
+//   // ─── Scheduled Bookings Escalation Engine ───
+//   // Runs every minute to evaluate scheduled bookings that haven't been accepted yet.
+//   setInterval(async () => {
+//     try {
+//       const { data: scheduledRides, error } = await supabase
+//         .from('later_bookings')
+//         .select('*')
+//         .eq('status', 'scheduled')
+//         .gte('pickup_at', new Date().toISOString());
+
+//       if (error || !scheduledRides) return;
+
+//       const now = new Date().getTime();
+
+//       for (const ride of scheduledRides) {
+//         const pickupTime = new Date(ride.pickup_at).getTime();
+//         const minsUntilPickup = (pickupTime - now) / 60000;
+
+//         // 15 Minutes -> URGENT ASAP Priority Job
+//         if (minsUntilPickup <= 15) {
+//           // Broadcast to all online drivers as an urgent ride
+//           io.emit('ride:urgent_scheduled', {
+//             ...ride,
+//             id: `urgent_sched_${ride.id}`, // prefix to avoid UI clashes if needed, or pass as is
+//             isUrgentScheduled: true,
+//             title: 'URGENT SCHEDULED RIDE',
+//             subtitle: 'Pickup soon',
+//           });
+//           continue;
+//         }
+
+//         // 30 Minutes -> Urgent Push
+//         if (minsUntilPickup <= 30 && minsUntilPickup > 29) { // Run once when crossing 30
+//           // (In a real scenario, this uses Expo Push Notifications to available drivers)
+//           console.log(`[ESCALATION] Urgent Push for scheduled ride ${ride.id} (30 mins until pickup)`);
+//         }
+
+//         // 60 Minutes -> Standard Push
+//         if (minsUntilPickup <= 60 && minsUntilPickup > 59) { // Run once when crossing 60
+//           console.log(`[ESCALATION] Push for scheduled ride ${ride.id} (60 mins until pickup)`);
+//         }
+//       }
+//     } catch (err) {
+//       console.error('Escalation engine error:', err);
+//     }
+//   }, 60000); // 1 minute interval
+
+//   // ─── Driver Payout Methods ────────────────────────────────────────
+//   app.get("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
+//     try {
+//       const { data, error } = await sb
+//         .from("driver_payout_methods")
+//         .select("*")
+//         .eq("driver_id", req.params.driverId)
+//         .order("created_at", { ascending: false })
+//         .limit(1)
+//         .single();
+
+//       if (error) {
+//         // No rows found is not a real error
+//         if (error.code === 'PGRST116') {
+//           return res.json(null);
+//         }
+//         return res.status(500).json({ error: error.message });
+//       }
+//       res.json(data);
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to fetch payout method" });
+//     }
+//   });
+
+//   app.post("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
+//     try {
+//       const { account_name, account_no, sort_code, bank_provider } = req.body;
+//       if (!account_name || !account_no || !sort_code || !bank_provider) {
+//         return res.status(400).json({ error: "All fields are required" });
+//       }
+
+//       const { data, error } = await sb
+//         .from("driver_payout_methods")
+//         .insert({
+//           driver_id: req.params.driverId,
+//           account_name,
+//           account_no,
+//           sort_code,
+//           bank_provider,
+//         })
+//         .select()
+//         .single();
+
+//       if (error) return res.status(500).json({ error: error.message });
+//       res.status(201).json(data);
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to create payout method" });
+//     }
+//   });
+
+//   app.put("/api/driver-payout-methods/:driverId/:id", async (req: Request, res: Response) => {
+//     try {
+//       const { account_name, account_no, sort_code, bank_provider } = req.body;
+
+//       const { data, error } = await sb
+//         .from("driver_payout_methods")
+//         .update({
+//           account_name,
+//           account_no,
+//           sort_code,
+//           bank_provider,
+//           updated_at: new Date().toISOString(),
+//         })
+//         .eq("id", req.params.id)
+//         .eq("driver_id", req.params.driverId)
+//         .select()
+//         .single();
+
+//       if (error) return res.status(500).json({ error: error.message });
+//       res.json(data);
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to update payout method" });
+//     }
+//   });
+
+//   // ═══════════════════════════════════════════════════════════════════════════════
+//   // ════════════════ RIDER PAYOUT METHODS & WITHDRAWALS (NEW) ════════════════════
+//   // ═══════════════════════════════════════════════════════════════════════════════
+
+//   // Get rider payout method
+//   app.get("/api/rider-payout-methods/:userId", async (req: Request, res: Response) => {
+//     try {
+//       const { data, error } = await sb
+//         .from("rider_payout_methods")
+//         .select("*")
+//         .eq("user_id", req.params.userId)
+//         .order("created_at", { ascending: false })
+//         .limit(1)
+//         .single();
+
+//       if (error) {
+//         // No rows found is not a real error
+//         if (error.code === 'PGRST116') {
+//           return res.json(null);
+//         }
+//         return res.status(500).json({ error: error.message });
+//       }
+//       res.json(data);
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to fetch payout method" });
+//     }
+//   });
+
+//   // Create rider payout method
+//   app.post("/api/rider-payout-methods/:userId", async (req: Request, res: Response) => {
+//     try {
+//       const { account_name, account_no, sort_code, bank_provider } = req.body;
+//       if (!account_name || !account_no || !sort_code || !bank_provider) {
+//         return res.status(400).json({ error: "All fields are required" });
+//       }
+
+//       const { data, error } = await sb
+//         .from("rider_payout_methods")
+//         .insert({
+//           user_id: req.params.userId,
+//           account_name,
+//           account_no,
+//           sort_code,
+//           bank_provider,
+//         })
+//         .select()
+//         .single();
+
+//       if (error) return res.status(500).json({ error: error.message });
+//       res.status(201).json(data);
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to create payout method" });
+//     }
+//   });
+
+//   // Update rider payout method
+//   app.put("/api/rider-payout-methods/:userId/:id", async (req: Request, res: Response) => {
+//     try {
+//       const { account_name, account_no, sort_code, bank_provider } = req.body;
+
+//       const { data, error } = await sb
+//         .from("rider_payout_methods")
+//         .update({
+//           account_name,
+//           account_no,
+//           sort_code,
+//           bank_provider,
+//           updated_at: new Date().toISOString(),
+//         })
+//         .eq("id", req.params.id)
+//         .eq("user_id", req.params.userId)
+//         .select()
+//         .single();
+
+//       if (error) return res.status(500).json({ error: error.message });
+//       res.json(data);
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to update payout method" });
+//     }
+//   });
+
+//   // Request withdrawal (debit from wallet, create withdrawal record)
+//   app.post("/api/withdrawals/:userId", async (req: Request, res: Response) => {
+//     try {
+//       const { amount, payout_method_id } = req.body;
+//       const userId = req.params.userId;
+
+//       if (!amount || amount <= 0) {
+//         return res.status(400).json({ error: "Amount must be greater than 0" });
+//       }
+
+//       // Get user's current wallet balance
+//       const { data: userData, error: userError } = await sb
+//         .from("users")
+//         .select("wallet_balance")
+//         .eq("id", userId)
+//         .single();
+
+//       if (userError || !userData) {
+//         return res.status(404).json({ error: "User not found" });
+//       }
+
+//       const currentBalance = userData.wallet_balance || 0;
+//       if (currentBalance < amount) {
+//         return res.status(400).json({ error: "Insufficient wallet balance" });
+//       }
+
+//       // Create withdrawal record
+//       const { data: withdrawalData, error: withdrawalError } = await sb
+//         .from("withdrawals")
+//         .insert({
+//           user_id: userId,
+//           payout_method_id,
+//           amount,
+//           status: "pending",
+//         })
+//         .select()
+//         .single();
+
+//       if (withdrawalError) {
+//         return res.status(500).json({ error: withdrawalError.message });
+//       }
+
+//       // Debit wallet
+//       const newBalance = currentBalance - amount;
+//       const { error: updateError } = await sb
+//         .from("users")
+//         .update({ wallet_balance: newBalance })
+//         .eq("id", userId);
+
+//       if (updateError) {
+//         return res.status(500).json({ error: "Failed to update wallet" });
+//       }
+
+//       // Record withdrawal transaction
+//       try {
+//         await sb
+//           .from("wallet_transactions")
+//           .insert({
+//             user_id: userId,
+//             amount,
+//             type: "debit",
+//             description: `Withdrawal request - £${amount.toFixed(2)}`,
+//           });
+//       } catch (e: any) {
+//         console.warn("Failed to record withdrawal transaction:", e?.message);
+//       }
+
+//       res.status(201).json({
+//         withdrawal: withdrawalData,
+//         newBalance,
+//       });
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to process withdrawal" });
+//     }
+//   });
+
+//   // Get user's withdrawal history
+//   app.get("/api/withdrawals/:userId", async (req: Request, res: Response) => {
+//     try {
+//       const { data, error } = await sb
+//         .from("withdrawals")
+//         .select("*")
+//         .eq("user_id", req.params.userId)
+//         .order("created_at", { ascending: false });
+
+//       if (error) {
+//         return res.status(500).json({ error: error.message });
+//       }
+
+//       res.json({ withdrawals: data || [] });
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to fetch withdrawals" });
+//     }
+//   });
+
+//   // Approve/Complete a withdrawal
+//   app.post("/api/withdrawals/:withdrawalId/approve", async (req: Request, res: Response) => {
+//     try {
+//       const { withdrawalId } = req.params;
+//       const { transactionId } = req.body;
+
+//       // Get withdrawal details
+//       const { data: withdrawal, error: fetchError } = await sb
+//         .from("withdrawals")
+//         .select("*")
+//         .eq("id", withdrawalId)
+//         .single();
+
+//       if (fetchError || !withdrawal) {
+//         return res.status(404).json({ error: "Withdrawal not found" });
+//       }
+
+//       // Update withdrawal status to completed
+//       const { error: updateError } = await sb
+//         .from("withdrawals")
+//         .update({
+//           status: "completed",
+//           completed_at: new Date().toISOString(),
+//           transaction_id: transactionId || null,
+//         })
+//         .eq("id", withdrawalId);
+
+//       if (updateError) {
+//         return res.status(500).json({ error: updateError.message });
+//       }
+
+//       console.log(`✅ Withdrawal ${withdrawalId} approved - amount £${withdrawal.amount}, user: ${withdrawal.user_id}`);
+//       res.json({ success: true, message: "Withdrawal approved" });
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to approve withdrawal" });
+//     }
+//   });
+
+//   // Cancel a withdrawal (and refund wallet)
+//   app.post("/api/withdrawals/:withdrawalId/cancel", async (req: Request, res: Response) => {
+//     try {
+//       const { withdrawalId } = req.params;
+//       const { reason } = req.body;
+
+//       // Get withdrawal details
+//       const { data: withdrawal, error: fetchError } = await sb
+//         .from("withdrawals")
+//         .select("*")
+//         .eq("id", withdrawalId)
+//         .single();
+
+//       if (fetchError || !withdrawal) {
+//         return res.status(404).json({ error: "Withdrawal not found" });
+//       }
+
+//       if (withdrawal.status !== "pending") {
+//         return res.status(400).json({ error: "Only pending withdrawals can be cancelled" });
+//       }
+
+//       // Update withdrawal status to cancelled
+//       const { error: updateError } = await sb
+//         .from("withdrawals")
+//         .update({
+//           status: "cancelled",
+//           notes: reason || "Cancelled",
+//         })
+//         .eq("id", withdrawalId);
+
+//       if (updateError) {
+//         return res.status(500).json({ error: updateError.message });
+//       }
+
+//       // Refund the wallet
+//       const { data: userData, error: userError } = await sb
+//         .from("users")
+//         .select("wallet_balance")
+//         .eq("id", withdrawal.user_id)
+//         .single();
+
+//       if (!userError && userData) {
+//         const newBalance = (userData.wallet_balance || 0) + withdrawal.amount;
+//         await sb
+//           .from("users")
+//           .update({ wallet_balance: newBalance })
+//           .eq("id", withdrawal.user_id);
+
+//         // Record refund transaction
+//         await sb
+//           .from("wallet_transactions")
+//           .insert({
+//             user_id: withdrawal.user_id,
+//             amount: withdrawal.amount,
+//             type: "credit",
+//             description: `Withdrawal cancelled - £${withdrawal.amount.toFixed(2)} refunded`,
+//           });
+//       }
+
+//       console.log(`❌ Withdrawal ${withdrawalId} cancelled - amount £${withdrawal.amount} refunded, user: ${withdrawal.user_id}`);
+//       res.json({ success: true, message: "Withdrawal cancelled and wallet refunded" });
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to cancel withdrawal" });
+//     }
+//   });
+
+//   // Get all pending withdrawals (for admin)
+//   app.get("/api/withdrawals/pending/all", async (req: Request, res: Response) => {
+//     try {
+//       const { data, error } = await sb
+//         .from("withdrawals")
+//         .select("*, user:users(email, full_name, wallet_balance)")
+//         .eq("status", "pending")
+//         .order("created_at", { ascending: true });
+
+//       if (error) {
+//         return res.status(500).json({ error: error.message });
+//       }
+
+//       res.json({ pending: data || [] });
+//     } catch (err: any) {
+//       res.status(500).json({ error: err?.message || "Failed to fetch pending withdrawals" });
+//     }
+//   });
+
+//   return httpServer;
+
+
+// }
+
+// // Decode Google's encoded polyline format
+// function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
+//   const points: { latitude: number; longitude: number }[] = [];
+//   let index = 0;
+//   let lat = 0;
+//   let lng = 0;
+
+//   while (index < encoded.length) {
+//     let b;
+//     let shift = 0;
+//     let result = 0;
+
+//     do {
+//       b = encoded.charCodeAt(index++) - 63;
+//       result |= (b & 0x1f) << shift;
+//       shift += 5;
+//     } while (b >= 0x20);
+
+//     const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+//     lat += dlat;
+
+//     shift = 0;
+//     result = 0;
+
+//     do {
+//       b = encoded.charCodeAt(index++) - 63;
+//       result |= (b & 0x1f) << shift;
+//       shift += 5;
+//     } while (b >= 0x20);
+
+//     const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+//     lng += dlng;
+
+//     points.push({
+//       latitude: lat / 1e5,
+//       longitude: lng / 1e5,
+//     });
+//   }
+
+//   return points;
+// }
