@@ -52,6 +52,7 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
+      timeZone: "Europe/London",
     });
   };
 

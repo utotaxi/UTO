@@ -2305,6 +2305,28 @@ const RADIUS_MILES = DEFAULT_DRIVER_RADIUS_MILES; // 5-mile radius for driver el
 const DISPATCH_TIMEOUT_MS = 15000; // 15-second timeout per driver
 const ARRIVED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes waiting for rider
 
+const normalizeVehicleType = (value: any): string => {
+  if (!value) return "saloon";
+  const normalized = String(value).trim().toLowerCase().replace(/[\s-]+/g, "_");
+
+  switch (normalized) {
+    case "peoplecarrier":
+    case "people_carrier":
+    case "mpv":
+      return "people_carrier";
+    case "mini_bus":
+    case "minibus":
+      return "minibus";
+    case "saloon_car":
+    case "salooncar":
+    case "sedan":
+    case "saloon":
+      return "saloon";
+    default:
+      return normalized;
+  }
+};
+
 // Track active dispatch queues so we can cancel/advance them
 // rideId -> { heap, timer, rideData, riderSocketId, currentDriverId }
 interface DispatchState {
@@ -2367,11 +2389,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
     return driverByUserId?.id || null;
   };
 
-  const buildRideDataFromDbRide = (ride: any) => ({
+  const buildRideDataFromDbRide = (ride: any) => {
+    const normalizedRideType = normalizeVehicleType(ride.vehicle_type || "saloon");
+    return {
     id: ride.id,
     riderId: ride.rider_id,
-    rideType: ride.vehicle_type || "saloon",
-    vehicleType: ride.vehicle_type || "saloon",
+    rideType: normalizedRideType,
+    vehicleType: normalizedRideType,
     pickupLocation: {
       address: ride.pickup_address || "Unknown",
       latitude: ride.pickup_latitude || 0,
@@ -2388,7 +2412,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
     couponCode: ride.coupon_code || null,
     discountAmount: Number(ride.discount_amount || 0),
     paymentMethod: ride.payment_method || "cash",
-  });
+  };
+  };
 
   const buildFallbackDriverLocation = (rideId: string, driverId?: string | null): (DriverLocation & { rideId: string }) | null => {
     const rideInfo = activeRides.get(rideId);
@@ -2607,11 +2632,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
         // Save ride details to Supabase so it's persisted for ride history
         if (rideData.riderId) {
           try {
+            const normalizedRideVehicleType = normalizeVehicleType(
+              rideData.rideType || rideData.vehicleType || rideData.vehicle_type || "economy"
+            );
             const insertPayload: Record<string, any> = {
               id: rideData.id,
               rider_id: rideData.riderId,
               status: "pending",
-              vehicle_type: rideData.rideType || "economy",
+              vehicle_type: normalizedRideVehicleType,
               pickup_address: rideData.pickupLocation?.address || "Unknown",
               pickup_latitude: rideData.pickupLocation?.latitude || 0,
               pickup_longitude: rideData.pickupLocation?.longitude || 0,
@@ -2625,32 +2653,36 @@ export function setupSocketIO(httpServer: HTTPServer) {
               distance: Math.round(parseFloat(rideData.distanceKm || rideData.distanceMiles || 0)),
               estimated_duration: Math.round(parseFloat(rideData.durationMinutes || 0)),
               payment_method: rideData.paymentMethod || "cash",
+              otp: typeof rideData.otp === "string" ? rideData.otp : null,
             };
 
             console.log('🚕 Inserting ride into Supabase:', JSON.stringify(insertPayload));
 
-            let { data: insertedData, error: insertError } = await supabase
-              .from("rides")
-              .insert(insertPayload)
-              .select()
-              .single();
-
-            if (
-              insertError?.code === "PGRST204" &&
-              String(insertError.message || "").includes("payment_method")
-            ) {
-              const retryPayload = { ...insertPayload };
-              delete retryPayload.payment_method;
-              console.warn("⚠️ rides.payment_method is missing in Supabase schema cache; retrying ride insert without payment_method");
-
-              const retryResult = await supabase
+            const payloadToInsert = { ...insertPayload };
+            let insertedData: any = null;
+            let insertError: any = null;
+            for (let attempt = 0; attempt < 5; attempt += 1) {
+              const result = await supabase
                 .from("rides")
-                .insert(retryPayload)
+                .insert(payloadToInsert)
                 .select()
                 .single();
 
-              insertedData = retryResult.data;
-              insertError = retryResult.error;
+              insertedData = result.data;
+              insertError = result.error;
+              if (!insertError) {
+                break;
+              }
+
+              if (insertError?.code === "PGRST204") {
+                const missingColumn = String(insertError.message || "").match(/'([^']+)'/)?.[1];
+                if (missingColumn && Object.prototype.hasOwnProperty.call(payloadToInsert, missingColumn)) {
+                  delete payloadToInsert[missingColumn];
+                  console.warn(`⚠️ rides.${missingColumn} is missing in Supabase schema cache; retrying ride insert without ${missingColumn}`);
+                  continue;
+                }
+              }
+              break;
             }
 
             if (insertError) {
@@ -2728,7 +2760,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
       // Issue 10: Vehicle type matching
       // Map rider-requested ride types to compatible driver vehicle types
-      const requestedType = (rideData.rideType || rideData.vehicleType || rideData.vehicle_type || "economy").toLowerCase();
+      const requestedType = normalizeVehicleType(rideData.rideType || rideData.vehicleType || rideData.vehicle_type || "economy");
       const compatibleTypes = getCompatibleVehicleTypes(requestedType);
       console.log(`🚗 Requested vehicle type: "${requestedType}" → compatible: [${compatibleTypes.join(', ')}]`);
 
@@ -2746,7 +2778,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           }
 
           // Vehicle type filtering
-          const driverVehicle = (driver.vehicle_type || 'saloon').toLowerCase();
+          const driverVehicle = normalizeVehicleType(driver.vehicle_type || 'saloon');
           if (!compatibleTypes.includes(driverVehicle)) {
             console.log(`   ⏭️ Skipping driver ${driver.id} — vehicle "${driverVehicle}" not compatible with "${requestedType}"`);
             continue;
@@ -2759,9 +2791,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
               driverLocation.latitude,
               driverLocation.longitude
             );
+            const withinRadius = dist <= RADIUS_MILES;
             console.log(`   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle})`);
 
-            if (dist <= RADIUS_MILES) {
+            if (withinRadius) {
               heap.push({ driverId: driver.id, distance: dist, socketId: driverSocketId });
               addedDriverIds.add(driver.id);
             } else {
@@ -2792,7 +2825,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             continue;
           }
 
-            const driverVehicle = (driverRow?.vehicle_type || 'saloon').toLowerCase();
+            const driverVehicle = normalizeVehicleType(driverRow?.vehicle_type || 'saloon');
             if (!compatibleTypes.includes(driverVehicle)) {
               console.log(`   ⏭️ Skipping socket driver ${driverId} — vehicle "${driverVehicle}" not compatible`);
               vehicleOk = false;
@@ -2863,22 +2896,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
     };
 
   const getCompatibleVehicleTypes = (rideType: string): string[] => {
-    switch (rideType) {
+    const normalizedRideType = normalizeVehicleType(rideType);
+    switch (normalizedRideType) {
       case 'economy':
       case 'standard':
       case 'comfort':
       case 'saloon':
         // Saloon requests can be fulfilled by saloon and larger classes
-        return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'people carrier', 'minibus'];
+        return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'minibus'];
       case 'people_carrier':
-      case 'people carrier':
         // People carrier requests can be fulfilled by people carrier and larger
-        return ['people_carrier', 'people carrier', 'minibus'];
+        return ['people_carrier', 'minibus'];
       case 'minibus':
         // Minibus requests must stay minibus-only
         return ['minibus'];
       default:
-        return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'people carrier', 'minibus'];
+        return ['saloon', 'economy', 'standard', 'comfort', 'people_carrier', 'minibus'];
     }
   };
 
@@ -2891,7 +2924,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
       return null;
     }
 
-    const requestedType = (rideData.rideType || rideData.vehicleType || rideData.vehicle_type || "economy").toLowerCase();
+    const requestedType = normalizeVehicleType(rideData.rideType || rideData.vehicleType || rideData.vehicle_type || "economy");
     const compatibleTypes = getCompatibleVehicleTypes(requestedType);
 
     const heap = new MinHeap();
@@ -2920,7 +2953,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           continue;
         }
 
-        const driverVehicle = (driver.vehicle_type || 'saloon').toLowerCase();
+        const driverVehicle = normalizeVehicleType(driver.vehicle_type || 'saloon');
         if (!compatibleTypes.includes(driverVehicle)) {
           console.log(`   ⏭️ Skipping driver ${driver.id} — vehicle "${driverVehicle}" not compatible with "${requestedType}"`);
           continue;
@@ -2964,7 +2997,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           continue;
       }
 
-        const driverVehicle = (driverRow?.vehicle_type || 'saloon').toLowerCase();
+        const driverVehicle = normalizeVehicleType(driverRow?.vehicle_type || 'saloon');
         if (!compatibleTypes.includes(driverVehicle)) {
           console.log(`   ⏭️ Skipping socket driver ${driverId} — vehicle "${driverVehicle}" not compatible`);
           vehicleOk = false;
@@ -3198,13 +3231,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
     socket.on("ride:declined", async (data: { rideId: string, rideData?: any, driverId?: string }) => {
       console.log('❌ Ride declined by driver:', data.driverId, 'for ride:', data.rideId);
       const rideInfo = activeRides.get(data.rideId);
+      const dispState = dispatchQueues.get(data.rideId);
 
       if (rideInfo && data.driverId) {
         rideInfo.declinedBy.add(data.driverId);
       }
 
       // Advance the dispatch queue to the next nearest driver
-      const dispState = dispatchQueues.get(data.rideId);
       if (dispState) {
         if (dispState.timer) clearTimeout(dispState.timer);
         if (data.driverId) {

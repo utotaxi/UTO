@@ -48,6 +48,7 @@ export function TripCard({ trip, onPress }: TripCardProps) {
     return date.toLocaleTimeString("en-GB", {
       hour: "numeric",
       minute: "2-digit",
+      timeZone: "Europe/London",
     });
   };
 

@@ -607,6 +607,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/drivers/:id/active-rides", async (req: Request, res: Response) => {
+    try {
+      const requestedDriverId = req.params.id as string;
+      if (!requestedDriverId) {
+        return res.status(400).json({ error: "Driver id is required" });
+      }
+
+      // Accept either drivers.id or users.id to keep this endpoint resilient.
+      let resolvedDriverId = requestedDriverId;
+      const directDriver = await storage.getDriver(requestedDriverId);
+      if (!directDriver) {
+        const byUserId = await storage.getDriverByUserId(requestedDriverId);
+        if (!byUserId) {
+          return res.status(404).json({ error: "Driver not found" });
+        }
+        resolvedDriverId = byUserId.id;
+      }
+
+      const activeStatuses = ["accepted", "arrived", "in_progress", "arriving", "at_pickup"];
+      const { data: rides, error: ridesErr } = await supabase
+        .from("rides")
+        .select("*")
+        .eq("driver_id", resolvedDriverId)
+        .in("status", activeStatuses)
+        .order("accepted_at", { ascending: false, nullsFirst: false });
+
+      if (ridesErr) {
+        console.error("Get driver active rides error:", ridesErr);
+        return res.status(500).json({ error: "Failed to fetch active rides" });
+      }
+
+      const riderIds = Array.from(
+        new Set(
+          (rides || [])
+            .map((r: any) => r.rider_id)
+            .filter((id: any) => typeof id === "string" && id.length > 0)
+        )
+      );
+
+      let riderById = new Map<string, any>();
+      if (riderIds.length > 0) {
+        const { data: riders, error: riderErr } = await supabase
+          .from("users")
+          .select("id, full_name, phone")
+          .in("id", riderIds);
+        if (!riderErr && riders) {
+          riderById = new Map((riders as any[]).map((r) => [r.id, r]));
+        }
+      }
+
+      const normalized = (rides || []).map((ride: any) => {
+        const rider = riderById.get(ride.rider_id);
+        return {
+          id: ride.id,
+          riderId: ride.rider_id,
+          riderName: rider?.full_name || "Rider",
+          riderPhone: rider?.phone || "",
+          status: ride.status,
+          pickupAddress: ride.pickup_address,
+          pickupLatitude: ride.pickup_latitude,
+          pickupLongitude: ride.pickup_longitude,
+          dropoffAddress: ride.dropoff_address,
+          dropoffLatitude: ride.dropoff_latitude,
+          dropoffLongitude: ride.dropoff_longitude,
+          estimatedPrice: ride.estimated_price,
+          finalPrice: ride.final_price,
+          distance: ride.distance,
+          estimatedDuration: ride.estimated_duration,
+          paymentMethod: ride.payment_method || "cash",
+          otp: ride.otp || null,
+          walletDeduction: ride.wallet_deduction || 0,
+          expectedCollectAmount:
+            ride.expected_collect_amount !== undefined && ride.expected_collect_amount !== null
+              ? ride.expected_collect_amount
+              : ride.estimated_price || 0,
+        };
+      });
+
+      res.json({ rides: normalized });
+    } catch (error) {
+      console.error("Get driver active rides exception:", error);
+      res.status(500).json({ error: "Failed to fetch active rides" });
+    }
+  });
+
   app.get("/api/drivers/user/:userId", async (req: Request, res: Response) => {
     try {
       const driver = await storage.getDriverByUserId(req.params.userId as string);

@@ -1897,10 +1897,10 @@ const darkMapStyle = [
 
 // ── Scheduling helpers ──────────────────────────────────────────
 function formatDisplayDate(d: Date): string {
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 }
 function formatDisplayTime(d: Date): string {
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
 }
 
 export default function RideRequestScreen({ navigation, route }: any) {
@@ -2794,7 +2794,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
             >
               <Text style={schedStyles.calHeaderYear}>{scheduledDate.getFullYear()}</Text>
               <Text style={schedStyles.calHeaderDate}>
-                {scheduledDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                {scheduledDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' })}
               </Text>
             </Pressable>
 
@@ -2817,7 +2817,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                     <MaterialIcons name="chevron-left" size={28} color="#111827" />
                   </Pressable>
                   <Text style={schedStyles.calMonthLabel}>
-                    {new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+                    {new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'Europe/London' })}
                   </Text>
                   <Pressable
                     onPress={() => {

@@ -20,13 +20,14 @@ function fmtDateTimeFull(iso: string | null | undefined) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Europe/London',
   });
 }
 
 function fmtTime(iso: string | null | undefined) {
   if (!iso) return 'N/A';
   const d = new Date(iso);
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
 }
 
 export default function ScheduledJobDetailsScreen() {

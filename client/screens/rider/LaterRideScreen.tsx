@@ -40,10 +40,10 @@ interface PlaceSuggestion {
 
 // ── Helpers ────────────────────────────────────────────────────────
 function fmtTime(d: Date) {
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
 }
 function fmtDate(d: Date) {
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 }
 
 
@@ -433,7 +433,7 @@ export default function LaterRideScreen({ navigation }: any) {
             <View style={s.calBox}>
               <View style={s.calMonthRow}>
                 <Pressable onPress={() => { if (!canNavPrev) return; setCalendarMonth(p => { let m = p.month - 1, y = p.year; if (m < 0) { m = 11; y--; } return { year: y, month: m }; }); }} style={{ opacity: canNavPrev ? 1 : 0.2 }}><MaterialIcons name="chevron-left" size={28} color="#111827" /></Pressable>
-                <Text style={s.calMonthLabel}>{new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</Text>
+                <Text style={s.calMonthLabel}>{new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'Europe/London' })}</Text>
                 <Pressable onPress={() => { if (!canNavNext) return; setCalendarMonth(p => { let m = p.month + 1, y = p.year; if (m > 11) { m = 0; y++; } return { year: y, month: m }; }); }} style={{ opacity: canNavNext ? 1 : 0.2 }}><MaterialIcons name="chevron-right" size={28} color="#111827" /></Pressable>
               </View>
               <View style={s.calDayNames}>{['S','M','T','W','T','F','S'].map((dn, i) => <Text key={i} style={s.calDayName}>{dn}</Text>)}</View>

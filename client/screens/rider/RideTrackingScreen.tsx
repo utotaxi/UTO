@@ -1476,7 +1476,7 @@ const getDropoffTime = () => {
   if (!activeRide) return "";
   const now = new Date();
   const dropoffTime = new Date(now.getTime() + activeRide.durationMinutes * 60000);
-  return dropoffTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return dropoffTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
 };
 
 // ✅ ULTRA CLOSE ZOOM

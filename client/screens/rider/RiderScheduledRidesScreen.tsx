@@ -41,8 +41,8 @@ interface ScheduledRide {
 // ── Helpers ─────────────────────────────────────────────────────────
 function fmtDateTime(iso: string) {
   const d = new Date(iso);
-  const date = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const date = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/London' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
   return { date, time };
 }
 

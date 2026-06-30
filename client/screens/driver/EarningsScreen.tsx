@@ -174,6 +174,7 @@ export default function EarningsScreen() {
           day: "numeric",
           month: "short",
           year: "numeric",
+          timeZone: "Europe/London",
         });
         if (!dateGroups[key]) dateGroups[key] = [];
         dateGroups[key].push({
@@ -189,6 +190,7 @@ export default function EarningsScreen() {
             day: "numeric",
             month: "short",
             year: "numeric",
+            timeZone: "Europe/London",
           });
           if (!dateGroups[key]) dateGroups[key] = [];
           dateGroups[key].push({
@@ -298,7 +300,7 @@ export default function EarningsScreen() {
   // ─── Date range label ───
   const dateRangeLabel = useMemo(() => {
     const now = new Date();
-    const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
     switch (selectedFilter) {
       case "today":
         return `Today, ${fmt(now)}`;
@@ -321,7 +323,7 @@ export default function EarningsScreen() {
 
   const formatTime = (dateStr: string) => {
     const d = new Date(dateStr);
-    return d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" });
+    return d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", timeZone: "Europe/London" });
   };
 
   const handleFilterPress = useCallback((filter: TimeFilter) => {
@@ -677,6 +679,7 @@ export default function EarningsScreen() {
                       day: "numeric",
                       month: "long",
                       year: "numeric",
+                      timeZone: "Europe/London",
                     })}
                     {" at "}
                     {formatTime(selectedTrip.completedAt)}

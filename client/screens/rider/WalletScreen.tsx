@@ -77,7 +77,7 @@ export default function WalletScreen({ navigation }: any) {
           </ThemedText>
           <ThemedText style={styles.date}>
             {new Date(item.createdAt).toLocaleDateString("en-GB", {
-              day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
+              day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London"
             })}
           </ThemedText>
         </View>
