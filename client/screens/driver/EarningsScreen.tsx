@@ -18,6 +18,8 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useTheme } from "@/hooks/useTheme";
 import { useDriver, Trip } from "@/context/DriverContext";
 import { Spacing, BorderRadius, formatPrice, UTOColors } from "@/constants/theme";
+import { parseBackendTimestamp } from "@/lib/dateTime";
+import { getDriverDeductionDisplayLabel, isCancellationCreditDeduction } from "@shared/driverDeductions";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -46,6 +48,12 @@ const MONTH_SHORT = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
+
+const getSignedDeductionAmount = (deduction: { amount: number; type: string; reason?: string | null }): number => {
+  const amount = Number(deduction.amount || 0);
+  if (isCancellationCreditDeduction(deduction.type, deduction.reason)) return Math.abs(amount);
+  return amount < 0 ? amount : -Math.abs(amount);
+};
 
 export default function EarningsScreen() {
   const insets = useSafeAreaInsets();
@@ -148,7 +156,7 @@ export default function EarningsScreen() {
       let total = 0;
       let count = 0;
       const trips = tripHistory.filter((trip) => {
-        const td = new Date(trip.completedAt);
+        const td = parseBackendTimestamp(trip.completedAt);
         if (td >= cutoffDate && td <= cutoffEnd) {
           total += trip.farePrice;
           count += 1;
@@ -158,17 +166,16 @@ export default function EarningsScreen() {
       });
 
       driverDeductions.forEach((deduction) => {
-        const dd = new Date(deduction.createdAt);
+        const dd = parseBackendTimestamp(deduction.createdAt);
         if (dd >= cutoffDate && dd <= cutoffEnd) {
-          const isCredit = deduction.type === 'cancellation_credit';
-          total += isCredit ? deduction.amount : -deduction.amount;
+          total += getSignedDeductionAmount(deduction);
         }
       });
 
       // Group trips and cancellation fee deductions by date for sections.
       const dateGroups: Record<string, EarningsEntry[]> = {};
       trips.forEach((trip) => {
-        const d = new Date(trip.completedAt);
+        const d = parseBackendTimestamp(trip.completedAt);
         const key = d.toLocaleDateString("en-GB", {
           weekday: "long",
           day: "numeric",
@@ -183,7 +190,7 @@ export default function EarningsScreen() {
         } as EarningsEntry);
       });
       driverDeductions.forEach((deduction) => {
-        const dd = new Date(deduction.createdAt);
+        const dd = parseBackendTimestamp(deduction.createdAt);
         if (dd >= cutoffDate && dd <= cutoffEnd) {
           const key = dd.toLocaleDateString("en-GB", {
             weekday: "long",
@@ -208,23 +215,21 @@ export default function EarningsScreen() {
         return {
           title,
           data: data.sort((a, b) => {
-            const aDate = new Date(a.entryType === "deduction" ? a.createdAt : a.completedAt).getTime();
-            const bDate = new Date(b.entryType === "deduction" ? b.createdAt : b.completedAt).getTime();
+            const aDate = parseBackendTimestamp(a.entryType === "deduction" ? a.createdAt : a.completedAt).getTime() || 0;
+            const bDate = parseBackendTimestamp(b.entryType === "deduction" ? b.createdAt : b.completedAt).getTime() || 0;
             return bDate - aDate;
           }),
           dayTotal: data.reduce((sum, item) => {
             if (item.entryType === "deduction") {
-              // Cancellation credits add to the total, deductions subtract
-              const isCredit = item.type === 'cancellation_credit';
-              return isCredit ? sum + item.amount : sum - item.amount;
+              return sum + getSignedDeductionAmount(item);
             } else {
               return sum + item.farePrice;
             }
           }, 0),
         };
       }).sort((a, b) => {
-        const aDate = new Date(a.data[0]?.entryType === "deduction" ? a.data[0]?.createdAt : a.data[0]?.completedAt).getTime();
-        const bDate = new Date(b.data[0]?.entryType === "deduction" ? b.data[0]?.createdAt : b.data[0]?.completedAt).getTime();
+        const aDate = parseBackendTimestamp(a.data[0]?.entryType === "deduction" ? a.data[0]?.createdAt : a.data[0]?.completedAt).getTime() || 0;
+        const bDate = parseBackendTimestamp(b.data[0]?.entryType === "deduction" ? b.data[0]?.createdAt : b.data[0]?.completedAt).getTime() || 0;
         return bDate - aDate;
       });
 
@@ -249,17 +254,15 @@ export default function EarningsScreen() {
 
         let dayTotal = 0;
         tripHistory.forEach((trip) => {
-          const td = new Date(trip.completedAt);
+          const td = parseBackendTimestamp(trip.completedAt);
           if (td >= dayStart && td < dayEnd) {
             dayTotal += trip.farePrice;
           }
         });
         driverDeductions.forEach((deduction) => {
-          const dd = new Date(deduction.createdAt);
+          const dd = parseBackendTimestamp(deduction.createdAt);
           if (dd >= dayStart && dd < dayEnd) {
-            // Credits add, deductions subtract
-            const isCredit = deduction.type === 'cancellation_credit';
-            dayTotal += isCredit ? deduction.amount : -deduction.amount;
+            dayTotal += getSignedDeductionAmount(deduction);
           }
         });
 
@@ -322,7 +325,7 @@ export default function EarningsScreen() {
   }, [selectedFilter, selectedMonth, selectedYear]);
 
   const formatTime = (dateStr: string) => {
-    const d = new Date(dateStr);
+    const d = parseBackendTimestamp(dateStr);
     return d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", timeZone: "Europe/London" });
   };
 
@@ -502,9 +505,10 @@ export default function EarningsScreen() {
     if (isDeduction) {
       const deductionItem = item as any;
       // Check if this is a credit (rider cancelled) or deduction (driver cancelled)
-      const isCredit = deductionItem.type === 'cancellation_credit';
+      const isCredit = isCancellationCreditDeduction(deductionItem.type, deductionItem.reason);
       const displayColor = isCredit ? SUCCESS : "#EF4444";
-      const displayIcon = isCredit ? "+" : "-";
+      const signedAmount = getSignedDeductionAmount(deductionItem);
+      const displayIcon = signedAmount >= 0 ? "+" : "-";
       const displayDotColor = isCredit ? SUCCESS : "#EF4444";
 
       return (
@@ -521,13 +525,13 @@ export default function EarningsScreen() {
               </Text>
             </View>
             <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={2}>
-              {deductionItem.reason || deductionItem.type || "Cancellation"}
+              {getDriverDeductionDisplayLabel(deductionItem)}
             </Text>
           </View>
 
           <View style={styles.tripRight}>
             <Text style={[styles.tripFare, { color: displayColor }]}>
-              {displayIcon}{formatPrice(deductionItem.amount)}
+              {displayIcon}{formatPrice(Math.abs(signedAmount))}
             </Text>
           </View>
         </View>
@@ -674,7 +678,7 @@ export default function EarningsScreen() {
                   </View>
                   <Text style={[styles.tripDetailTitle, { color: C.text }]}>Ride Summary</Text>
                   <Text style={[styles.tripDetailDate, { color: C.textMid }]}>
-                    {new Date(selectedTrip.completedAt).toLocaleDateString("en-GB", {
+                    {parseBackendTimestamp(selectedTrip.completedAt).toLocaleDateString("en-GB", {
                       weekday: "long",
                       day: "numeric",
                       month: "long",

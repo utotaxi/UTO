@@ -447,21 +447,50 @@ export default function RideTrackingScreen({ navigation }: any) {
     }
   };
 
-  const handleCall = () => {
+  const getDialablePhone = (rawPhone?: string) => {
+    if (!rawPhone) return "";
+    return rawPhone.replace(/[^\d+]/g, "");
+  };
+
+  const handleCall = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (activeRide?.driverPhone) {
-      Linking.openURL(`tel:${activeRide.driverPhone}`);
-    } else {
+    const driverPhone = getDialablePhone(activeRide?.driverPhone);
+    if (!driverPhone) {
       Alert.alert("No Phone", "Driver phone not available.");
+      return;
+    }
+
+    const telUrl = `tel:${driverPhone}`;
+    try {
+      const canCall = await Linking.canOpenURL(telUrl);
+      if (canCall) {
+        await Linking.openURL(telUrl);
+      } else {
+        Alert.alert("Call Failed", "Unable to open phone dialer for this number.");
+      }
+    } catch {
+      Alert.alert("Call Failed", "Unable to call the driver right now.");
     }
   };
 
-  const handleMessage = () => {
+  const handleMessage = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (activeRide?.driverPhone) {
-      Linking.openURL(`sms:${activeRide.driverPhone}`);
-    } else {
+    const driverPhone = getDialablePhone(activeRide?.driverPhone);
+    if (!driverPhone) {
       Alert.alert("No Phone", "Driver phone not available.");
+      return;
+    }
+
+    const smsUrl = `sms:${driverPhone}`;
+    try {
+      const canMessage = await Linking.canOpenURL(smsUrl);
+      if (canMessage) {
+        await Linking.openURL(smsUrl);
+      } else {
+        Alert.alert("Message Failed", "Unable to open messaging for this number.");
+      }
+    } catch {
+      Alert.alert("Message Failed", "Unable to message the driver right now.");
     }
   };
 
@@ -1828,7 +1857,7 @@ return (
               <MaterialIcons name="person" size={24} color={theme.textSecondary} />
             </View>
             <View style={styles.driverInfo}>
-              <ThemedText style={styles.driverName}>{activeRide.driverName}</ThemedText>
+              <ThemedText style={styles.driverName}>{activeRide.driverName || "Your Driver"}</ThemedText>
               <View style={styles.vehicleRow}>
                 <ThemedText style={[styles.vehicleInfo, { color: theme.textSecondary }]}>
                   {activeRide.vehicleInfo}

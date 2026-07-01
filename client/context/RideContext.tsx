@@ -860,6 +860,7 @@ import { Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getSocket, connectAsRider, onRideAccepted, onRideUpdate } from "@/lib/socket";
 import { getApiUrl } from "@/lib/query-client";
+import { normalizeBackendTimestamp } from "@/lib/dateTime";
 import { useAuth } from "./AuthContext";
 import { sendLocalNotification } from "@/hooks/useNotifications";
 
@@ -1213,6 +1214,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               ...(update.status === "pending" && (update as any).driverCancelled
                 ? {
                   driverName: undefined,
+                  driverPhone: undefined,
                   driverRating: undefined,
                   vehicleInfo: undefined,
                   licensePlate: undefined,
@@ -1284,7 +1286,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
       ]);
 
       if (storedHistory) {
-        setRideHistory(JSON.parse(storedHistory));
+        const parsedHistory = JSON.parse(storedHistory);
+        const normalizedHistory = (parsedHistory as Ride[]).map((ride) => ({
+          ...ride,
+          createdAt: normalizeBackendTimestamp(ride.createdAt || new Date().toISOString()),
+          completedAt: ride.completedAt ? normalizeBackendTimestamp(ride.completedAt) : undefined,
+        }));
+        setRideHistory(normalizedHistory);
       }
 
       if (storedActive) {
@@ -1325,6 +1333,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 ...localActive,
                 status: serverRide.status as RideStatus,
                 acceptedAt: serverRideAny.acceptedAt || serverRideAny.accepted_at || localActive.acceptedAt,
+                driverName: serverRideAny.driverName || localActive.driverName,
+                driverPhone: serverRideAny.driverPhone || localActive.driverPhone,
+                vehicleInfo: serverRideAny.vehicleInfo || localActive.vehicleInfo,
+                licensePlate: serverRideAny.licensePlate || localActive.licensePlate,
+                driverRating: serverRideAny.driverRating || localActive.driverRating,
               });
             }
           }
@@ -1373,8 +1386,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
           paymentMethod: r.paymentMethod || undefined,
           paymentStatus: r.paymentStatus || undefined,
           paymentIntentId: r.paymentIntentId || undefined,
-          createdAt: r.requestedAt || new Date().toISOString(),
-          completedAt: r.completedAt || r.cancelledAt || new Date().toISOString(),
+          createdAt: normalizeBackendTimestamp(r.requestedAt || new Date().toISOString()),
+          completedAt: normalizeBackendTimestamp(r.completedAt || r.cancelledAt || new Date().toISOString()),
         }));
 
       // Merge: server rides take priority (they have ground-truth status)
@@ -1387,7 +1400,17 @@ export function RideProvider({ children }: { children: ReactNode }) {
         for (const [id, ride] of serverMap) {
           // Preserve local enrichment (driverName etc) if server doesn't have it
           const local = localMap.get(id);
-          merged.set(id, local ? { ...local, ...ride, driverName: ride.driverName || local.driverName } : ride);
+          merged.set(
+            id,
+            local
+              ? {
+                  ...local,
+                  ...ride,
+                  driverName: ride.driverName || local.driverName,
+                  driverPhone: ride.driverPhone || local.driverPhone,
+                }
+              : ride
+          );
         }
         // Add local-only entries (e.g. rides from a different device session)
         for (const [id, ride] of localMap) {
@@ -1415,6 +1438,52 @@ export function RideProvider({ children }: { children: ReactNode }) {
       refreshRideHistory();
     }
   }, [user?.id]);
+
+  // Ensure active ride always has driver details after reconnect/reopen.
+  useEffect(() => {
+    if (!activeRide?.id) return;
+    const needsDriverDetails =
+      ["accepted", "arrived", "in_progress"].includes(activeRide.status) &&
+      (!activeRide.driverName || !activeRide.driverPhone);
+    if (!needsDriverDetails) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const { api } = await import("@/lib/api");
+        const serverRide = await api.rides.get(activeRide.id);
+        const serverRideAny = serverRide as any;
+        if (cancelled || !serverRideAny) return;
+
+        const hasEnrichedData =
+          !!serverRideAny.driverName ||
+          !!serverRideAny.driverPhone ||
+          !!serverRideAny.vehicleInfo ||
+          !!serverRideAny.licensePlate;
+        if (!hasEnrichedData) return;
+
+        setActiveRide((current) => {
+          if (!current || current.id !== activeRide.id) return current;
+          const updated: Ride = {
+            ...current,
+            driverName: serverRideAny.driverName || current.driverName,
+            driverPhone: serverRideAny.driverPhone || current.driverPhone,
+            vehicleInfo: serverRideAny.vehicleInfo || current.vehicleInfo,
+            licensePlate: serverRideAny.licensePlate || current.licensePlate,
+            driverRating: serverRideAny.driverRating || current.driverRating,
+          };
+          AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(console.error);
+          return updated;
+        });
+      } catch (err) {
+        console.warn("Failed to hydrate active ride driver info:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRide?.id, activeRide?.status, activeRide?.driverName, activeRide?.driverPhone]);
 
   const calculateDynamicFare = (distanceMiles: number, durationMin: number, rideType: string): number => {
     const normalizePricingKey = (value: string) =>

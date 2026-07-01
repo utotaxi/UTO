@@ -6,7 +6,13 @@ import { getSocket, connectAsDriver, onNewRide, onRideUpdate, onRideExpired } fr
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
+import { normalizeBackendTimestamp } from "@/lib/dateTime";
 import { sendLocalNotification } from "@/hooks/useNotifications";
+import {
+  DRIVER_DEDUCTION_TYPE,
+  formatLiveRideCancellationPenalty,
+  isCancellationCreditDeduction,
+} from "@shared/driverDeductions";
 
 export interface DriverProfile {
   id?: string;
@@ -71,6 +77,12 @@ export interface Earnings {
   totalTrips: number;
   averageRating: number;
 }
+
+const getSignedDeductionAmount = (deduction: DriverDeduction): number => {
+  const amount = Number(deduction.amount || 0);
+  if (isCancellationCreditDeduction(deduction.type, deduction.reason)) return Math.abs(amount);
+  return amount < 0 ? amount : -Math.abs(amount);
+};
 
 export interface RideRequest {
   id: string;
@@ -424,7 +436,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (storedTrips) {
         const parsed = JSON.parse(storedTrips);
         if (parsed.length > 0) {
-          setTripHistory(parsed);
+          const normalizedCachedTrips = parsed.map((trip: any) => ({
+            ...trip,
+            completedAt: normalizeBackendTimestamp(trip.completedAt || new Date().toISOString()),
+          }));
+          setTripHistory(normalizedCachedTrips);
           console.log('✅ Loaded', parsed.length, 'cached trips from AsyncStorage');
         }
       }
@@ -518,7 +534,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             farePrice: typeof r.finalPrice === 'number' && r.finalPrice > 0 ? r.finalPrice : (r.estimatedPrice || 0),
             distanceMiles: r.distance || 0,
             durationMinutes: r.estimatedDuration || 0,
-            completedAt: r.completedAt || r.requestedAt || new Date().toISOString(),
+            completedAt: normalizeBackendTimestamp(r.completedAt || r.requestedAt || new Date().toISOString()),
             rating: r.driverRating || undefined,
           }));
           setTripHistory(serverTrips);
@@ -532,9 +548,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       // ── FETCH DEDUCTIONS FROM SUPABASE ──
       try {
         const d = await api.drivers.getDeductions(driver.id);
+        const normalizedServerDeductions = (d || []).map((entry: any) => ({
+          ...entry,
+          createdAt: normalizeBackendTimestamp(entry.createdAt || entry.created_at || new Date().toISOString()),
+        }));
 
         // ── Also add cancelled rides with fees as deduction entries ──
-        let allDeductions = [...d];
+        let allDeductions = [...normalizedServerDeductions];
         try {
           const rides = await api.rides.getByDriver(driver.id);
           if (rides && rides.length > 0) {
@@ -556,18 +576,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
               if (feeAmount > 0) {
                 // Check if this deduction already exists (avoid duplicates)
-                const deductionExists = allDeductions.some((d: any) => d.id === `ride_${ride.id}_cancellation`);
+                const driverPenaltyLabel = formatLiveRideCancellationPenalty(ride.id);
+                const deductionExists = allDeductions.some((d: any) =>
+                  d.reason === driverPenaltyLabel || d.type === driverPenaltyLabel
+                );
                 if (!deductionExists) {
                   const cancelledByRider = ride.paymentStatus === 'cancellation_fee_wallet_charged';
                   allDeductions.push({
                     id: `ride_${ride.id}_cancellation`,
                     driverId: driver.id,
-                    amount: feeAmount,
-                    type: cancelledByRider ? 'cancellation_credit' : 'cancellation_fee',
+                    amount: cancelledByRider ? Math.abs(feeAmount) : -Math.abs(feeAmount),
+                    type: cancelledByRider
+                      ? DRIVER_DEDUCTION_TYPE.COMMISSION
+                      : DRIVER_DEDUCTION_TYPE.PENALTY,
                     reason: cancelledByRider
                       ? `Cancellation Fee Credit - Passenger Cancelled - ${ride.pickupAddress || 'Trip'}`
-                      : `Cancellation Fee - Driver Cancelled - ${ride.pickupAddress || 'Trip'}`,
-                    createdAt: ride.cancelledAt || ride.updatedAt || new Date().toISOString(),
+                      : driverPenaltyLabel,
+                    createdAt: normalizeBackendTimestamp(ride.cancelledAt || ride.updatedAt || new Date().toISOString()),
                   });
                 }
               }
@@ -882,12 +907,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
         if (isAtPickup && activeRideRequest.estimatedFare > 0) {
           const penaltyAmount = Number((activeRideRequest.estimatedFare * 0.5).toFixed(2));
+          const penaltyLabel = formatLiveRideCancellationPenalty(activeRideRequest.id);
           const localDeduction: DriverDeduction = {
             id: `local_cancel_${activeRideRequest.id}`,
             driverId: driverProfile?.id || user?.id || "",
-            amount: penaltyAmount,
-            type: "cancel_at_pickup_penalty",
-            reason: `50% cancellation penalty for ride ${activeRideRequest.id}`,
+            amount: -Math.abs(penaltyAmount),
+            type: DRIVER_DEDUCTION_TYPE.PENALTY,
+            reason: penaltyLabel,
             createdAt: new Date().toISOString(),
             cancelled_by: activeRideRequest.cancelled_by,
           };
@@ -1208,9 +1234,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     driverDeductions.forEach((deduction) => {
       const deductionDate = new Date(deduction.createdAt);
-      // Cancellation credits (rider cancelled) add to earnings; other deductions subtract
-      const isCredit = deduction.type === 'cancellation_credit';
-      const amount = isCredit ? deduction.amount : -deduction.amount;
+      const amount = getSignedDeductionAmount(deduction);
 
       if (deductionDate >= monthStart) {
         thisMonth += amount;
