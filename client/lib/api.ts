@@ -251,6 +251,15 @@ export const api = {
       return res.json();
     },
 
+    async authorizeRide(userId: string, rideId: string, amount: number): Promise<{ success: boolean; paymentIntentId: string }> {
+      const res = await apiRequest("POST", "/api/payments/authorize-ride", { userId, rideId, amount });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to authorize card");
+      }
+      return data;
+    },
+
     async setupIntent(userId: string): Promise<{ clientSecret: string }> {
       const res = await apiRequest("POST", "/api/payments/setup-intent", { userId });
       return res.json();

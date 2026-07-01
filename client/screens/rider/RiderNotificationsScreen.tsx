@@ -119,7 +119,7 @@ export default function RiderNotificationsScreen({ navigation }: any) {
     try {
       const key = user?.id ? `${NOTIF_PREFS_KEY}_${user.id}` : NOTIF_PREFS_KEY;
       await AsyncStorage.setItem(key, JSON.stringify(updated));
-      setLastSaved(new Date().toLocaleTimeString());
+      setLastSaved(new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/London" }));
     } catch (err) {
       console.warn("Failed to save notification prefs:", err);
     }

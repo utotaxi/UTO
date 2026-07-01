@@ -42,6 +42,65 @@ export async function createPaymentIntent(
   }
 }
 
+export async function authorizeSavedCard(
+  stripeCustomerId: string,
+  amount: number,
+  rideId: string,
+  currency: string = "gbp"
+): Promise<{ success: boolean; paymentIntentId?: string; error?: string }> {
+  if (!stripe) {
+    return { success: false, error: "Stripe is not configured" };
+  }
+
+  if (!stripeCustomerId) {
+    return { success: false, error: "No Stripe customer ID provided" };
+  }
+
+  if (amount <= 0) {
+    return { success: false, error: "Invalid authorization amount" };
+  }
+
+  try {
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: stripeCustomerId,
+      type: "card",
+    });
+
+    const paymentMethodId = paymentMethods.data?.[0]?.id;
+    if (!paymentMethodId) {
+      return { success: false, error: "No saved card found for this customer" };
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency,
+      customer: stripeCustomerId,
+      payment_method: paymentMethodId,
+      capture_method: "manual",
+      confirm: true,
+      off_session: true,
+      description: `Ride authorization for ride ${rideId}`,
+      metadata: {
+        ride_id: rideId,
+        charge_type: "ride_authorization",
+      },
+    });
+
+    if (paymentIntent.status === "requires_capture") {
+      return { success: true, paymentIntentId: paymentIntent.id };
+    }
+
+    return {
+      success: false,
+      paymentIntentId: paymentIntent.id,
+      error: `Authorization status: ${paymentIntent.status}`,
+    };
+  } catch (error: any) {
+    console.error("Error authorizing saved card:", error.message || error);
+    return { success: false, error: error.message || "Unknown Stripe authorization error" };
+  }
+}
+
 export async function createCustomer(email: string, name: string): Promise<string | null> {
   if (!stripe) {
     console.error("Stripe is not configured");
@@ -132,6 +191,52 @@ export async function confirmPayment(paymentIntentId: string): Promise<boolean> 
   } catch (error) {
     console.error("Error confirming payment:", error);
     return false;
+  }
+}
+
+export async function capturePaymentIntent(
+  paymentIntentId: string,
+  amount?: number
+): Promise<{ success: boolean; paymentIntentId?: string; error?: string }> {
+  if (!stripe) {
+    return { success: false, error: "Stripe is not configured" };
+  }
+
+  if (!paymentIntentId) {
+    return { success: false, error: "No PaymentIntent ID provided" };
+  }
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status === "succeeded") {
+      return { success: true, paymentIntentId };
+    }
+
+    if (paymentIntent.status !== "requires_capture") {
+      return {
+        success: false,
+        paymentIntentId,
+        error: `PaymentIntent is ${paymentIntent.status}, not requires_capture`,
+      };
+    }
+
+    const captured = await stripe.paymentIntents.capture(paymentIntentId, {
+      ...(amount && amount > 0 ? { amount_to_capture: Math.round(amount * 100) } : {}),
+    });
+
+    if (captured.status === "succeeded") {
+      return { success: true, paymentIntentId: captured.id };
+    }
+
+    return {
+      success: false,
+      paymentIntentId: captured.id,
+      error: `Capture status: ${captured.status}`,
+    };
+  } catch (error: any) {
+    console.error("Error capturing payment intent:", error.message || error);
+    return { success: false, paymentIntentId, error: error.message || "Unknown Stripe capture error" };
   }
 }
 

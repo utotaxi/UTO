@@ -2,7 +2,7 @@
 // Helper to reassign a ride to the next nearest available driver
 
 import { supabase } from "../db";
-import { io } from "../socket"; // Assuming socket instance exported from server/socket.ts
+import { io } from "../socket";
 
 /**
  * Find the nearest online driver (excluding the current driver) and assign the ride.

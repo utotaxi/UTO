@@ -1,4 +1,4 @@
-import { supabase } from './server/db.js';
+import { supabase } from '../server/db';
 
 async function check() {
   const { data, error } = await supabase.from('users').select('id, full_name, wallet_balance').limit(5);

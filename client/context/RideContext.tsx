@@ -883,11 +883,13 @@ export interface Ride {
   durationMinutes: number;
   driverName?: string;
   driverRating?: number;
+  driverPhone?: string;
   vehicleInfo?: string;
   licensePlate?: string;
   otp?: string;
   paymentMethod?: string;
   paymentStatus?: string;
+  paymentIntentId?: string;
   walletDeduction?: number;
   expectedCollectAmount?: number;
   couponCode?: string | null;
@@ -995,6 +997,15 @@ export function RideProvider({ children }: { children: ReactNode }) {
             ...current,
             status: "accepted",
             acceptedAt: data.acceptedAt || new Date().toISOString(),
+            ...((data as any).driverInfo
+              ? {
+                driverName: (data as any).driverInfo.driverName,
+                driverPhone: (data as any).driverInfo.driverPhone,
+                vehicleInfo: (data as any).driverInfo.vehicleInfo,
+                licensePlate: (data as any).driverInfo.licensePlate,
+                driverRating: (data as any).driverInfo.driverRating,
+              }
+              : {}),
           };
           AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(console.error);
           return updated;
@@ -1213,6 +1224,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               ...(update.status === "accepted" && (update as any).driverInfo
                 ? {
                   driverName: (update as any).driverInfo.driverName,
+                  driverPhone: (update as any).driverInfo.driverPhone,
                   vehicleInfo: (update as any).driverInfo.vehicleInfo,
                   licensePlate: (update as any).driverInfo.licensePlate,
                   driverRating: (update as any).driverInfo.driverRating,
@@ -1357,8 +1369,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
           durationMinutes: r.estimatedDuration || 0,
           driverName: r.driverName || undefined,
           driverRating: r.driverRating || undefined,
+          driverPhone: r.driverPhone || undefined,
           paymentMethod: r.paymentMethod || undefined,
           paymentStatus: r.paymentStatus || undefined,
+          paymentIntentId: r.paymentIntentId || undefined,
           createdAt: r.requestedAt || new Date().toISOString(),
           completedAt: r.completedAt || r.cancelledAt || new Date().toISOString(),
         }));
@@ -1577,6 +1591,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
       discountedFare,
       createdAt: new Date().toISOString(),
     };
+
+    if (paymentMethod === "card" && user?.id) {
+      try {
+        const { api } = await import('@/lib/api');
+        const authorization = await api.payments.authorizeRide(user.id, newRide.id, discountedFare);
+        newRide.paymentIntentId = authorization.paymentIntentId;
+        newRide.paymentStatus = "authorized";
+      } catch (err: any) {
+        console.error("Failed to authorize card for ride:", err);
+        throw new Error(err?.message || "Could not authorize your card. Please try again or choose cash.");
+      }
+    }
 
     console.log(`🚕 Ride created: distance=${distanceMiles}mi, duration=${durationMinutes}min, fare=${fullFare}`);
 

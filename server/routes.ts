@@ -3,7 +3,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
 import { setupSocketIO } from "./socket";
-import { createPaymentIntent, createCustomer, confirmPayment, createSetupIntent, getPaymentMethods, deletePaymentMethod } from "./stripe";
+import { authorizeSavedCard, createPaymentIntent, createCustomer, confirmPayment, createSetupIntent, getPaymentMethods, deletePaymentMethod } from "./stripe";
 import { insertUserSchema, insertRideSchema, insertDriverSchema } from "@shared/schema";
 import { supabase } from "./db";
 
@@ -864,6 +864,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Create payment intent error:", error);
       res.status(500).json({ error: "Failed to create payment intent" });
+    }
+  });
+
+  app.post("/api/payments/authorize-ride", async (req: Request, res: Response) => {
+    try {
+      const { userId, rideId, amount } = req.body;
+
+      if (!userId || !rideId || !amount || amount <= 0) {
+        return res.status(400).json({ error: "userId, rideId and a positive amount are required" });
+      }
+
+      const user = await storage.getUser(userId as string);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      let customerId = user.stripeCustomerId;
+      if (!customerId) {
+        customerId = await createCustomer(user.email, user.fullName || "User");
+        if (customerId) {
+          await storage.updateUser(userId as string, { stripeCustomerId: customerId });
+        }
+      }
+
+      if (!customerId) {
+        return res.status(400).json({ error: "No Stripe customer available" });
+      }
+
+      const result = await authorizeSavedCard(customerId, Number(amount), String(rideId), "gbp");
+      if (!result.success) {
+        return res.status(402).json({ error: result.error || "Failed to authorize saved card" });
+      }
+
+      res.json({ success: true, paymentIntentId: result.paymentIntentId });
+    } catch (error) {
+      console.error("Authorize ride payment error:", error);
+      res.status(500).json({ error: "Failed to authorize ride payment" });
     }
   });
 
