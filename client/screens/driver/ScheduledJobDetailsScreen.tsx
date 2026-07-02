@@ -146,6 +146,26 @@ export default function ScheduledJobDetailsScreen() {
           </View>
 
           <View style={s.section}>
+            <Text style={s.sectionTitle}>Rider Details</Text>
+            <View style={s.detailRow}>
+              <Text style={s.detailLabel}>Name:</Text>
+              <Text style={s.detailValue}>{booking.rider_name || 'Rider'}</Text>
+            </View>
+            {!!booking.rider_phone && (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>Phone:</Text>
+                <Text style={s.detailValue}>{booking.rider_phone}</Text>
+              </View>
+            )}
+            {!!booking.rider_email && (
+              <View style={s.detailRow}>
+                <Text style={s.detailLabel}>Email:</Text>
+                <Text style={s.detailValue}>{booking.rider_email}</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={s.section}>
             <Text style={s.sectionTitle}>Route Details</Text>
             <View style={s.detailRowStack}>
               <Text style={s.detailLabel}>Pickup:</Text>

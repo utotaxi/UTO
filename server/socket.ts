@@ -2235,6 +2235,114 @@ import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 export const serverRideEmitter = new EventEmitter();
 export let io: Server;
 
+// ─── Scheduled booking → live ride bridge ─────────────────────────────────
+// Populated inside setupSocketIO (needs access to the in-memory dispatch state).
+// Used by the scheduled-bookings activation engine in routes.ts.
+export const scheduledRideHooks: {
+  // Dispatch an unassigned scheduled booking exactly like an immediate booking
+  dispatchScheduledRide: ((rideData: any) => Promise<void>) | null;
+  // Hand an already-accepted scheduled booking straight to its driver's home screen
+  activateAcceptedScheduledRide: ((rideData: any, driverId: string) => Promise<boolean>) | null;
+  // Cancel a live ride that originated from a scheduled booking (rider/driver cancelled the booking)
+  cancelScheduledLiveRide: ((rideId: string, cancelledBy?: string) => Promise<void>) | null;
+} = {
+  dispatchScheduledRide: null,
+  activateAcceptedScheduledRide: null,
+  cancelScheduledLiveRide: null,
+};
+
+const SCHEDULED_RIDE_ID_PREFIX = "sched_";
+
+export const isScheduledLiveRideId = (rideId?: string | null): boolean =>
+  typeof rideId === "string" && rideId.startsWith(SCHEDULED_RIDE_ID_PREFIX);
+
+// Keep the source later_bookings / web_booker row in sync with the live ride status
+async function syncScheduledBookingForRide(rideId: string, status: string, extra?: Record<string, any>) {
+  if (!isScheduledLiveRideId(rideId)) return;
+  for (const table of ["later_bookings", "web_booker"] as const) {
+    try {
+      let { data, error } = await supabase
+        .from(table)
+        .update({ status, updated_at: new Date().toISOString(), ...(extra || {}) })
+        .eq("live_ride_id", rideId)
+        .select();
+
+      // If an optional column is missing in this table, retry with the bare status update
+      if (error && extra && /column/i.test(String(error.message || ""))) {
+        const retry = await supabase
+          .from(table)
+          .update({ status, updated_at: new Date().toISOString() })
+          .eq("live_ride_id", rideId)
+          .select();
+        data = retry.data;
+        error = retry.error;
+      }
+
+      if (!error && data && data.length > 0) {
+        console.log(`🔄 Synced scheduled booking in ${table} (live ride ${rideId}) → ${status}`);
+        try {
+          io.emit("later-booking:update", { type: "live_status", booking: { ...data[0], source_table: table } });
+        } catch (_) { /* non-critical */ }
+        return;
+      }
+    } catch (err) {
+      console.warn(`⚠️ Could not sync scheduled booking status in ${table} for ride ${rideId}:`, err);
+    }
+  }
+}
+
+// No driver could be found for the activated booking — clear the live ride link
+// so the activation engine can retry dispatching it on a later cycle.
+async function releaseScheduledBookingForRetry(rideId: string) {
+  if (!isScheduledLiveRideId(rideId)) return;
+  for (const table of ["later_bookings", "web_booker"] as const) {
+    try {
+      const { data, error } = await supabase
+        .from(table)
+        .update({ live_ride_id: null, updated_at: new Date().toISOString() })
+        .eq("live_ride_id", rideId)
+        .select();
+      if (!error && data && data.length > 0) {
+        console.log(`🔁 Released scheduled booking in ${table} for retry (live ride ${rideId})`);
+        return;
+      }
+    } catch (err) {
+      console.warn(`⚠️ Could not release scheduled booking for retry in ${table} (ride ${rideId}):`, err);
+    }
+  }
+}
+
+// The assigned driver cancelled the live ride and no reassignment was possible —
+// release the booking back to the pool (unassigned) so other drivers can get it.
+async function releaseScheduledBookingAssignment(rideId: string) {
+  if (!isScheduledLiveRideId(rideId)) return;
+  for (const table of ["later_bookings", "web_booker"] as const) {
+    const releasedStatus = table === "web_booker" ? "marketplace" : "scheduled";
+    try {
+      const { data, error } = await supabase
+        .from(table)
+        .update({
+          status: releasedStatus,
+          driver_id: null,
+          assigned_driver_id: null,
+          live_ride_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("live_ride_id", rideId)
+        .select();
+      if (!error && data && data.length > 0) {
+        console.log(`🔁 Released scheduled booking assignment in ${table} (live ride ${rideId})`);
+        try {
+          io.emit("later-booking:update", { type: "released", booking: { ...data[0], source_table: table } });
+        } catch (_) { /* non-critical */ }
+        return;
+      }
+    } catch (err) {
+      console.warn(`⚠️ Could not release scheduled booking assignment in ${table} (ride ${rideId}):`, err);
+    }
+  }
+}
+
 interface DriverLocation {
   driverId: string;
   latitude: number;
@@ -2415,6 +2523,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
     couponCode: ride.coupon_code || null,
     discountAmount: Number(ride.discount_amount || 0),
     paymentMethod: ride.payment_method || "cash",
+    otp: ride.otp || null,
   };
   };
 
@@ -2535,6 +2644,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
         console.error(`❌ Failed to cancel ride ${rideId} in DB:`, dbErr);
       }
       dispatchQueues.delete(rideId);
+
+      // Scheduled bookings are not lost — release them so the activation
+      // engine can retry the dispatch on a later cycle.
+      await releaseScheduledBookingForRetry(rideId);
       return;
     }
 
@@ -2881,6 +2994,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
           } catch (dbErr) {
             console.error(`❌ Failed to cancel ride ${rideData.id} in DB:`, dbErr);
           }
+
+          // Scheduled bookings are not lost — release them so the activation
+          // engine can retry the dispatch on a later cycle.
+          await releaseScheduledBookingForRetry(rideData.id);
         }
         return;
       }
@@ -3046,6 +3163,239 @@ export function setupSocketIO(httpServer: HTTPServer) {
       cancelled: false,
     } as DispatchState;
   }
+
+  // ─── Scheduled booking → live ride hooks (used by the activation engine) ──
+
+  // Unassigned scheduled booking: dispatch to nearby drivers like an ASAP ride
+  scheduledRideHooks.dispatchScheduledRide = async (rideData: any) => {
+    const riderSocketId = connectedRiders.get(rideData.riderId) || null;
+
+    // Let the rider app know their scheduled ride is now live (pending a driver)
+    try {
+      io.to(`rider:${rideData.riderId}`).emit("ride:scheduled_activated", {
+        ride: rideData,
+        status: "pending",
+      });
+    } catch (_) { /* non-critical */ }
+
+    await handleRideRequest(rideData, riderSocketId);
+  };
+
+  // Scheduled booking already accepted by a driver: put it straight on that
+  // driver's home screen in the "accepted" phase (no need to re-accept).
+  scheduledRideHooks.activateAcceptedScheduledRide = async (rideData: any, rawDriverId: string): Promise<boolean> => {
+    const actualDriverId = await resolveDriverTableId(rawDriverId);
+    if (!actualDriverId) {
+      console.warn(`⚠️ Cannot activate scheduled ride ${rideData.id} — driver ${rawDriverId} not found`);
+      return false;
+    }
+
+    const acceptedAt = new Date().toISOString();
+    const insertPayload: Record<string, any> = {
+      id: rideData.id,
+      rider_id: rideData.riderId,
+      driver_id: actualDriverId,
+      status: "accepted",
+      accepted_at: acceptedAt,
+      vehicle_type: normalizeVehicleType(rideData.rideType || rideData.vehicleType || "saloon"),
+      pickup_address: rideData.pickupLocation?.address || "Unknown",
+      pickup_latitude: rideData.pickupLocation?.latitude || 0,
+      pickup_longitude: rideData.pickupLocation?.longitude || 0,
+      dropoff_address: rideData.dropoffLocation?.address || "Unknown",
+      dropoff_latitude: rideData.dropoffLocation?.latitude || 0,
+      dropoff_longitude: rideData.dropoffLocation?.longitude || 0,
+      estimated_price: rideData.farePrice || 0,
+      distance: Math.round(parseFloat(rideData.distanceMiles || 0)),
+      estimated_duration: Math.round(parseFloat(rideData.durationMinutes || 0)),
+      payment_method: rideData.paymentMethod || "cash",
+      otp: typeof rideData.otp === "string" ? rideData.otp : null,
+    };
+
+    // Insert with the same missing-column retry pattern as handleRideRequest
+    const payloadToInsert = { ...insertPayload };
+    let insertError: any = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const result = await supabase.from("rides").insert(payloadToInsert).select().single();
+      insertError = result.error;
+      if (!insertError) break;
+
+      if (insertError?.code === "PGRST204") {
+        const missingColumn = String(insertError.message || "").match(/'([^']+)'/)?.[1];
+        if (missingColumn && Object.prototype.hasOwnProperty.call(payloadToInsert, missingColumn)) {
+          delete payloadToInsert[missingColumn];
+          console.warn(`⚠️ rides.${missingColumn} missing in schema cache; retrying scheduled ride insert without it`);
+          continue;
+        }
+      }
+      break;
+    }
+
+    if (insertError) {
+      console.error(`❌ Failed to insert live ride for scheduled booking ${rideData.scheduledBookingId}:`, JSON.stringify(insertError));
+      return false;
+    }
+
+    // Register in-memory state so all live status updates flow normally
+    const riderSocketId = connectedRiders.get(rideData.riderId) || "";
+    const driverSocketId = connectedDrivers.get(actualDriverId);
+    activeRides.set(rideData.id, {
+      riderSocketId,
+      riderId: rideData.riderId,
+      declinedBy: new Set(),
+      rideData,
+      driverSocketId,
+    });
+
+    // Distance from the driver's last known location to the pickup
+    let pickupDistance = 0;
+    try {
+      const driverLocation = await getLatestDriverLocation(rideData.id, actualDriverId, driverSocketId);
+      if (driverLocation && rideData.pickupLocation?.latitude && rideData.pickupLocation?.longitude) {
+        pickupDistance = Math.round(
+          haversineDistanceMiles(
+            rideData.pickupLocation.latitude,
+            rideData.pickupLocation.longitude,
+            driverLocation.latitude,
+            driverLocation.longitude,
+          ) * 100,
+        ) / 100;
+      }
+    } catch (_) { /* non-critical */ }
+
+    const enrichedRide = {
+      ...rideData,
+      pickupDistance,
+      scheduledPreAccepted: true,
+      acceptedAt,
+      _dispatchedTo: actualDriverId,
+    };
+
+    console.log(`📡 Activating scheduled ride ${rideData.id} for its assigned driver ${actualDriverId}`);
+    io.to(`driver:${actualDriverId}`).emit("ride:new", enrichedRide);
+    if (rawDriverId !== actualDriverId) {
+      io.to(`driver:${rawDriverId}`).emit("ride:new", enrichedRide);
+    }
+
+    // Push notification so the driver is alerted even with the app in background
+    try {
+      const { data: driverRow } = await supabase
+        .from("drivers")
+        .select("user_id")
+        .eq("id", actualDriverId)
+        .single();
+
+      if (driverRow?.user_id) {
+        const { data: userRow } = await supabase
+          .from("users")
+          .select("push_token")
+          .eq("id", driverRow.user_id)
+          .single();
+
+        if (userRow?.push_token) {
+          fetch("https://exp.host/--/api/v2/push/send", {
+            method: "POST",
+            headers: { "Accept": "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: userRow.push_token,
+              sound: "default",
+              title: "🗓 Scheduled Ride Starting",
+              body: `Your scheduled pickup from ${rideData.pickupLocation?.address || "the rider"} is in 15 minutes — head to the pickup now.`,
+              data: { type: "scheduled_ride_live", rideId: rideData.id },
+              priority: "high",
+            }),
+          }).catch((pushErr) => {
+            console.warn(`⚠️ Push notification failed for driver ${actualDriverId}:`, pushErr);
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn(`⚠️ Could not send scheduled-ride push to driver ${actualDriverId}:`, pushErr);
+    }
+
+    // Tell the rider their scheduled ride is live, including their driver's details
+    try {
+      const { data: driverProfile } = await supabase
+        .from("drivers")
+        .select("vehicle_make, vehicle_model, license_plate, rating, user_id")
+        .eq("id", actualDriverId)
+        .maybeSingle();
+      const { data: driverUser } = driverProfile?.user_id
+        ? await supabase
+          .from("users")
+          .select("full_name, phone")
+          .eq("id", driverProfile.user_id)
+          .maybeSingle()
+        : { data: null };
+
+      io.to(`rider:${rideData.riderId}`).emit("ride:scheduled_activated", {
+        ride: rideData,
+        status: "accepted",
+        acceptedAt,
+        driverInfo: {
+          driverName: driverUser?.full_name || "Your Driver",
+          driverPhone: driverUser?.phone || "",
+          vehicleInfo: [driverProfile?.vehicle_make, driverProfile?.vehicle_model].filter(Boolean).join(" "),
+          licensePlate: driverProfile?.license_plate || "",
+          driverRating: driverProfile?.rating || 5.0,
+        },
+      });
+    } catch (riderNotifyErr) {
+      console.warn(`⚠️ Could not notify rider about activated scheduled ride ${rideData.id}:`, riderNotifyErr);
+    }
+
+    return true;
+  };
+
+  // The rider or driver cancelled the scheduled booking after it went live
+  scheduledRideHooks.cancelScheduledLiveRide = async (rideId: string, cancelledBy?: string) => {
+    // Stop any in-flight dispatch
+    const dispState = dispatchQueues.get(rideId);
+    if (dispState) {
+      if (dispState.timer) clearTimeout(dispState.timer);
+      dispState.cancelled = true;
+      dispatchQueues.delete(rideId);
+      if (dispState.currentDriverId) {
+        io.to(`driver:${dispState.currentDriverId}`).emit("ride:expired", { rideId });
+      }
+      console.log(`🛑 Dispatch queue cancelled for scheduled live ride ${rideId}`);
+    }
+
+    try {
+      const { data: ride } = await supabase
+        .from("rides")
+        .select("*")
+        .eq("id", rideId)
+        .maybeSingle();
+
+      if (ride && !["completed", "cancelled"].includes(ride.status)) {
+        await supabase
+          .from("rides")
+          .update({
+            status: "cancelled",
+            cancelled_at: new Date().toISOString(),
+            cancellation_reason: `Scheduled booking cancelled by ${cancelledBy || "rider"}`,
+          })
+          .eq("id", rideId);
+
+        const cancelUpdate = { rideId, status: "cancelled", cancellationFee: 0, chargedVia: "none" };
+        if (ride.driver_id) {
+          io.to(`driver:${ride.driver_id}`).emit("ride:update", cancelUpdate);
+        }
+        const rideInfo = activeRides.get(rideId);
+        if (rideInfo?.driverSocketId) {
+          io.to(rideInfo.driverSocketId).emit("ride:update", cancelUpdate);
+        }
+        if (ride.rider_id) {
+          io.to(`rider:${ride.rider_id}`).emit("ride:update", cancelUpdate);
+        }
+        console.log(`✅ Scheduled live ride ${rideId} cancelled (by ${cancelledBy || "rider"})`);
+      }
+    } catch (err) {
+      console.error(`❌ Failed to cancel scheduled live ride ${rideId}:`, err);
+    }
+
+    activeRides.delete(rideId);
+  };
 
   io.on("connection", (socket: Socket) => {
     console.log(`✅ Client connected: ${socket.id}`);
@@ -3387,6 +3737,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
             .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
             .eq("id", data.rideId);
           io.emit("ride:update", { rideId: data.rideId, status: "cancelled_no_drivers" });
+
+          // If this was a scheduled booking, release it back to the pool so
+          // other drivers can pick it up on the next activation cycle.
+          await releaseScheduledBookingAssignment(data.rideId);
         }
       } catch (err) {
         console.error("Error processing driver cancel at pickup:", err);
@@ -3438,6 +3792,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.error("❌ Failed to update ride on accept:", acceptUpdateError);
         } else {
           console.log(`✅ Ride ${data.rideId} driver_id=${actualDriverId} saved to Supabase on accept`);
+        }
+
+        // If this live ride came from a scheduled booking, mark the booking accepted too
+        if (isScheduledLiveRideId(data.rideId)) {
+          syncScheduledBookingForRide(data.rideId, "driver_accepted", {
+            driver_id: actualDriverId,
+            assigned_driver_id: actualDriverId,
+          }).catch((syncErr) => {
+            console.warn(`⚠️ Scheduled booking sync failed on accept for ride ${data.rideId}:`, syncErr);
+          });
         }
 
         const { data: ride } = await supabase
@@ -3870,6 +4234,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
           }
         }
 
+        // Keep the source scheduled booking in sync with its live ride
+        if (isScheduledLiveRideId(update.rideId)) {
+          const bookingStatus =
+            update.status === "accepted" ? "driver_accepted"
+            : ["in_progress", "completed", "cancelled"].includes(update.status) ? update.status
+            : null;
+          if (bookingStatus) {
+            const extra = update.status === "accepted" && resolvedDriverId
+              ? { driver_id: resolvedDriverId, assigned_driver_id: resolvedDriverId }
+              : undefined;
+            syncScheduledBookingForRide(update.rideId, bookingStatus, extra).catch((syncErr) => {
+              console.warn(`⚠️ Scheduled booking sync failed for ride ${update.rideId}:`, syncErr);
+            });
+          }
+        }
+
         const rideInfo = activeRides.get(update.rideId);
 
         // When driver accepts, store their socket so we can notify them of cancellations
@@ -4150,6 +4530,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
           .eq("id", data.rideId);
 
         console.log(`✅ Ride ${data.rideId} cancelled in DB due to no-show (charged via: ${stripeChargeSuccess ? 'card' : 'wallet'})`);
+
+        // If this live ride came from a scheduled booking, mark the booking cancelled too
+        if (isScheduledLiveRideId(data.rideId)) {
+          syncScheduledBookingForRide(data.rideId, "cancelled").catch((syncErr) => {
+            console.warn(`⚠️ Scheduled booking sync failed on no-show for ride ${data.rideId}:`, syncErr);
+          });
+        }
 
         // ─── 4. If card charge failed, fall back to wallet deduction ─────────
         if (!stripeChargeSuccess && rideRow.rider_id && fareAmount > 0) {

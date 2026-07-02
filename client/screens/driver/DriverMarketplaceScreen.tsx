@@ -23,6 +23,9 @@ const UTO_YELLOW = '#FFD000';
 interface LaterBooking {
   id: string;
   rider_id: string;
+  rider_name?: string | null;
+  rider_email?: string | null;
+  rider_phone?: string | null;
   pickup_address: string;
   dropoff_address: string;
   pickup_at: string;
@@ -107,6 +110,22 @@ function BookingCard({
           <Text style={s.detailLabel}>Job Type:</Text>
           <Text style={s.detailValue}>{jobType}</Text>
         </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Rider Name:</Text>
+          <Text style={s.detailValue}>{item.rider_name || 'Rider'}</Text>
+        </View>
+        {!!item.rider_phone && (
+          <View style={s.detailRow}>
+            <Text style={s.detailLabel}>Rider Phone:</Text>
+            <Text style={s.detailValue}>{item.rider_phone}</Text>
+          </View>
+        )}
+        {!!item.rider_email && (
+          <View style={s.detailRow}>
+            <Text style={s.detailLabel}>Rider Email:</Text>
+            <Text style={s.detailValue}>{item.rider_email}</Text>
+          </View>
+        )}
         <View style={s.detailRowStack}>
           <Text style={s.detailLabel}>Pickup:</Text>
           <Text style={s.detailValue}>{item.pickup_address}</Text>

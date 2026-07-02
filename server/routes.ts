@@ -2,7 +2,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
-import { setupSocketIO } from "./socket";
+import { setupSocketIO, scheduledRideHooks } from "./socket";
 import { authorizeSavedCard, createPaymentIntent, createCustomer, confirmPayment, createSetupIntent, getPaymentMethods, deletePaymentMethod } from "./stripe";
 import { insertUserSchema, insertRideSchema, insertDriverSchema } from "@shared/schema";
 import {
@@ -156,6 +156,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS fare NUMERIC DEFAULT NULL;`
+    });
+    // Pre-provided ride PIN + live-dispatch tracking fields
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS otp TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS activated_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS live_ride_id TEXT DEFAULT NULL;`
+    });
+    // Same fields for web_booker so admin/web bookings can also go live
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS otp TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS activated_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS live_ride_id TEXT DEFAULT NULL;`
     });
     console.log('✅ Ensured later_bookings columns exist (including penalty & tracking fields)');
   } catch (e) {
@@ -1471,6 +1491,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 const missingLaterBookingColumns = new Set<string>();
 const missingLaterBookingAcceptColumns = new Set<string>();
 const missingLaterBookingCancelColumns = new Set<string>();
+const missingLaterBookingActivationColumns = new Set<string>();
 
 const normalizeVehicleType = (value: any): string => {
   if (!value) return "saloon";
@@ -1509,6 +1530,59 @@ const normalizeLaterBooking = (
 const pickupTimestamp = (booking: any): number => {
   const value = booking?.pickup_at ? new Date(booking.pickup_at).getTime() : NaN;
   return Number.isFinite(value) ? value : 0;
+};
+
+// 4-digit ride PIN, generated server-side at booking time
+const generateRidePin = (): string =>
+  Math.floor(1000 + Math.random() * 9000).toString();
+
+// How long before the scheduled pickup a booking is converted into a live ride
+const SCHEDULED_ACTIVATION_WINDOW_MS = 15 * 60 * 1000;
+
+// Attach rider name / email / phone to normalized bookings (batched users lookup)
+const attachRiderDetails = async (bookings: any[]): Promise<any[]> => {
+  const riderIds = Array.from(
+    new Set(
+      bookings
+        .map((b: any) => b?.rider_id)
+        .filter((id: any) => typeof id === "string" && id.length > 0),
+    ),
+  );
+  if (riderIds.length === 0) return bookings;
+
+  try {
+    const { data: riders, error } = await sb
+      .from("users")
+      .select("id, full_name, email, phone")
+      .in("id", riderIds);
+
+    if (error || !riders) {
+      console.warn("⚠️ Could not fetch rider details for bookings:", error?.message);
+      return bookings;
+    }
+
+    const riderMap = new Map(riders.map((r: any) => [r.id, r]));
+    return bookings.map((booking: any) => {
+      const rider = riderMap.get(booking?.rider_id);
+      if (!rider) return booking;
+      return {
+        ...booking,
+        rider_name: booking.rider_name || rider.full_name || null,
+        rider_email: booking.rider_email || rider.email || null,
+        rider_phone: booking.rider_phone || rider.phone || null,
+      };
+    });
+  } catch (err) {
+    console.warn("⚠️ attachRiderDetails failed:", err);
+    return bookings;
+  }
+};
+
+// Drivers must not see the rider's PIN before pickup — strip it from driver-facing responses
+const stripPinForDrivers = (booking: any) => {
+  if (!booking || typeof booking !== "object") return booking;
+  const { otp, ...rest } = booking;
+  return rest;
 };
 
 const fetchLaterBookingsFromTable = async (
@@ -1633,8 +1707,13 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
       finalDropoffTime = new Date(pickupTime.getTime() + mins * 60000);
     }
 
+    // Pre-provide the ride PIN at booking time so the rider can see it in
+    // their trip details right away (same PIN is used when the ride goes live)
+    const bookingOtp = generateRidePin();
+
     const insertData: any = {
         rider_id: riderId,
+        otp: bookingOtp,
         pickup_address: pickupAddress,
         pickup_latitude: pickupLatitude ?? null,
         pickup_longitude: pickupLongitude ?? null,
@@ -1705,7 +1784,9 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
       console.error("Supabase insert error:", error);
       return res.status(500).json({ error: error.message || "Database error" });
     }
-    io.emit("later-booking:update", { type: "created", booking: data });
+    // Broadcast without the PIN (drivers also receive this event); the rider
+    // gets the PIN in the direct response below.
+    io.emit("later-booking:update", { type: "created", booking: stripPinForDrivers(data) });
     res.status(201).json({ booking: data });
   } catch (error: any) {
     console.error("Create later booking error:", error);
@@ -1734,7 +1815,9 @@ app.get("/api/later-bookings", async (req: Request, res: Response) => {
         const bookingPickupTs = pickupTimestamp(booking);
 
         if (driverId) {
-          if (status === "scheduled") return bookingPickupTs >= nowTs;
+          // Unassigned bookings inside the 15-min activation window are dispatched
+          // as live rides — keep them out of the marketplace to avoid double-accepts.
+          if (status === "scheduled") return bookingPickupTs >= nowTs + SCHEDULED_ACTIVATION_WINDOW_MS && !booking.activated_at;
           if (status === "driver_accepted" || status === "cancelled") return bookingDriverId === driverId;
           return false;
         }
@@ -1743,7 +1826,9 @@ app.get("/api/later-bookings", async (req: Request, res: Response) => {
       })
       .sort((a: any, b: any) => pickupTimestamp(a) - pickupTimestamp(b));
 
-    res.json({ bookings });
+    const enrichedBookings = (await attachRiderDetails(bookings)).map(stripPinForDrivers);
+
+    res.json({ bookings: enrichedBookings });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
   }
@@ -1789,9 +1874,10 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
     }
 
     let sourceTable: "web_booker" | "later_bookings" | null = null;
+    let existingBooking: any = null;
     const webFetch = await sb
       .from("web_booker")
-      .select("id")
+      .select("*")
       .eq("id", bookingId)
       .maybeSingle();
     if (webFetch.error) {
@@ -1799,10 +1885,11 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
     }
     if (webFetch.data) {
       sourceTable = "web_booker";
+      existingBooking = webFetch.data;
     } else {
       const laterFetch = await sb
         .from("later_bookings")
-        .select("id")
+        .select("*")
         .eq("id", bookingId)
         .maybeSingle();
       if (laterFetch.error) {
@@ -1810,11 +1897,18 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
       }
       if (laterFetch.data) {
         sourceTable = "later_bookings";
+        existingBooking = laterFetch.data;
       }
     }
 
     if (!sourceTable) {
       return res.status(404).json({ error: "Booking not found" });
+    }
+
+    // Once a booking has been activated (converted to a live ride within the
+    // 15-min window) it can only be accepted through the live dispatch flow.
+    if (existingBooking?.activated_at || existingBooking?.live_ride_id) {
+      return res.status(400).json({ error: "This booking is now being dispatched as a live ride" });
     }
 
     const updateResult = await updateLaterBookingWithFallbackColumns(
@@ -1833,8 +1927,9 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
     }
 
     const normalizedBooking = normalizeLaterBooking(updateResult.data, sourceTable);
-    io.emit("later-booking:update", { type: "accepted", booking: normalizedBooking });
-    res.json({ booking: normalizedBooking });
+    const [enrichedBooking] = (await attachRiderDetails([normalizedBooking])).map(stripPinForDrivers);
+    io.emit("later-booking:update", { type: "accepted", booking: enrichedBooking });
+    res.json({ booking: enrichedBooking });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to accept booking" });
   }
@@ -1885,6 +1980,33 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
     const currentStatus = String(normalizedBooking.status || "").toLowerCase();
     if (currentStatus === 'cancelled' || currentStatus === 'driver_cancelled' || currentStatus === 'driver_cancelled_late') {
       return res.status(400).json({ error: "Booking already cancelled" });
+    }
+    if (currentStatus === 'completed') {
+      return res.status(400).json({ error: "Booking already completed" });
+    }
+
+    // If the booking has already gone live (within 15 min of pickup) the live
+    // ride must be cancelled too. A ride that is already in progress can no
+    // longer be cancelled from the scheduled bookings screen.
+    const liveRideId = booking.live_ride_id || null;
+    if (liveRideId || currentStatus === 'in_progress') {
+      if (currentStatus === 'in_progress') {
+        return res.status(400).json({ error: "This ride is already in progress and can no longer be cancelled here" });
+      }
+      if (liveRideId) {
+        try {
+          const { data: liveRide } = await sb
+            .from("rides")
+            .select("id, status")
+            .eq("id", liveRideId)
+            .maybeSingle();
+          if (liveRide?.status === 'in_progress') {
+            return res.status(400).json({ error: "This ride is already in progress and can no longer be cancelled here" });
+          }
+        } catch (liveRideErr) {
+          console.warn(`⚠️ Could not check live ride ${liveRideId} before cancelling booking ${bookingId}:`, liveRideErr);
+        }
+      }
     }
 
     const bookingDriverId = normalizedBooking.driver_id || normalizedBooking.assigned_driver_id;
@@ -2019,6 +2141,10 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
         updatePayload.driver_id = null;
         updatePayload.assigned_driver_id = null;
         updatePayload.accepted_by_driver_at = null;
+        // Clear the live-ride link so the activation engine can re-dispatch
+        // the booking to other drivers if it's inside the 15-min window.
+        updatePayload.live_ride_id = null;
+        updatePayload.activated_at = null;
       }
       updatePayload.driver_cancelled_at = now.toISOString();
       updatePayload.driver_cancel_reason = reason || null;
@@ -2074,6 +2200,16 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
       return res.status(404).json({ error: "Booking not found" });
     }
 
+    // Cancel the live ride spawned from this booking (stops dispatch and/or
+    // clears the assigned driver's home screen)
+    if (liveRideId) {
+      try {
+        await scheduledRideHooks.cancelScheduledLiveRide?.(liveRideId, cancelledBy || 'rider');
+      } catch (liveCancelErr) {
+        console.error(`❌ Failed to cancel live ride ${liveRideId} for booking ${bookingId}:`, liveCancelErr);
+      }
+    }
+
     const normalizedUpdatedBooking = normalizeLaterBooking(data, sourceTable);
     io.emit("later-booking:update", {
       type: cancelledBy === 'driver' ? "released" : "cancelled",
@@ -2119,50 +2255,152 @@ app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
   }
 });
 
-// ─── Scheduled Bookings Escalation Engine ───
-// Runs every minute to evaluate scheduled bookings that haven't been accepted yet.
+// ─── Scheduled Bookings Live Activation Engine ───
+// Runs every minute. Any booking within 15 minutes of its pickup time is
+// converted into a real live ride:
+//   • already accepted by a driver → lands directly on that driver's home
+//     screen in the "accepted" phase (same flow as an immediate booking).
+//   • still unassigned → dispatched to the nearest online drivers exactly
+//     like an immediate (ASAP) booking.
+// From that point all live-ride policies apply (PIN verification, no-show,
+// driver 50% / rider 100% cancellation fees, etc.).
+const SCHEDULED_ACTIVATION_RETRY_MS = 3 * 60 * 1000;   // retry dispatch every 3 min if no driver found
+const SCHEDULED_ACTIVATION_GRACE_MS = 30 * 60 * 1000;  // keep trying up to 30 min past pickup
+
 setInterval(async () => {
   try {
-    const { data: scheduledRides, error } = await supabase
-      .from('later_bookings')
-      .select('*')
-      .eq('status', 'scheduled')
-      .gte('pickup_at', new Date().toISOString());
+    const [laterBookingsRaw, webBookerRaw] = await Promise.all([
+      fetchLaterBookingsFromTable("later_bookings"),
+      fetchLaterBookingsFromTable("web_booker"),
+    ]);
 
-    if (error || !scheduledRides) return;
+    const nowTs = Date.now();
+    const candidates = [
+      ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
+      ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
+    ].filter((booking: any) => {
+      const status = String(booking.status || "").toLowerCase();
+      if (status !== "scheduled" && status !== "driver_accepted") return false;
+      if (!booking.rider_id || !booking.pickup_at) return false;
 
-    const now = new Date().getTime();
+      const pickupTs = pickupTimestamp(booking);
+      if (!pickupTs) return false;
+      if (pickupTs > nowTs + SCHEDULED_ACTIVATION_WINDOW_MS) return false; // too early
+      if (pickupTs < nowTs - SCHEDULED_ACTIVATION_GRACE_MS) return false;  // too stale
 
-    for (const ride of scheduledRides) {
-      const pickupTime = new Date(ride.pickup_at).getTime();
-      const minsUntilPickup = (pickupTime - now) / 60000;
+      // Already live
+      if (booking.live_ride_id) return false;
 
-      // 15 Minutes -> URGENT ASAP Priority Job
-      if (minsUntilPickup <= 15) {
-        // Broadcast to all online drivers as an urgent ride
-        io.emit('ride:urgent_scheduled', {
-          ...ride,
-          id: `urgent_sched_${ride.id}`, // prefix to avoid UI clashes if needed, or pass as is
-          isUrgentScheduled: true,
-          title: 'URGENT SCHEDULED RIDE',
-          subtitle: 'Pickup soon',
+      // Throttle re-dispatch attempts when no driver was available last time
+      if (booking.activated_at) {
+        const lastAttempt = new Date(booking.activated_at).getTime();
+        if (Number.isFinite(lastAttempt) && nowTs - lastAttempt < SCHEDULED_ACTIVATION_RETRY_MS) return false;
+      }
+
+      // If the activation-tracking columns don't exist at all we cannot run
+      // safely (would re-dispatch every minute) — skip until migration lands.
+      if (booking.live_ride_id === undefined && booking.activated_at === undefined) {
+        console.warn(`⚠️ Skipping activation for booking ${booking.id} — live_ride_id/activated_at columns missing on ${booking.source_table}`);
+        return false;
+      }
+
+      return true;
+    });
+
+    if (candidates.length === 0) return;
+
+    const enrichedCandidates = await attachRiderDetails(candidates);
+
+    for (const booking of enrichedCandidates) {
+      try {
+        // Ensure the booking has a PIN (older bookings may predate PIN generation)
+        let otp = typeof booking.otp === "string" && booking.otp ? booking.otp : null;
+        if (!otp) {
+          otp = generateRidePin();
+          await updateLaterBookingWithFallbackColumns(
+            booking.source_table,
+            booking.id,
+            { otp },
+            missingLaterBookingActivationColumns,
+          );
+        }
+
+        const liveRideId = `sched_${booking.id}_${Date.now().toString(36)}`;
+        const rideData = {
+          id: liveRideId,
+          riderId: booking.rider_id,
+          riderName: booking.rider_name || "Rider",
+          riderPhone: booking.rider_phone || "",
+          riderEmail: booking.rider_email || "",
+          rideType: booking.vehicle_type || "saloon",
+          vehicleType: booking.vehicle_type || "saloon",
+          pickupLocation: {
+            address: booking.pickup_address || "Unknown",
+            latitude: Number(booking.pickup_latitude) || 0,
+            longitude: Number(booking.pickup_longitude) || 0,
+          },
+          dropoffLocation: {
+            address: booking.dropoff_address || "Unknown",
+            latitude: Number(booking.dropoff_latitude) || 0,
+            longitude: Number(booking.dropoff_longitude) || 0,
+          },
+          farePrice: Number(booking.estimated_fare) || 0,
+          estimatedPrice: Number(booking.estimated_fare) || 0,
+          distanceMiles: Number(booking.distance_miles) || 0,
+          durationMinutes: Number(booking.duration_minutes) || 0,
+          paymentMethod: booking.payment_method || "cash",
+          otp,
+          isScheduledBooking: true,
+          scheduledBookingId: booking.id,
+          scheduledPickupAt: booking.pickup_at,
+          sourceTable: booking.source_table,
+        };
+
+        // Mark as activated BEFORE dispatching so a slow dispatch can't double-fire
+        const markResult = await updateLaterBookingWithFallbackColumns(
+          booking.source_table,
+          booking.id,
+          { activated_at: new Date().toISOString(), live_ride_id: liveRideId },
+          missingLaterBookingActivationColumns,
+        );
+        if (markResult.error || !markResult.data) {
+          console.warn(`⚠️ Could not mark booking ${booking.id} as activated — skipping this cycle:`, markResult.error?.message);
+          continue;
+        }
+        if (markResult.data.live_ride_id === undefined && markResult.data.activated_at === undefined) {
+          console.warn(`⚠️ Activation columns missing on ${booking.source_table} — skipping booking ${booking.id} to avoid dispatch storms`);
+          continue;
+        }
+
+        const assignedDriverId = booking.driver_id || booking.assigned_driver_id;
+        if (assignedDriverId && String(booking.status).toLowerCase() === "driver_accepted") {
+          console.log(`🚀 Activating accepted scheduled booking ${booking.id} → live ride ${liveRideId} (driver ${assignedDriverId})`);
+          const handedOver = await scheduledRideHooks.activateAcceptedScheduledRide?.(rideData, assignedDriverId);
+          if (!handedOver) {
+            // Could not hand over to the assigned driver — release for a later retry
+            await updateLaterBookingWithFallbackColumns(
+              booking.source_table,
+              booking.id,
+              { live_ride_id: null },
+              missingLaterBookingActivationColumns,
+            );
+            continue;
+          }
+        } else {
+          console.log(`🚀 Dispatching unassigned scheduled booking ${booking.id} → live ride ${liveRideId} (treated like an immediate booking)`);
+          await scheduledRideHooks.dispatchScheduledRide?.(rideData);
+        }
+
+        io.emit("later-booking:update", {
+          type: "activated",
+          booking: { ...stripPinForDrivers(booking), live_ride_id: liveRideId },
         });
-        continue;
-      }
-
-      // 30 Minutes -> Urgent Push
-      if (minsUntilPickup <= 30 && minsUntilPickup > 29) { // Run once when crossing 30
-        // (In a real scenario, this uses Expo Push Notifications to available drivers)
-        console.log(`[ESCALATION] Urgent Push for scheduled ride ${ride.id} (30 mins until pickup)`);
-      }
-
-      // 60 Minutes -> Standard Push
-      if (minsUntilPickup <= 60 && minsUntilPickup > 59) { // Run once when crossing 60
-        console.log(`[ESCALATION] Push for scheduled ride ${ride.id} (60 mins until pickup)`);
+      } catch (activationErr) {
+        console.error(`❌ Failed to activate scheduled booking ${booking?.id}:`, activationErr);
       }
     }
   } catch (err) {
-    console.error('Escalation engine error:', err);
+    console.error('Scheduled activation engine error:', err);
   }
 }, 60000); // 1 minute interval
 

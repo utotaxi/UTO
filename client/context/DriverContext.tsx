@@ -301,26 +301,66 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       cleanup = onNewRide((ride: any) => {
         console.log('🚕 Driver received new ride request via socket payload:', JSON.stringify(ride, null, 2));
 
+        const mappedRequest: RideRequest = {
+          id: ride.id,
+          riderName: ride.riderName || ride.rider_name || "Rider",
+          riderPhone: ride.riderPhone || ride.rider_phone || ride.phone || "",
+          pickupAddress: ride.pickupAddress || ride.pickup_address || ride.pickupLocation?.address || "Pickup location",
+          dropoffAddress: ride.dropoffAddress || ride.dropoff_address || ride.dropoffLocation?.address || "Dropoff location",
+          pickupLatitude: ride.pickupLatitude || ride.pickup_latitude || ride.pickupLocation?.latitude || 0,
+          pickupLongitude: ride.pickupLongitude || ride.pickup_longitude || ride.pickupLocation?.longitude || 0,
+          dropoffLatitude: ride.dropoffLatitude || ride.dropoff_latitude || ride.dropoffLocation?.latitude || 0,
+          dropoffLongitude: ride.dropoffLongitude || ride.dropoff_longitude || ride.dropoffLocation?.longitude || 0,
+          estimatedFare: ride.estimatedPrice || ride.estimated_price || ride.farePrice || ride.fare_price || 0,
+          distanceMiles: ride.distance || ride.distanceMiles || ride.distance_miles || ride.distanceKm || ride.distance_km || 0,
+          durationMinutes: ride.estimatedDuration || ride.estimated_duration || ride.durationMinutes || ride.duration_minutes || 0,
+          pickupDistance: ride.pickupDistance || 0,  // Real distance from server Haversine calculation
+          otp: ride.otp,
+          paymentMethod: ride.paymentMethod || "cash",
+          walletDeduction: ride.walletDeduction || 0,
+          expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || ride.farePrice || 0),
+        };
+
+        // ─── Scheduled booking going live (already accepted by THIS driver) ───
+        // The driver committed to this job in the marketplace, so it lands
+        // directly in the "accepted" phase — no accept/decline step, and it
+        // appears even if the online toggle is off (they committed to the job).
+        if (ride.scheduledPreAccepted) {
+          if (activeRideRequestRef.current && activeRideRequestRef.current.id !== ride.id) {
+            console.warn('⚠️ Scheduled ride went live but driver is busy with another ride:', activeRideRequestRef.current.id);
+            return;
+          }
+
+          setActiveRideRequest(mappedRequest);
+          setRideState("accepted");
+
+          const scheduledTrip: Trip = {
+            id: mappedRequest.id,
+            riderName: mappedRequest.riderName,
+            pickupAddress: mappedRequest.pickupAddress,
+            dropoffAddress: mappedRequest.dropoffAddress,
+            farePrice: mappedRequest.estimatedFare,
+            distanceMiles: mappedRequest.distanceMiles,
+            durationMinutes: mappedRequest.durationMinutes,
+            completedAt: "",
+            paymentMethod: mappedRequest.paymentMethod,
+          };
+          setActiveRide(scheduledTrip);
+          saveActiveRide(scheduledTrip).catch((err) => console.warn("⚠️ Failed to persist scheduled active ride:", err));
+
+          // 🔊 Same loud alert as an immediate booking
+          playRideAlert();
+
+          sendLocalNotification(
+            "🗓 Scheduled Ride Starting",
+            `Your scheduled pickup for ${mappedRequest.riderName} at ${mappedRequest.pickupAddress} starts soon. Head to the pickup now.`,
+            { type: "scheduled_ride_live", rideId: ride.id }
+          );
+          return;
+        }
+
         if (isOnlineRef.current && !activeRideRequestRef.current) {
-          setActiveRideRequest({
-            id: ride.id,
-            riderName: ride.riderName || ride.rider_name || "Rider",
-            riderPhone: ride.riderPhone || ride.rider_phone || ride.phone || "",
-            pickupAddress: ride.pickupAddress || ride.pickup_address || ride.pickupLocation?.address || "Pickup location",
-            dropoffAddress: ride.dropoffAddress || ride.dropoff_address || ride.dropoffLocation?.address || "Dropoff location",
-            pickupLatitude: ride.pickupLatitude || ride.pickup_latitude || ride.pickupLocation?.latitude || 0,
-            pickupLongitude: ride.pickupLongitude || ride.pickup_longitude || ride.pickupLocation?.longitude || 0,
-            dropoffLatitude: ride.dropoffLatitude || ride.dropoff_latitude || ride.dropoffLocation?.latitude || 0,
-            dropoffLongitude: ride.dropoffLongitude || ride.dropoff_longitude || ride.dropoffLocation?.longitude || 0,
-            estimatedFare: ride.estimatedPrice || ride.estimated_price || ride.farePrice || ride.fare_price || 0,
-            distanceMiles: ride.distance || ride.distanceMiles || ride.distance_miles || ride.distanceKm || ride.distance_km || 0,
-            durationMinutes: ride.estimatedDuration || ride.estimated_duration || ride.durationMinutes || ride.duration_minutes || 0,
-            pickupDistance: ride.pickupDistance || 0,  // Real distance from server Haversine calculation
-            otp: ride.otp,
-            paymentMethod: ride.paymentMethod || "cash",
-            walletDeduction: ride.walletDeduction || 0,
-            expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || ride.farePrice || 0),
-          });
+          setActiveRideRequest(mappedRequest);
           setRideState("incoming");
 
           // 🔊 Play loud beep sound + vibration for incoming ride

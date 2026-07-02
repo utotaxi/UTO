@@ -440,6 +440,7 @@ export default function AirportBookingScreen({ navigation }: any) {
         throw new Error(resBody.error || `Server error ${res.status}`);
       }
 
+      let returnRidePin: string | null = null;
       if (isReturnJourney && returnScheduledTime) {
         const rPickup = returnPickup;
         const rDropoff = returnDropoff;
@@ -481,12 +482,17 @@ export default function AirportBookingScreen({ navigation }: any) {
         if (!returnRes.ok) {
            throw new Error(returnResBody.error || `Server error on return booking ${returnRes.status}`);
         }
+        returnRidePin = returnResBody?.booking?.otp || null;
       }
 
       const vName = selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus';
+      const ridePin = resBody?.booking?.otp;
+      const pinSection = ridePin
+        ? `\n\n🔐 Your Ride PIN: ${ridePin}${returnRidePin ? `\nReturn Ride PIN: ${returnRidePin}` : ''}\nShare it with your driver at pickup. You can also find it anytime in your scheduled ride details.`
+        : '';
       Alert.alert(
         '✈️ Airport Transfer Booked!',
-        `Your ${vName}${isReturnJourney ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}\n${passengers} passenger(s), ${luggage} baggage${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}`,
+        `Your ${vName}${isReturnJourney ? ' Round Trip' : ''} airport transfer has been scheduled.\n\nDate: ${fmtDate(scheduledTime)} at ${fmtTime(scheduledTime)}${flightNumber ? `\nFlight: ${flightNumber}` : ''}\n${passengers} passenger(s), ${luggage} baggage${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}${pinSection}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {

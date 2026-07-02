@@ -1021,6 +1021,70 @@ export function RideProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // A scheduled (book-later) ride reached its 15-minute window and went live.
+  // The server sends the full ride payload (including the pre-provided PIN) so
+  // the rider app can treat it exactly like an immediate booking from here on.
+  useEffect(() => {
+    let socket: any;
+    const handleScheduledActivated = (data: any) => {
+      const rideData = data?.ride;
+      if (!rideData?.id) return;
+
+      const current = activeRideRef.current;
+      if (current && current.id !== rideData.id && ["accepted", "arrived", "in_progress"].includes(current.status)) {
+        console.warn("⚠️ Scheduled ride activated while another ride is active — keeping current ride", current.id);
+        return;
+      }
+
+      const activatedRide: Ride = {
+        id: rideData.id,
+        pickupLocation: rideData.pickupLocation || { address: "Unknown", latitude: 0, longitude: 0 },
+        dropoffLocation: rideData.dropoffLocation || { address: "Unknown", latitude: 0, longitude: 0 },
+        rideType: (rideData.rideType as RideType) || "saloon",
+        status: data.status === "accepted" ? "accepted" : "pending",
+        farePrice: rideData.farePrice || 0,
+        distanceKm: rideData.distanceMiles || 0,
+        durationMinutes: rideData.durationMinutes || 0,
+        otp: rideData.otp || undefined,
+        paymentMethod: rideData.paymentMethod || "card",
+        acceptedAt: data.acceptedAt || undefined,
+        createdAt: new Date().toISOString(),
+        ...(data.driverInfo
+          ? {
+            driverName: data.driverInfo.driverName,
+            driverPhone: data.driverInfo.driverPhone,
+            vehicleInfo: data.driverInfo.vehicleInfo,
+            licensePlate: data.driverInfo.licensePlate,
+            driverRating: data.driverInfo.driverRating,
+          }
+          : {}),
+      };
+
+      console.log("🗓 Scheduled ride went live:", activatedRide.id, "status:", activatedRide.status);
+      setActiveRide(activatedRide);
+      AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(activatedRide)).catch(console.error);
+
+      sendLocalNotification(
+        "🗓 Your Scheduled Ride Is Starting",
+        data.status === "accepted"
+          ? `${data.driverInfo?.driverName || "Your driver"} is getting ready for your pickup at ${activatedRide.pickupLocation.address}.`
+          : `We're finding a driver for your pickup at ${activatedRide.pickupLocation.address}.`,
+        { type: "scheduled_ride_live", rideId: activatedRide.id }
+      );
+    };
+
+    try {
+      socket = getSocket();
+      socket.on("ride:scheduled_activated", handleScheduledActivated);
+    } catch (err) {
+      console.warn("Socket not available for scheduled activation listener:", err);
+    }
+
+    return () => {
+      if (socket) socket.off("ride:scheduled_activated", handleScheduledActivated);
+    };
+  }, []);
+
   // Listen for driver status updates (e.g. ride started via OTP)
   useEffect(() => {
     let cleanup: (() => void) | undefined;

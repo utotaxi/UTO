@@ -254,9 +254,10 @@ export default function LaterRideScreen({ navigation }: any) {
       }
 
       const vName = selectedVehicle === 'saloon' ? 'Saloon' : selectedVehicle === 'people_carrier' ? 'People Carrier' : 'Minibus';
+      const ridePin = resBody?.booking?.otp;
       Alert.alert(
         '🗓 Ride Scheduled!',
-        `Your ${vName} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\n${passengers} passenger(s), ${luggage} baggage${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}`,
+        `Your ${vName} ride has been scheduled.\n\nPickup: ${fmtDate(finalPickup)} at ${fmtTime(finalPickup)}\n${passengers} passenger(s), ${luggage} baggage${finalFare ? `\nFare: £${finalFare.toFixed(2)}${couponDiscount > 0 ? ` (£${couponDiscount.toFixed(2)} discount)` : ''}` : ''}${ridePin ? `\n\n🔐 Your Ride PIN: ${ridePin}\nShare it with your driver at pickup. You can also find it anytime in your scheduled ride details.` : ''}`,
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err: any) {

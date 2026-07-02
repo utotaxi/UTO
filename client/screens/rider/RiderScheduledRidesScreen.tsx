@@ -36,6 +36,7 @@ interface ScheduledRide {
   vehicle_type?: string;
   passengers?: number;
   luggage?: number;
+  otp?: string | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -117,6 +118,17 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
         <View style={cs.fareRow}>
           <Text style={cs.fareLabel}>Estimated Fare</Text>
           <Text style={cs.fareValue}>£{parseFloat(displayFare as any).toFixed(2)}</Text>
+        </View>
+      ) : null}
+
+      {/* Ride PIN — pre-provided at booking time; give it to the driver at pickup */}
+      {ride.otp && ride.status !== 'completed' && ride.status !== 'cancelled' ? (
+        <View style={cs.pinBox}>
+          <View style={{ flex: 1 }}>
+            <Text style={cs.pinLabel}>YOUR RIDE PIN</Text>
+            <Text style={cs.pinHint}>Share this PIN with your driver at pickup to start the ride</Text>
+          </View>
+          <Text style={cs.pinValue}>{ride.otp}</Text>
         </View>
       ) : null}
 
@@ -384,6 +396,22 @@ const cs = StyleSheet.create({
   },
   fareLabel: { fontSize: 13, color: '#9CA3AF' },
   fareValue: { fontSize: 15, fontWeight: '700', color: '#FFD000' },
+
+  // Ride PIN
+  pinBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#111111',
+    borderWidth: 1,
+    borderColor: UTO_YELLOW + '55',
+  },
+  pinLabel: { fontSize: 10, fontWeight: '700', color: UTO_YELLOW, letterSpacing: 1 },
+  pinHint: { fontSize: 11, color: '#9CA3AF', marginTop: 3, lineHeight: 15 },
+  pinValue: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: 6 },
 
   // Late cancel warning
   lateCancelWarning: {
