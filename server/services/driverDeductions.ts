@@ -6,6 +6,78 @@ import {
 
 export { formatLiveRideCancellationPenalty, formatScheduledBookingCancellationPenalty };
 
+function getMissingSchemaColumn(error: any): string | null {
+  const message = String(error?.message || "");
+  const quotedMatch = message.match(/Could not find the '([^']+)' column/i);
+  if (quotedMatch?.[1]) return quotedMatch[1];
+
+  const sqlMatch = message.match(/column "([^"]+)" of relation "[^"]+" does not exist/i);
+  return sqlMatch?.[1] || null;
+}
+
+async function resolveDriverUserId(
+  supabase: { from: (table: string) => any },
+  driverId: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from("drivers")
+      .select("user_id")
+      .eq("id", driverId)
+      .maybeSingle();
+    if (error) {
+      console.warn(`⚠️ Could not resolve user_id for driver ${driverId}:`, error);
+      return null;
+    }
+    return data?.user_id || null;
+  } catch (error) {
+    console.warn(`⚠️ Driver user lookup failed for ${driverId}:`, error);
+    return null;
+  }
+}
+
+async function updateDeductionWithFallback(
+  supabase: { from: (table: string) => any },
+  deductionId: string,
+  payload: Record<string, any>,
+): Promise<void> {
+  const nextPayload: Record<string, any> = { ...payload };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { error } = await supabase
+      .from("driver_deductions")
+      .update(nextPayload)
+      .eq("id", deductionId);
+    if (!error) return;
+
+    const missingColumn = getMissingSchemaColumn(error);
+    if (missingColumn && missingColumn in nextPayload) {
+      delete nextPayload[missingColumn];
+      continue;
+    }
+    throw error;
+  }
+}
+
+async function insertDeductionWithFallback(
+  supabase: { from: (table: string) => any },
+  payload: Record<string, any>,
+): Promise<void> {
+  const nextPayload: Record<string, any> = { ...payload };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { error } = await supabase
+      .from("driver_deductions")
+      .insert(nextPayload);
+    if (!error) return;
+
+    const missingColumn = getMissingSchemaColumn(error);
+    if (missingColumn && missingColumn in nextPayload) {
+      delete nextPayload[missingColumn];
+      continue;
+    }
+    throw error;
+  }
+}
+
 export async function upsertDriverPenaltyDeduction(
   supabase: { from: (table: string) => any },
   params: {
@@ -28,25 +100,22 @@ export async function upsertDriverPenaltyDeduction(
     throw lookupError;
   }
 
-  const payload = {
+  const driverUserId = await resolveDriverUserId(supabase, driverId);
+  const payload: Record<string, any> = {
     driver_id: driverId,
     amount,
     type,
     reason,
     created_at: createdAt || new Date().toISOString(),
   };
+  if (driverUserId) {
+    payload.user_id = driverUserId;
+  }
 
   if (existing?.id) {
-    const { error: updateError } = await supabase
-      .from("driver_deductions")
-      .update(payload)
-      .eq("id", existing.id);
-    if (updateError) throw updateError;
+    await updateDeductionWithFallback(supabase, existing.id, payload);
     return;
   }
 
-  const { error: insertError } = await supabase
-    .from("driver_deductions")
-    .insert(payload);
-  if (insertError) throw insertError;
+  await insertDeductionWithFallback(supabase, payload);
 }
