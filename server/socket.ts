@@ -2229,6 +2229,8 @@ import { supabase } from "./db";
 import { EventEmitter } from "events";
 import { capturePaymentIntent, chargeSavedCard } from "./stripe";
 import { DEFAULT_DRIVER_RADIUS_MILES, haversineDistanceMiles } from "../server/services/driverMatching";
+import { DRIVER_DEDUCTION_TYPE, formatLiveRideCancellationPenalty } from "../shared/driverDeductions";
+import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 
 export const serverRideEmitter = new EventEmitter();
 export let io: Server;
@@ -3278,7 +3280,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
           const actualDriverId =
             await resolveDriverTableId(data.driverId || getDriverIdForSocket(socket.id) || ride.driver_id);
           const fare = ride.estimated_price || 0;
-          const penaltyAmount = fare * 0.5;
+          const penaltyAmount = Number((fare * 0.5).toFixed(2));
+          const deductionAmount = -Math.abs(penaltyAmount);
 
           if (data.applyPenalty && penaltyAmount > 0 && actualDriverId) {
             try {
@@ -3296,18 +3299,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 .eq("id", actualDriverId);
 
               // Create deduction record
-              const deductionId = `ride_${data.rideId}_cancel_at_pickup`;
-              const deductionReason = `50% cancellation penalty for ride ${data.rideId}`;
-              const { error: deductionErr } = await supabase
-                .from("driver_deductions")
-                .insert({
-                  id: deductionId,
-                  driver_id: actualDriverId,
-                  amount: penaltyAmount,
-                  type: "cancel_at_pickup_penalty",
-                  reason: deductionReason,
-                  created_at: new Date().toISOString(),
+              const deductionLabel = formatLiveRideCancellationPenalty(data.rideId);
+              try {
+                await upsertDriverPenaltyDeduction(supabase, {
+                  driverId: actualDriverId,
+                  amount: deductionAmount,
+                  type: DRIVER_DEDUCTION_TYPE.PENALTY,
+                  reason: deductionLabel,
                 });
+              } catch (deductionErr) {
+                console.error(`❌ Failed to create driver deduction for ride ${data.rideId}:`, deductionErr);
+              }
             } catch (penaltyErr) {
               console.error(`❌ Failed to apply cancellation penalty to driver ${actualDriverId}:`, penaltyErr);
             }

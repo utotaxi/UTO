@@ -5,6 +5,11 @@ import { storage } from "./storage";
 import { setupSocketIO } from "./socket";
 import { authorizeSavedCard, createPaymentIntent, createCustomer, confirmPayment, createSetupIntent, getPaymentMethods, deletePaymentMethod } from "./stripe";
 import { insertUserSchema, insertRideSchema, insertDriverSchema } from "@shared/schema";
+import {
+  DRIVER_DEDUCTION_TYPE,
+  formatScheduledBookingCancellationPenalty,
+} from "../shared/driverDeductions";
+import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 import { supabase } from "./db";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -1966,7 +1971,8 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
     } else if (cancelledBy === 'driver') {
       // Driver cancellation within 3 hours: 50% penalty
       if (withinThreeHours || pastPickup) {
-        const driverPenalty = estimatedFare * 0.5;
+        const driverPenalty = Number((estimatedFare * 0.5).toFixed(2));
+        const driverDeductionAmount = -Math.abs(driverPenalty);
         penaltyNote = `Driver late cancellation — 50% penalty of £${driverPenalty.toFixed(2)} applies.`;
         statusToSet = statusForReleasedBooking;
         driverCancelType = 'late_cancellation';
@@ -1976,11 +1982,13 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
         if (bookingDriverId && driverPenalty > 0) {
           try {
             // Add a deduction record for the driver
-            await sb.from('driver_deductions').insert({
-              driver_id: bookingDriverId,
-              amount: driverPenalty,
-              type: 'late_cancel_penalty',
-              reason: `Late cancellation penalty (50%) for scheduled booking ${bookingId}`,
+            const scheduledPenaltyLabel = formatScheduledBookingCancellationPenalty(bookingId);
+            await upsertDriverPenaltyDeduction(sb, {
+              driverId: bookingDriverId,
+              amount: driverDeductionAmount,
+              type: DRIVER_DEDUCTION_TYPE.PENALTY,
+              reason: scheduledPenaltyLabel,
+              createdAt: now.toISOString(),
             });
             // Also deduct from driver's total_earnings
             const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', bookingDriverId).single();
