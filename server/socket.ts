@@ -4077,10 +4077,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const isDriverAlreadyAtPickup = cancelledRide && ["arrived", "at_pickup", "in_progress"].includes(cancelledRide.status);
               const cancelledBy = String((update as any).cancelledBy || "").toLowerCase();
               const riderInitiatedCancellation = cancelledBy === "rider";
+              // Product rule: rider has a strict 1-minute free-cancel window from
+              // acceptance time before any cancellation fee can be captured.
               const shouldChargeCancellationFee =
                 !!cancelledRide &&
                 riderInitiatedCancellation &&
-                (isDriverAlreadyAtPickup || isAfterFreeMinute);
+                isAfterFreeMinute;
 
               if (cancelledRide && shouldChargeCancellationFee) {
                 const fullFareAmount = Number(cancelledRide.final_price || cancelledRide.estimated_price || 0);
@@ -4096,7 +4098,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   (update as any).cancellationFee = cancellationFeeAmount;
                   (update as any).chargedAmount = walletDebitAmount;
                   (update as any).walletAdjustment = walletAdjustmentAmount;
-                  (update as any).cancellationPolicy = isDriverAlreadyAtPickup ? "driver_arrived" : "after_free_minute";
+                  (update as any).cancellationPolicy = "after_free_minute";
 
                   let cardCaptureSuccess = false;
                   let capturedPaymentIntentId: string | undefined;
@@ -4203,7 +4205,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 (update as any).chargedVia = "none";
                 if (!riderInitiatedCancellation) {
                   (update as any).cancellationPolicy = "driver_cancelled_no_fee";
-                } else if (!isAfterFreeMinute && !isDriverAlreadyAtPickup) {
+                } else if (!isAfterFreeMinute) {
                   (update as any).cancellationPolicy = "free_minute";
                 }
               }
