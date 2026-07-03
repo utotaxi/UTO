@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Location from "expo-location";
+import * as Notifications from "expo-notifications";
 import { Feather, MaterialIcons } from "@expo/vector-icons";
 import Animated, {
   FadeIn,
@@ -109,6 +110,43 @@ export default function DriverHomeScreen({ navigation }: any) {
 
   // Cash payment flow state
   const [cashChangeMode, setCashChangeMode] = useState<'input' | 'noChange' | 'changeGiven' | null>(null);
+
+  const handleNotificationNavigation = useCallback((rawData: any) => {
+    const data = rawData || {};
+    if (typeof data !== "object") return;
+
+    if ((data.type === "scheduled_booking_reminder" || data.type === "scheduled_booking_drive_to_pickup") && data.bookingId) {
+      (navigation as any).navigate("AccountTab", {
+        screen: "ScheduledJobDetails",
+        params: {
+          bookingId: String(data.bookingId),
+          openDriveToPickup: true,
+        },
+      });
+    }
+  }, [navigation]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (!mounted || !response) return;
+        handleNotificationNavigation(response.notification?.request?.content?.data);
+      })
+      .catch(() => {
+        // ignore non-critical notification bootstrap errors
+      });
+
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      handleNotificationNavigation(response.notification?.request?.content?.data);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, [handleNotificationNavigation]);
 
   // Haversine distance calculation (returns meters)
   const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -1532,7 +1570,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                   setShowEarlyCompleteModal(false);
                   setEarlyCompleteReason(null);
                   setEarlyCompleteOtherText("");
-                  completeTrip();
+                  completeTrip(reason);
                 }}
                 style={{
                   flex: 1, padding: 14, borderRadius: 12,

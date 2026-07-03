@@ -143,7 +143,7 @@ interface DriverContextType {
   declineRide: (isAtPickup?: boolean) => void;
   arrivedAtPickup: () => void;
   startRide: (rideId: string, otp: string) => Promise<boolean>;
-  completeTrip: () => void;
+  completeTrip: (earlyCompletionReason?: string) => void;
   noShowRide: () => void;
   agreeToWait: () => void;
   paidWaitingStartedAt: string | null;
@@ -316,7 +316,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           durationMinutes: ride.estimatedDuration || ride.estimated_duration || ride.durationMinutes || ride.duration_minutes || 0,
           pickupDistance: ride.pickupDistance || 0,  // Real distance from server Haversine calculation
           otp: ride.otp,
-          paymentMethod: ride.paymentMethod || "cash",
+          paymentMethod: ride.paymentMethod || "card",
           walletDeduction: ride.walletDeduction || 0,
           expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || ride.farePrice || 0),
         };
@@ -779,7 +779,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             durationMinutes: ride.estimatedDuration || activeRide.durationMinutes || 0,
             pickupDistance: 0,
             otp: ride.otp,
-            paymentMethod: ride.paymentMethod || activeRide.paymentMethod || "cash",
+            paymentMethod: ride.paymentMethod || activeRide.paymentMethod || "card",
             walletDeduction: ride.walletDeduction || 0,
             expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || activeRide.farePrice || 0),
           };
@@ -1111,7 +1111,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
-  const completeTrip = async () => {
+  const completeTrip = async (earlyCompletionReason?: string) => {
     if (activeRideRequest) {
       const completedAt = new Date().toISOString();
 
@@ -1154,6 +1154,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           driverId: driverProfile?.id || user?.id || undefined,
           waitingCharge,
           totalFare,
+          ...(earlyCompletionReason && earlyCompletionReason.trim()
+            ? { earlyCompletionReason: earlyCompletionReason.trim() }
+            : {}),
         });
       } catch (err) {
         console.warn("Socket emit failed:", err);
@@ -1163,19 +1166,30 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const baseCollect = activeRideRequest.expectedCollectAmount !== undefined ? activeRideRequest.expectedCollectAmount : activeRideRequest.estimatedFare;
       const amountToCollect = Math.round((baseCollect + waitingCharge) * 100) / 100;
 
-      // Show the payment collection screen to the driver
-      setCompletedRidePayment({
-        rideId: activeRideRequest.id,
-        riderName: activeRideRequest.riderName,
-        pickupAddress: activeRideRequest.pickupAddress,
-        dropoffAddress: activeRideRequest.dropoffAddress,
-        fareAmount: totalFare,
-        distanceMiles: activeRideRequest.distanceMiles,
-        durationMinutes: activeRideRequest.durationMinutes,
-        completedAt,
-        paymentMethod: activeRideRequest.paymentMethod || 'cash',
-        amountToCollect,
-      });
+      // Card/prepaid rides are completed in-app without manual cash collection.
+      const paymentMethod = (activeRideRequest.paymentMethod || "card").toLowerCase();
+      if (paymentMethod === "cash") {
+        setCompletedRidePayment({
+          rideId: activeRideRequest.id,
+          riderName: activeRideRequest.riderName,
+          pickupAddress: activeRideRequest.pickupAddress,
+          dropoffAddress: activeRideRequest.dropoffAddress,
+          fareAmount: totalFare,
+          distanceMiles: activeRideRequest.distanceMiles,
+          durationMinutes: activeRideRequest.durationMinutes,
+          completedAt,
+          paymentMethod: "cash",
+          amountToCollect,
+        });
+      } else {
+        setCompletedRidePayment(null);
+        setTimeout(() => {
+          setPendingRating({ rideId: activeRideRequest.id, riderName: activeRideRequest.riderName });
+        }, 800);
+        setTimeout(() => {
+          refreshData().catch((err) => console.warn("⚠️ Post-completion refreshData failed:", err));
+        }, 1500);
+      }
 
       // 🔔 Notify driver of ride completion
       sendLocalNotification(

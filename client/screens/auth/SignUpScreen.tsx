@@ -109,8 +109,9 @@ export default function SignUpScreen({ navigation, route }: any) {
         ? { councilLicence, badgeNo }
         : undefined;
 
-      await signUp(fullName, email, password, selectedRole, driverDetails);
-      setUserRole(isDriver ? "driver" : "rider");
+      const signedUpUser = await signUp(fullName, email, password, selectedRole, driverDetails);
+      const serverRole = (signedUpUser.role || selectedRole || (isDriver ? "driver" : "rider")).toLowerCase();
+      setUserRole(serverRole === "both" ? "both" : serverRole === "driver" ? "driver" : "rider");
     } catch (err: any) {
       // Extract server error message if available (e.g. "User already exists")
       const message =

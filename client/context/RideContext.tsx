@@ -1697,6 +1697,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
     const walletBalance = userRef.current?.walletBalance || 0;
     const walletDeduction = (useWalletBalance && walletBalance > 0) ? Math.min(walletBalance, discountedFare) : 0;
     const expectedCollectAmount = discountedFare - walletDeduction;
+    const normalizedPaymentMethod = paymentMethod || "card";
 
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -1715,7 +1716,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
       vehicleInfo: undefined,
       licensePlate: undefined,
       otp,
-      paymentMethod: paymentMethod || "cash",
+      paymentMethod: normalizedPaymentMethod,
       walletDeduction,
       expectedCollectAmount,
       couponCode: couponCode ?? null,
@@ -1725,7 +1726,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
     };
 
-    if (paymentMethod === "card" && user?.id) {
+    if (normalizedPaymentMethod === "card" && user?.id) {
       try {
         const { api } = await import('@/lib/api');
         const authorization = await api.payments.authorizeRide(user.id, newRide.id, discountedFare);
@@ -1733,7 +1734,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
         newRide.paymentStatus = "authorized";
       } catch (err: any) {
         console.error("Failed to authorize card for ride:", err);
-        throw new Error(err?.message || "Could not authorize your card. Please try again or choose cash.");
+        throw new Error(err?.message || "Could not authorize your card. Please try again.");
       }
     }
 
@@ -1835,22 +1836,23 @@ export function RideProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateRidePaymentMethod = async (rideId: string, method: string) => {
+  const updateRidePaymentMethod = async (rideId: string, _method: string) => {
     if (!activeRide || activeRide.id !== rideId) return;
+    const nextMethod = "card";
     try {
       // 1. Optimistic update
-      const updated = { ...activeRide, paymentMethod: method };
+      const updated = { ...activeRide, paymentMethod: nextMethod };
       setActiveRide(updated);
       await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated));
 
       // 2. Call backend
       const { api } = await import('@/lib/api');
-      await api.rides.update(rideId, { paymentMethod: method } as Partial<Ride>);
+      await api.rides.update(rideId, { paymentMethod: nextMethod } as Partial<Ride>);
 
       // 3. Emit local socket update to immediately notify driver without relying solely on backend sync
       try {
         const socket = getSocket();
-        socket.emit("ride:update", { rideId, paymentMethod: method });
+        socket.emit("ride:update", { rideId, paymentMethod: nextMethod });
       } catch (e) {
         console.warn("Could not emit ride:update", e);
       }

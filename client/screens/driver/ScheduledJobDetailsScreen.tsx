@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -37,10 +37,80 @@ export default function ScheduledJobDetailsScreen() {
   const { user } = useAuth();
   const tabBarHeight = useBottomTabBarHeight();
   
-  const [booking, setBooking] = useState<any>((route.params as any)?.booking);
+  const initialParams = (route.params as any) || {};
+  const bookingIdFromParams = initialParams?.bookingId as string | undefined;
+  const [booking, setBooking] = useState<any>(initialParams?.booking || null);
+  const [isLoadingBooking, setIsLoadingBooking] = useState<boolean>(!initialParams?.booking && !!bookingIdFromParams);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [cancelOtherText, setCancelOtherText] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!bookingIdFromParams || booking) return;
+
+    const loadBooking = async () => {
+      try {
+        setIsLoadingBooking(true);
+        const res = await fetch(`${getApiUrl()}/api/later-bookings/${bookingIdFromParams}`);
+        if (!res.ok) throw new Error("Failed to load booking");
+        const data = await res.json();
+        if (!cancelled) {
+          setBooking(data.booking || null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          Alert.alert("Error", "Could not load booking details.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingBooking(false);
+        }
+      }
+    };
+
+    loadBooking();
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingIdFromParams, booking]);
+
+  const handleDriveToPickup = () => {
+    if (!booking?.pickup_address) return;
+    const lat = Number(booking?.pickup_latitude);
+    const lng = Number(booking?.pickup_longitude);
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    const encodedAddress = encodeURIComponent(booking.pickup_address);
+    const label = encodeURIComponent("Pickup");
+    const appUrl = hasCoords
+      ? Platform.select({
+          ios: `maps:0,0?q=${label}@${lat},${lng}`,
+          android: `google.navigation:q=${lat},${lng}`,
+          default: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+        })
+      : Platform.select({
+          ios: `maps:0,0?q=${encodedAddress}`,
+          android: `google.navigation:q=${encodedAddress}`,
+          default: `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`,
+        });
+    const fallbackWebUrl = hasCoords
+      ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+
+    if (appUrl) {
+      Linking.openURL(appUrl).catch(() => Linking.openURL(fallbackWebUrl).catch(() => {
+        Alert.alert("Navigation unavailable", "Could not open maps on this device.");
+      }));
+    }
+  };
+
+  if (isLoadingBooking) {
+    return (
+      <View style={[s.root, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={UTOColors.primary} />
+      </View>
+    );
+  }
 
   if (!booking) {
     return (
@@ -59,7 +129,7 @@ export default function ScheduledJobDetailsScreen() {
   const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
   const fare = booking.estimated_fare;
   const penalty = fare ? (parseFloat(String(fare)) * 0.5) : 0;
-  const driverOwnsThis = booking.driver_id === user?.id;
+  const driverOwnsThis = booking.driver_id === user?.id || booking.assigned_driver_id === user?.id;
 
   const handleAccept = async () => {
     Alert.alert(
@@ -215,7 +285,7 @@ export default function ScheduledJobDetailsScreen() {
             )}
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Payment Method:</Text>
-              <Text style={s.detailValue}>{booking.payment_method === 'cash' ? 'Cash' : 'Card / App'}</Text>
+              <Text style={s.detailValue}>Card / Prepaid</Text>
             </View>
           </View>
         </View>
@@ -229,9 +299,14 @@ export default function ScheduledJobDetailsScreen() {
           </Pressable>
         )}
         {booking.status === 'driver_accepted' && driverOwnsThis && (
-          <Pressable style={s.cancelBtn} onPress={() => setShowCancelModal(true)}>
-            <Text style={s.cancelBtnText}>Cancel Booking</Text>
-          </Pressable>
+          <>
+            <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
+              <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
+            </Pressable>
+            <Pressable style={s.cancelBtn} onPress={() => setShowCancelModal(true)}>
+              <Text style={s.cancelBtnText}>Cancel Booking</Text>
+            </Pressable>
+          </>
         )}
       </View>
 
@@ -320,6 +395,8 @@ const s = StyleSheet.create({
   acceptBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
   cancelBtn: { backgroundColor: '#FEE2E2', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   cancelBtnText: { color: '#DC2626', fontSize: 16, fontWeight: '700' },
+  driveBtn: { backgroundColor: UTOColors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
+  driveBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
 
   modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 100 },
   modalContent: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, width: '100%', maxHeight: '90%' },

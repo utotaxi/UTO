@@ -1914,24 +1914,22 @@ return (
         {currentStatus !== "completed" && (
           <Pressable style={styles.paymentSwitchButton} onPress={() => {
             if (!activeRide) return;
-            const currentMethod = activeRide.paymentMethod || "cash";
-            const newMethod = currentMethod === "card" ? "cash" : "card";
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             if (typeof updateRidePaymentMethod === 'function') {
-              updateRidePaymentMethod(activeRide.id, newMethod);
+              updateRidePaymentMethod(activeRide.id, "card");
             }
           }}>
             <View style={styles.paymentSwitchRow}>
               <MaterialIcons 
-                name={activeRide.paymentMethod === 'card' ? 'credit-card' : 'payments'} 
+                name="credit-card" 
                 size={18} 
                 color={theme.textSecondary} 
               />
               <ThemedText style={{ color: theme.textSecondary, marginLeft: 8 }}>
-                Paying with {activeRide.paymentMethod === 'card' ? 'Card' : 'Cash'}
+                Paying with Card
               </ThemedText>
             </View>
-            <ThemedText style={{ color: UTOColors.rider.primary, fontWeight: '600' }}>Change</ThemedText>
+            <ThemedText style={{ color: UTOColors.rider.primary, fontWeight: '600' }}>Default</ThemedText>
           </Pressable>
         )}
       </View>

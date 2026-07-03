@@ -1,3 +1,5 @@
+//client/context/AuthContext.tsx
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
@@ -25,8 +27,8 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signIn: (email: string, password: string, isGoogle?: boolean, googleFullName?: string) => Promise<boolean>;
-  signUp: (fullName: string, email: string, password: string, role?: string, driverDetails?: DriverDetails) => Promise<boolean>;
+  signIn: (email: string, password: string, isGoogle?: boolean, googleFullName?: string) => Promise<User | null>;
+  signUp: (fullName: string, email: string, password: string, role?: string, driverDetails?: DriverDetails) => Promise<User>;
   signOut: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
 }
@@ -84,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signIn = async (email: string, password: string, isGoogle: boolean = false, googleFullName?: string): Promise<boolean> => {
+  const signIn = async (email: string, password: string, isGoogle: boolean = false, googleFullName?: string): Promise<User | null> => {
     try {
       // Use API to login (pass fullName if we have it from google, otherwise undefined)
       // We pass the email name part as a fallback fullName since google doesn't always provide it on just signIn
@@ -105,14 +107,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(mappedUser);
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(mappedUser));
       await AsyncStorage.setItem(AUTH_STORAGE_KEY, "true");
-      return true;
+      return mappedUser;
     } catch (error) {
       console.error("Sign in API failed:", error);
-      throw error;
+      return null;
     }
   };
 
-  const signUp = async (fullName: string, email: string, password: string, role: string = "rider", driverDetails?: DriverDetails): Promise<boolean> => {
+  const signUp = async (fullName: string, email: string, password: string, role: string = "rider", driverDetails?: DriverDetails): Promise<User> => {
     // NOTE: No local fallback here — sign-up MUST persist to Supabase.
     // If the API call fails, we throw so the UI can show the error to the user.
 
@@ -163,7 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(mappedUser);
     await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(mappedUser));
     await AsyncStorage.setItem(AUTH_STORAGE_KEY, "true");
-    return true;
+    return mappedUser;
   };
 
   const signOut = async () => {

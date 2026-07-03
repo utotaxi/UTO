@@ -3,7 +3,17 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
 import { setupSocketIO, scheduledRideHooks } from "./socket";
-import { authorizeSavedCard, createPaymentIntent, createCustomer, confirmPayment, createSetupIntent, getPaymentMethods, deletePaymentMethod } from "./stripe";
+import {
+  authorizeSavedCard,
+  chargeSavedCard,
+  createPaymentIntent,
+  createCustomer,
+  confirmPayment,
+  createSetupIntent,
+  deletePaymentMethod,
+  getPaymentMethods,
+  refundPayment,
+} from "./stripe";
 import { insertUserSchema, insertRideSchema, insertDriverSchema } from "@shared/schema";
 import {
   DRIVER_DEDUCTION_TYPE,
@@ -59,7 +69,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ─── Safe migration: ensure payment_method column exists on rides table ───
   try {
     const { error: migrationErr } = await supabase.rpc('exec_sql', {
-      sql: `ALTER TABLE rides ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'cash';`
+      sql: `ALTER TABLE rides ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'card';`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE rides ALTER COLUMN payment_method SET DEFAULT 'card';`
     });
     if (migrationErr) {
       console.log('ℹ️ Could not run ALTER TABLE via RPC — payment_method column may already exist');
@@ -167,6 +180,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS live_ride_id TEXT DEFAULT NULL;`
     });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'card';`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS payment_intent_id TEXT DEFAULT NULL;`
+    });
     // Same fields for web_booker so admin/web bookings can also go live
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS otp TEXT DEFAULT NULL;`
@@ -176,6 +198,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS live_ride_id TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'card';`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS payment_intent_id TEXT DEFAULT NULL;`
     });
     console.log('✅ Ensured later_bookings columns exist (including penalty & tracking fields)');
   } catch (e) {
@@ -700,7 +731,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           finalPrice: ride.final_price,
           distance: ride.distance,
           estimatedDuration: ride.estimated_duration,
-          paymentMethod: ride.payment_method || "cash",
+          paymentMethod: ride.payment_method || "card",
           otp: ride.otp || null,
           walletDeduction: ride.wallet_deduction || 0,
           expectedCollectAmount:
@@ -760,7 +791,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/drivers/:id/upload", async (req: Request, res: Response) => {
     try {
       const { base64, docType, mimeType } = req.body;
-      const driver = await storage.getDriver(req.params.id as string);
+      const rawDriverId = req.params.id as string;
+      let driver = await storage.getDriver(rawDriverId);
+      if (!driver) {
+        driver = await storage.getDriverByUserId(rawDriverId);
+      }
       if (!driver) return res.status(404).json({ error: "Driver not found" });
 
       if (!base64 || !docType) {
@@ -1492,6 +1527,44 @@ const missingLaterBookingColumns = new Set<string>();
 const missingLaterBookingAcceptColumns = new Set<string>();
 const missingLaterBookingCancelColumns = new Set<string>();
 const missingLaterBookingActivationColumns = new Set<string>();
+const scheduledReminderBucketByBooking = new Map<string, number>();
+
+const sendExpoPushNotification = async (
+  token: string,
+  title: string,
+  body: string,
+  data: Record<string, any> = {},
+) => {
+  if (!token) return;
+  try {
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: token,
+        sound: "default",
+        title,
+        body,
+        data,
+        priority: "high",
+      }),
+    });
+  } catch (err) {
+    console.warn("⚠️ Failed to send Expo push notification:", err);
+  }
+};
+
+const formatReminderWindow = (msUntilPickup: number): string => {
+  const totalMinutes = Math.max(0, Math.round(msUntilPickup / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours} hour${hours === 1 ? "" : "s"} ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  if (hours > 0) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+};
 
 const normalizeVehicleType = (value: any): string => {
   if (!value) return "saloon";
@@ -1537,7 +1610,7 @@ const generateRidePin = (): string =>
   Math.floor(1000 + Math.random() * 9000).toString();
 
 // How long before the scheduled pickup a booking is converted into a live ride
-const SCHEDULED_ACTIVATION_WINDOW_MS = 15 * 60 * 1000;
+const SCHEDULED_ACTIVATION_WINDOW_MS = 60 * 60 * 1000;
 
 // Attach rider name / email / phone to normalized bookings (batched users lookup)
 const attachRiderDetails = async (bookings: any[]): Promise<any[]> => {
@@ -1682,29 +1755,54 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
       }
     }
 
-    // If a coupon was applied, increment its used_count
-    if (couponCode) {
-      const normalizedCouponCode = couponCode?.toUpperCase()?.trim();
-      const { error: couponRpcError } = await sb.rpc('increment_coupon_usage', { coupon_code: normalizedCouponCode });
-      if (couponRpcError) {
-      const { data: couponData } = await sb
-        .from("coupons")
-        .select("used_count")
-        .eq("code", normalizedCouponCode)
-        .single();
-      if (couponData) {
-        await sb
-          .from("coupons")
-          .update({ used_count: (couponData.used_count || 0) + 1 })
-          .eq("code", normalizedCouponCode);
-        }
-      }
-    }
-
     let finalDropoffTime = dropoffTime;
     if (!finalDropoffTime) {
       const mins = clientDurationMinutes || 30;
       finalDropoffTime = new Date(pickupTime.getTime() + mins * 60000);
+    }
+
+    const rider = await storage.getUser(riderId);
+    if (!rider) {
+      return res.status(404).json({ error: "Rider not found" });
+    }
+
+    let stripeCustomerId = rider.stripeCustomerId || null;
+    if (!stripeCustomerId) {
+      try {
+        stripeCustomerId = await createCustomer(rider.email, rider.fullName || "Rider");
+        if (stripeCustomerId) {
+          await storage.updateUser(rider.id, { stripeCustomerId });
+        }
+      } catch (customerErr) {
+        console.warn("⚠️ Failed to create Stripe customer for scheduled booking:", customerErr);
+      }
+    }
+
+    const finalEstimatedFare = Math.max(0, Number(estimatedFare ?? 0));
+    let bookingPaymentStatus = finalEstimatedFare > 0 ? "prepaid" : "free";
+    let prepaidPaymentIntentId: string | null = null;
+
+    if (finalEstimatedFare > 0) {
+      if (!stripeCustomerId) {
+        return res.status(400).json({ error: "Please add a card before scheduling this ride." });
+      }
+
+      const chargeReference = `later_${riderId}_${Date.now()}`;
+      const chargeResult = await chargeSavedCard(
+        stripeCustomerId,
+        finalEstimatedFare,
+        chargeReference,
+        "gbp",
+        "ride_fare",
+      );
+
+      if (!chargeResult.success || !chargeResult.paymentIntentId) {
+        return res.status(400).json({
+          error: chargeResult.error || "Prepaid scheduled rides require a saved card. Please add a card and try again.",
+        });
+      }
+
+      prepaidPaymentIntentId = chargeResult.paymentIntentId;
     }
 
     // Pre-provide the ride PIN at booking time so the rider can see it in
@@ -1724,7 +1822,7 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
         dropoff_by: finalDropoffTime.toISOString(),
         status: "scheduled",
         vehicle_type: vehicleType || 'saloon',
-        estimated_fare: estimatedFare ?? null,
+        estimated_fare: finalEstimatedFare,
         distance_miles: clientDistanceMiles ?? null,
         duration_minutes: clientDurationMinutes ?? null,
         flight_number: flightNumber ?? null,
@@ -1732,6 +1830,9 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
         booking_type: bookingType || 'standard',
         passengers: passengers ?? 1,
         luggage: luggage ?? 0,
+        payment_method: "card",
+        payment_status: bookingPaymentStatus,
+        payment_intent_id: prepaidPaymentIntentId,
         coupon_code: couponCode ?? null,
         discount_amount: discountAmount ?? 0,
         return_pickup_address: returnPickupAddress ?? null,
@@ -1782,8 +1883,59 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
 
     if (error) {
       console.error("Supabase insert error:", error);
+      if (prepaidPaymentIntentId) {
+        await refundPayment(prepaidPaymentIntentId);
+      }
       return res.status(500).json({ error: error.message || "Database error" });
     }
+
+    if (couponCode) {
+      const normalizedCouponCode = couponCode?.toUpperCase()?.trim();
+      const { error: couponRpcError } = await sb.rpc('increment_coupon_usage', { coupon_code: normalizedCouponCode });
+      if (couponRpcError) {
+        const { data: couponData } = await sb
+          .from("coupons")
+          .select("used_count")
+          .eq("code", normalizedCouponCode)
+          .single();
+        if (couponData) {
+          await sb
+            .from("coupons")
+            .update({ used_count: (couponData.used_count || 0) + 1 })
+            .eq("code", normalizedCouponCode);
+        }
+      }
+    }
+
+    // Notify all drivers that a new marketplace booking is available.
+    try {
+      const { data: driverRows } = await sb
+        .from("drivers")
+        .select("user_id")
+        .not("user_id", "is", null);
+      const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
+      if (driverUserIds.length > 0) {
+        const { data: driverUsers } = await sb
+          .from("users")
+          .select("id, push_token")
+          .in("id", driverUserIds);
+        const title = "🗓 New Scheduled Ride";
+        const body = `ride has been scheduled by ${rider.fullName || "rider"} please go to the market place and pick the ride`;
+        await Promise.all(
+          (driverUsers || [])
+            .filter((row: any) => row.push_token)
+            .map((row: any) =>
+              sendExpoPushNotification(row.push_token, title, body, {
+                type: "scheduled_marketplace_created",
+                bookingId: data.id,
+              }),
+            ),
+        );
+      }
+    } catch (notifyErr) {
+      console.warn("⚠️ Failed to notify drivers about scheduled booking:", notifyErr);
+    }
+
     // Broadcast without the PIN (drivers also receive this event); the rider
     // gets the PIN in the direct response below.
     io.emit("later-booking:update", { type: "created", booking: stripPinForDrivers(data) });
@@ -1815,7 +1967,7 @@ app.get("/api/later-bookings", async (req: Request, res: Response) => {
         const bookingPickupTs = pickupTimestamp(booking);
 
         if (driverId) {
-          // Unassigned bookings inside the 15-min activation window are dispatched
+          // Unassigned bookings inside the activation window are dispatched
           // as live rides — keep them out of the marketplace to avoid double-accepts.
           if (status === "scheduled") return bookingPickupTs >= nowTs + SCHEDULED_ACTIVATION_WINDOW_MS && !booking.activated_at;
           if (status === "driver_accepted" || status === "cancelled") return bookingDriverId === driverId;
@@ -1856,6 +2008,38 @@ app.get("/api/later-bookings/rider/:riderId", async (req: Request, res: Response
     res.json({ bookings });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
+  }
+});
+
+app.get("/api/later-bookings/:id", async (req: Request, res: Response) => {
+  try {
+    const bookingId = req.params.id as string;
+
+    const webFetch = await sb
+      .from("web_booker")
+      .select("*")
+      .eq("id", bookingId)
+      .maybeSingle();
+    if (webFetch.data) {
+      const normalized = normalizeLaterBooking(webFetch.data, "web_booker");
+      const [enriched] = await attachRiderDetails([normalized]);
+      return res.json({ booking: stripPinForDrivers(enriched) });
+    }
+
+    const laterFetch = await sb
+      .from("later_bookings")
+      .select("*")
+      .eq("id", bookingId)
+      .maybeSingle();
+    if (laterFetch.data) {
+      const normalized = normalizeLaterBooking(laterFetch.data, "later_bookings");
+      const [enriched] = await attachRiderDetails([normalized]);
+      return res.json({ booking: stripPinForDrivers(enriched) });
+    }
+
+    return res.status(404).json({ error: "Booking not found" });
+  } catch (error: any) {
+    return res.status(500).json({ error: error?.message || "Failed to fetch booking" });
   }
 });
 
@@ -1906,7 +2090,7 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
     }
 
     // Once a booking has been activated (converted to a live ride within the
-    // 15-min window) it can only be accepted through the live dispatch flow.
+    // activation window) it can only be accepted through the live dispatch flow.
     if (existingBooking?.activated_at || existingBooking?.live_ride_id) {
       return res.status(400).json({ error: "This booking is now being dispatched as a live ride" });
     }
@@ -1985,7 +2169,7 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
       return res.status(400).json({ error: "Booking already completed" });
     }
 
-    // If the booking has already gone live (within 15 min of pickup) the live
+    // If the booking has already gone live (inside activation window) the live
     // ride must be cancelled too. A ride that is already in progress can no
     // longer be cancelled from the scheduled bookings screen.
     const liveRideId = booking.live_ride_id || null;
@@ -2023,6 +2207,11 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
     const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
     const pastPickup = msUntilPickup < 0;
     const estimatedFare = Number(normalizedBooking.estimated_fare || 0);
+    const bookingPaymentMethod = String(normalizedBooking.payment_method || "card").toLowerCase();
+    const bookingPaymentStatus = String(normalizedBooking.payment_status || "").toLowerCase();
+    const bookingPaymentIntentId = normalizedBooking.payment_intent_id || null;
+    const prepaidStatusSet = new Set(["prepaid", "paid", "card_charged", "completed", "succeeded"]);
+    const isPrepaidBooking = bookingPaymentMethod === "card" && !!bookingPaymentIntentId && prepaidStatusSet.has(bookingPaymentStatus);
 
     let cancellationFee = 0;
     let refundAmount = 0;
@@ -2040,10 +2229,15 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
         // Charge 100% cancellation fee for late cancellation
         const halfFare = estimatedFare * 1;
         cancellationFee = halfFare;
-        penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
+        if (isPrepaidBooking) {
+          penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} retained from prepaid fare.`;
+        } else {
+          penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
+        }
 
-        // Deduct from rider wallet (allowing negative balance)
-        if (riderId && halfFare > 0) {
+        // Deduct from rider wallet (allowing negative balance) only when this
+        // booking wasn't already prepaid on card at schedule time.
+        if (!isPrepaidBooking && riderId && halfFare > 0) {
           try {
             const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', riderId).single();
             const currentBalance = riderRow?.wallet_balance || 0;
@@ -2086,9 +2280,16 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
       } else {
         // Free cancellation — issue full refund
         refundAmount = estimatedFare > 0 ? estimatedFare : 0;
-        penaltyNote = 'Free cancellation — more than 3 hours before pickup.';
-        // If they prepaid something, refund it (stub — payment logic would go here)
-        console.log(`✅ Free cancel: rider ${riderId}, refund would be £${refundAmount}`);
+        if (isPrepaidBooking && bookingPaymentIntentId) {
+          const refunded = await refundPayment(bookingPaymentIntentId);
+          if (!refunded) {
+            return res.status(500).json({ error: "Failed to refund prepaid amount. Please try again." });
+          }
+          penaltyNote = `Free cancellation — more than 3 hours before pickup. Prepaid amount £${refundAmount.toFixed(2)} refunded.`;
+        } else {
+          penaltyNote = 'Free cancellation — more than 3 hours before pickup.';
+        }
+        console.log(`✅ Free cancel: rider ${riderId}, refundAmount=£${refundAmount}`);
       }
     } else if (cancelledBy === 'driver') {
       // Driver cancellation within 3 hours: 50% penalty
@@ -2136,13 +2337,20 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
       cancellation_note: penaltyNote,
       cancelled_by: cancelledBy || 'rider',
     };
+    if (cancelledBy === 'rider' && isPrepaidBooking) {
+      if (cancellationFee > 0) {
+        updatePayload.payment_status = "prepaid_retained";
+      } else if (bookingPaymentIntentId) {
+        updatePayload.payment_status = "refunded";
+      }
+    }
     if (cancelledBy === 'driver') {
       if (releaseDriverAssignment) {
         updatePayload.driver_id = null;
         updatePayload.assigned_driver_id = null;
         updatePayload.accepted_by_driver_at = null;
         // Clear the live-ride link so the activation engine can re-dispatch
-        // the booking to other drivers if it's inside the 15-min window.
+        // the booking to other drivers if it's inside the activation window.
         updatePayload.live_ride_id = null;
         updatePayload.activated_at = null;
       }
@@ -2255,8 +2463,100 @@ app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
   }
 });
 
+const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 3 * 60 * 60 * 1000;
+const SCHEDULED_DRIVER_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+
+const triggerScheduledDriverReminders = async () => {
+  const nowTs = Date.now();
+  const [laterBookingsRaw, webBookerRaw] = await Promise.all([
+    fetchLaterBookingsFromTable("later_bookings"),
+    fetchLaterBookingsFromTable("web_booker"),
+  ]);
+
+  const acceptedBookings = [
+    ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
+    ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
+  ].filter((booking: any) => {
+    const status = String(booking.status || "").toLowerCase();
+    if (status !== "driver_accepted") return false;
+    const assignedDriverId = booking.driver_id || booking.assigned_driver_id;
+    if (!assignedDriverId) return false;
+    const pickupTs = pickupTimestamp(booking);
+    if (!pickupTs) return false;
+    const msUntilPickup = pickupTs - nowTs;
+    return msUntilPickup > 0 && msUntilPickup <= SCHEDULED_DRIVER_REMINDER_WINDOW_MS;
+  });
+
+  const activeReminderKeys = new Set<string>();
+  for (const booking of acceptedBookings) {
+    const pickupTs = pickupTimestamp(booking);
+    const msUntilPickup = pickupTs - nowTs;
+    const bucket = Math.floor(msUntilPickup / SCHEDULED_DRIVER_REMINDER_INTERVAL_MS);
+    const reminderKey = `${booking.source_table}:${booking.id}`;
+    activeReminderKeys.add(reminderKey);
+
+    if (scheduledReminderBucketByBooking.get(reminderKey) === bucket) {
+      continue;
+    }
+
+    const assignedDriverId = booking.driver_id || booking.assigned_driver_id;
+    if (!assignedDriverId) continue;
+
+    const { data: driverRow } = await sb
+      .from("drivers")
+      .select("user_id")
+      .or(`id.eq.${assignedDriverId},user_id.eq.${assignedDriverId}`)
+      .limit(1)
+      .maybeSingle();
+
+    const driverUserId = driverRow?.user_id || assignedDriverId;
+    const { data: userRow } = await sb
+      .from("users")
+      .select("push_token")
+      .eq("id", driverUserId)
+      .maybeSingle();
+
+    if (!userRow?.push_token) continue;
+
+    const pickupLabel = booking.pickup_address || "pickup location";
+    const dropoffLabel = booking.dropoff_address || "destination";
+    const rideDetails = `${pickupLabel} to ${dropoffLabel}`;
+    const reminderWindow = formatReminderWindow(msUntilPickup);
+    const body = `Ride ${rideDetails} is going to start in ${reminderWindow} please reach to the pickup location`;
+
+    await sendExpoPushNotification(
+      userRow.push_token,
+      "Upcoming Scheduled Ride",
+      body,
+      {
+        type: "scheduled_booking_reminder",
+        bookingId: booking.id,
+        sourceTable: booking.source_table,
+      },
+    );
+
+    scheduledReminderBucketByBooking.set(reminderKey, bucket);
+  }
+
+  for (const key of Array.from(scheduledReminderBucketByBooking.keys())) {
+    if (!activeReminderKeys.has(key)) {
+      scheduledReminderBucketByBooking.delete(key);
+    }
+  }
+};
+
+setInterval(() => {
+  triggerScheduledDriverReminders().catch((err) => {
+    console.error("Scheduled driver reminder engine error:", err);
+  });
+}, 5 * 60 * 1000);
+
+triggerScheduledDriverReminders().catch((err) => {
+  console.error("Initial scheduled driver reminder check failed:", err);
+});
+
 // ─── Scheduled Bookings Live Activation Engine ───
-// Runs every minute. Any booking within 15 minutes of its pickup time is
+// Runs every minute. Any booking within 60 minutes of its pickup time is
 // converted into a real live ride:
 //   • already accepted by a driver → lands directly on that driver's home
 //     screen in the "accepted" phase (same flow as an immediate booking).
@@ -2264,7 +2564,7 @@ app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
 //     like an immediate (ASAP) booking.
 // From that point all live-ride policies apply (PIN verification, no-show,
 // driver 50% / rider 100% cancellation fees, etc.).
-const SCHEDULED_ACTIVATION_RETRY_MS = 3 * 60 * 1000;   // retry dispatch every 3 min if no driver found
+const SCHEDULED_ACTIVATION_RETRY_MS = 5 * 60 * 1000;   // retry dispatch every 5 min if no driver found
 const SCHEDULED_ACTIVATION_GRACE_MS = 30 * 60 * 1000;  // keep trying up to 30 min past pickup
 
 setInterval(async () => {
@@ -2348,7 +2648,9 @@ setInterval(async () => {
           estimatedPrice: Number(booking.estimated_fare) || 0,
           distanceMiles: Number(booking.distance_miles) || 0,
           durationMinutes: Number(booking.duration_minutes) || 0,
-          paymentMethod: booking.payment_method || "cash",
+          paymentMethod: booking.payment_method || "card",
+          paymentStatus: booking.payment_status || null,
+          paymentIntentId: booking.payment_intent_id || null,
           otp,
           isScheduledBooking: true,
           scheduledBookingId: booking.id,

@@ -2355,6 +2355,8 @@ interface RideUpdate {
   rideId: string;
   status: string;
   driverId?: string;
+  cancelledBy?: "rider" | "driver";
+  earlyCompletionReason?: string;
   driverLocation?: DriverLocation;
   driverInfo?: any;
 }
@@ -2522,7 +2524,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
     durationMinutes: Number(ride.estimated_duration || 0),
     couponCode: ride.coupon_code || null,
     discountAmount: Number(ride.discount_amount || 0),
-    paymentMethod: ride.payment_method || "cash",
+    paymentMethod: ride.payment_method || "card",
     otp: ride.otp || null,
   };
   };
@@ -2617,12 +2619,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         entry = undefined;
         continue;
       }
-
-      // Verify they are still connected
-      const currentSocketId = connectedDrivers.get(entry.driverId);
-      if (currentSocketId) break;
-      console.log(`⏭️ Skipping driver ${entry.driverId} — no longer connected`);
-      entry = undefined;
+      break;
     }
 
     if (!entry) {
@@ -2768,7 +2765,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               // Parse to integers to avoid "invalid input syntax for type integer" DB error
               distance: Math.round(parseFloat(rideData.distanceKm || rideData.distanceMiles || 0)),
               estimated_duration: Math.round(parseFloat(rideData.durationMinutes || 0)),
-              payment_method: rideData.paymentMethod || "cash",
+              payment_method: rideData.paymentMethod || "card",
               payment_intent_id: rideData.paymentIntentId || null,
               payment_status: rideData.paymentStatus || (rideData.paymentIntentId ? "authorized" : null),
               otp: typeof rideData.otp === "string" ? rideData.otp : null,
@@ -2890,10 +2887,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
       if (onlineDrivers && onlineDrivers.length > 0) {
         for (const driver of onlineDrivers) {
           const driverSocketId = connectedDrivers.get(driver.id);
-          if (!driverSocketId) {
-            console.log(`   ⏭️ Skipping DB driver ${driver.id} — not socket-connected`);
-            continue;
-          }
 
           // Vehicle type filtering
           const driverVehicle = normalizeVehicleType(driver.vehicle_type || 'saloon');
@@ -2910,10 +2903,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
               driverLocation.longitude
             );
             const withinRadius = dist <= RADIUS_MILES;
-            console.log(`   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle})`);
+            console.log(`   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle}, socket: ${driverSocketId ? "connected" : "background/offline"})`);
 
             if (withinRadius) {
-              heap.push({ driverId: driver.id, distance: dist, socketId: driverSocketId });
+              heap.push({ driverId: driver.id, distance: dist, socketId: driverSocketId || "" });
               addedDriverIds.add(driver.id);
             } else {
               console.log(`   ⏭️ Driver ${driver.id} is ${dist.toFixed(2)} mi away — outside ${RADIUS_MILES} mi radius`);
@@ -3070,10 +3063,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         const driverSocketId = connectedDrivers.get(driver.id);
-        if (!driverSocketId) {
-          console.log(`   ⏭️ Skipping DB driver ${driver.id} — not socket-connected`);
-          continue;
-        }
 
         const driverVehicle = normalizeVehicleType(driver.vehicle_type || 'saloon');
         if (!compatibleTypes.includes(driverVehicle)) {
@@ -3089,10 +3078,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
             driverLocation.longitude
           );
 
-          console.log(`   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle})`);
+          console.log(`   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle}, socket: ${driverSocketId ? "connected" : "background/offline"})`);
 
           if (dist <= RADIUS_MILES) {
-            heap.push({ driverId: driver.id, distance: dist, socketId: driverSocketId });
+            heap.push({ driverId: driver.id, distance: dist, socketId: driverSocketId || "" });
             addedDriverIds.add(driver.id);
           } else {
             console.log(`   ⏭️ Driver ${driver.id} is ${dist.toFixed(2)} mi away — outside ${RADIUS_MILES} mi radius`);
@@ -3207,7 +3196,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
       estimated_price: rideData.farePrice || 0,
       distance: Math.round(parseFloat(rideData.distanceMiles || 0)),
       estimated_duration: Math.round(parseFloat(rideData.durationMinutes || 0)),
-      payment_method: rideData.paymentMethod || "cash",
+      payment_method: rideData.paymentMethod || "card",
+      payment_status: rideData.paymentStatus || null,
+      payment_intent_id: rideData.paymentIntentId || null,
       otp: typeof rideData.otp === "string" ? rideData.otp : null,
     };
 
@@ -3994,6 +3985,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
             updateData.payment_status = "completed";
             // Ensure driver_id is ALWAYS set on completion
             if (resolvedDriverId) updateData.driver_id = resolvedDriverId;
+            if (typeof update.earlyCompletionReason === "string" && update.earlyCompletionReason.trim()) {
+              updateData.cancellation_reason = update.earlyCompletionReason.trim();
+            }
 
             // Store waiting charge and final price if sent by the driver client
             const waitingCharge = (update as any).waitingCharge || 0;
@@ -4008,12 +4002,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
             try {
               const { data: completedRide } = await supabase
                 .from("rides")
-                .select("rider_id, estimated_price, final_price, payment_method, payment_intent_id")
+                .select("rider_id, estimated_price, final_price, payment_method, payment_intent_id, payment_status")
                 .eq("id", update.rideId)
                 .single();
 
               const completedFare = Number(clientTotalFare || completedRide?.final_price || completedRide?.estimated_price || 0);
-              if (completedRide?.payment_method === "card" && completedFare > 0 && completedRide.rider_id) {
+              const paymentStatus = String(completedRide?.payment_status || "").toLowerCase();
+              const alreadyPrepaid = new Set(["prepaid", "card_charged", "paid", "succeeded", "prepaid_retained"]).has(paymentStatus);
+              if (completedRide?.payment_method === "card" && completedFare > 0 && completedRide.rider_id && !alreadyPrepaid) {
                 const { data: riderUser } = await supabase
                   .from("users")
                   .select("stripe_customer_id")
@@ -4054,6 +4050,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   console.warn(`⚠️ Card capture/charge failed for ride ${update.rideId}: ${chargeResult.error}`);
                   updateData.payment_status = "card_charge_failed";
                 }
+              } else if (alreadyPrepaid) {
+                updateData.payment_status = completedRide?.payment_status || "prepaid";
+                console.log(`💳 Ride ${update.rideId} was prepaid earlier — skipping completion-time card capture`);
               }
             } catch (cardChargeErr) {
               console.error(`❌ Card charge error on ride completion:`, cardChargeErr);
@@ -4076,7 +4075,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const acceptedElapsedMs = acceptedAt ? Date.now() - acceptedAt : 0;
               const isAfterFreeMinute = acceptedAt > 0 && acceptedElapsedMs >= 60_000;
               const isDriverAlreadyAtPickup = cancelledRide && ["arrived", "at_pickup", "in_progress"].includes(cancelledRide.status);
-              const shouldChargeCancellationFee = !!cancelledRide && (isDriverAlreadyAtPickup || isAfterFreeMinute);
+              const cancelledBy = String((update as any).cancelledBy || "").toLowerCase();
+              const riderInitiatedCancellation = cancelledBy === "rider";
+              const shouldChargeCancellationFee =
+                !!cancelledRide &&
+                riderInitiatedCancellation &&
+                (isDriverAlreadyAtPickup || isAfterFreeMinute);
 
               if (cancelledRide && shouldChargeCancellationFee) {
                 const fullFareAmount = Number(cancelledRide.final_price || cancelledRide.estimated_price || 0);
@@ -4197,6 +4201,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 (update as any).cancellationFee = 0;
                 (update as any).chargedAmount = 0;
                 (update as any).chargedVia = "none";
+                if (!riderInitiatedCancellation) {
+                  (update as any).cancellationPolicy = "driver_cancelled_no_fee";
+                } else if (!isAfterFreeMinute && !isDriverAlreadyAtPickup) {
+                  (update as any).cancellationPolicy = "free_minute";
+                }
               }
             } catch (cancelFeeErr) {
               console.error("❌ Error processing cancellation fee:", cancelFeeErr);
@@ -4453,7 +4462,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         const fareAmount = rideRow.estimated_price || 0;
-        const ridePaymentMethod = rideRow.payment_method || "cash";
+        const ridePaymentMethod = rideRow.payment_method || "card";
 
         console.log(`💳 No-show: ride ${data.rideId} payment_method=${ridePaymentMethod}, fare=£${fareAmount}`);
 
@@ -4933,10 +4942,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
             }
           }
 
+          const disconnectGraceMs = hasActiveRide ? 30_000 : 120_000;
           if (hasActiveRide) {
             console.log(`⏳ Driver ${driverId} disconnected during active ride — waiting 30s before marking offline`);
-            // Grace period: wait 30 seconds before marking offline
-            setTimeout(async () => {
+          } else {
+            console.log(`⏳ Driver ${driverId} disconnected while online — waiting 120s before marking offline`);
+          }
+
+          setTimeout(async () => {
               // Check if driver reconnected with a NEW socket in the meantime
               const currentSocketId = connectedDrivers.get(driverId);
               if (currentSocketId && currentSocketId !== socket.id) {
@@ -4946,7 +4959,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               // Driver did NOT reconnect — mark offline
               if (!currentSocketId || currentSocketId === socket.id) {
                 connectedDrivers.delete(driverId);
-                console.log(`📊 Driver ${driverId} did not reconnect within 30s — marking offline. Remaining: ${connectedDrivers.size}`);
+                console.log(`📊 Driver ${driverId} did not reconnect within ${Math.round(disconnectGraceMs / 1000)}s — marking offline. Remaining: ${connectedDrivers.size}`);
                 try {
                   await supabase
                     .from("drivers")
@@ -4956,20 +4969,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   console.error("Error updating driver status on disconnect:", error);
                 }
               }
-            }, 30000);
-          } else {
-            // No active ride — mark offline immediately
-            connectedDrivers.delete(driverId);
-            console.log(`📊 Driver ${driverId} disconnected (no active ride). Remaining connected drivers: ${connectedDrivers.size}`);
-            try {
-              await supabase
-                .from("drivers")
-                .update({ is_online: false, is_available: false })
-                .eq("id", driverId);
-            } catch (error) {
-              console.error("Error updating driver status on disconnect:", error);
-            }
-          }
+            }, disconnectGraceMs);
           break;
         }
       }

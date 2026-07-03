@@ -128,8 +128,12 @@ export default function SignInScreen({ navigation, route }: any) {
 
       console.log("🔑 Google OAuth: authenticated as", userEmail);
 
-      await signIn(userEmail, "google", true, userFullName);
-      setUserRole(selectedRole === "driver" ? "driver" : "rider");
+      const signedInUser = await signIn(userEmail, "google", true, userFullName);
+      if (!signedInUser) {
+        throw new Error("Failed to sign in");
+      }
+      const serverRole = (signedInUser.role || "rider").toLowerCase();
+      setUserRole(serverRole === "both" ? "both" : serverRole === "driver" ? "driver" : "rider");
     } catch (err: any) {
       console.error("🔑 Google OAuth redirect error:", err);
       setError(parseAuthError(err, "Server Error: Google sign in failed on the backend"));
@@ -171,8 +175,12 @@ export default function SignInScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      await signIn(email, password);
-      setUserRole(selectedRole === "driver" ? "driver" : "rider");
+      const signedInUser = await signIn(email, password);
+      if (!signedInUser) {
+        throw new Error("Invalid email or password");
+      }
+      const serverRole = (signedInUser.role || "rider").toLowerCase();
+      setUserRole(serverRole === "both" ? "both" : serverRole === "driver" ? "driver" : "rider");
     } catch (err) {
       setError(parseAuthError(err, "Invalid email or password"));
     } finally {

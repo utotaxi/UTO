@@ -21,6 +21,7 @@ import { LocationInputAutocomplete } from '@/components/LocationInputAutocomplet
 import { useAuth } from '@/context/AuthContext';
 import { useRide } from '@/context/RideContext';
 import { getApiUrl } from '@/lib/query-client';
+import { api } from '@/lib/api';
 
 const UTO_YELLOW = '#FFD000';
 
@@ -221,6 +222,12 @@ export default function LaterRideScreen({ navigation }: any) {
     setIsSaving(true);
     const finalFare = estimatedFare ? Math.max(0, estimatedFare - couponDiscount) : null;
     try {
+      const savedCards = user?.id ? await api.payments.getSavedCards(user.id) : [];
+      if (!savedCards || savedCards.length === 0) {
+        Alert.alert('Card Required', 'Please add a card in your account before scheduling a ride.');
+        return;
+      }
+
       const res = await fetch(`${getApiUrl()}/api/later-bookings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,6 +241,7 @@ export default function LaterRideScreen({ navigation }: any) {
           dropoffLongitude: dropoffLocation?.longitude ?? null,
           pickupAt: finalPickup.toISOString(),
           estimatedFare: finalFare,
+          paymentMethod: 'card',
           vehicleType: selectedVehicle,
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
           durationMinutes: durationMin ?? null,

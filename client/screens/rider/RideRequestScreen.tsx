@@ -1926,7 +1926,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [durationMin, setDurationMin] = useState<number | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card">("cash");
+  const [paymentMethod, setPaymentMethod] = useState<"card">("card");
   const [useWalletBalance, setUseWalletBalance] = useState(false);
 
   // const MAX_RIDE_DISTANCE_MILES = 5;
@@ -2312,14 +2312,14 @@ export default function RideRequestScreen({ navigation, route }: any) {
     //   return;
     // }
 
-    // ── Guard: Ensure saved card exists when paying by card ──
-    if (paymentMethod === 'card' && savedCards.length === 0) {
+    // Card-only flow: a saved card is required before requesting.
+    if (savedCards.length === 0) {
       Alert.alert(
         'No Saved Card',
-        'You need to save a card before requesting a ride with card payment.',
+        'You need to save a card before requesting a ride.',
         [
           { text: 'Add Card', onPress: handleSaveCard },
-          { text: 'Use Cash', onPress: () => setPaymentMethod('cash'), style: 'cancel' },
+          { text: 'Cancel', style: 'cancel' },
         ]
       );
       return;
@@ -2611,56 +2611,38 @@ export default function RideRequestScreen({ navigation, route }: any) {
             <View style={{ paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#333333', marginBottom: 12, marginTop: 8 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <ThemedText style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFF' }}>Payment Method</ThemedText>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Pressable
-                    onPress={() => setPaymentMethod('cash')}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      backgroundColor: paymentMethod === 'cash' ? UTOColors.primary : '#333333',
-                    }}
-                  >
-                    <MaterialIcons name="money" size={16} color={paymentMethod === 'cash' ? '#000000' : '#FFFFFF'} style={{ marginRight: 4 }} />
-                    <Text style={{ color: paymentMethod === 'cash' ? '#000000' : '#FFFFFF', fontWeight: '600', fontSize: 14 }}>Cash</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      if (savedCards.length > 0) {
-                        // Card already saved — just switch
-                        setPaymentMethod('card');
-                      } else {
-                        // No saved card — trigger save flow
-                        handleSaveCard();
-                      }
-                    }}
-                    disabled={isSavingCard}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      backgroundColor: paymentMethod === 'card' ? UTOColors.primary : '#333333',
-                      opacity: isSavingCard ? 0.6 : 1,
-                    }}
-                  >
-                    {isSavingCard ? (
-                      <ActivityIndicator size="small" color={paymentMethod === 'card' ? '#000000' : '#FFFFFF'} style={{ marginRight: 4 }} />
-                    ) : (
-                      <MaterialIcons name="credit-card" size={16} color={paymentMethod === 'card' ? '#000000' : '#FFFFFF'} style={{ marginRight: 4 }} />
-                    )}
-                    <Text style={{ color: paymentMethod === 'card' ? '#000000' : '#FFFFFF', fontWeight: '600', fontSize: 14 }}>
-                      {isSavingCard ? 'Saving...' : savedCards.length > 0 ? 'Card' : 'Add Card'}
-                    </Text>
-                  </Pressable>
-                </View>
+                <Pressable
+                  onPress={() => {
+                    if (savedCards.length > 0) {
+                      setPaymentMethod('card');
+                    } else {
+                      handleSaveCard();
+                    }
+                  }}
+                  disabled={isSavingCard}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    backgroundColor: UTOColors.primary,
+                    opacity: isSavingCard ? 0.6 : 1,
+                  }}
+                >
+                  {isSavingCard ? (
+                    <ActivityIndicator size="small" color="#000000" style={{ marginRight: 4 }} />
+                  ) : (
+                    <MaterialIcons name="credit-card" size={16} color="#000000" style={{ marginRight: 4 }} />
+                  )}
+                  <Text style={{ color: '#000000', fontWeight: '600', fontSize: 14 }}>
+                    {isSavingCard ? 'Saving...' : savedCards.length > 0 ? 'Card' : 'Add Card'}
+                  </Text>
+                </Pressable>
               </View>
 
               {/* Show saved card info when card payment is active */}
-              {paymentMethod === 'card' && savedCards.length > 0 && (
+              {savedCards.length > 0 && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingLeft: 4 }}>
                   <MaterialIcons name="check-circle" size={14} color={UTOColors.success} style={{ marginRight: 6 }} />
                   <Text style={{ color: '#A0A0A0', fontSize: 13 }}>
@@ -3029,6 +3011,17 @@ export default function RideRequestScreen({ navigation, route }: any) {
 
                 // Save to Supabase if locations are already entered
                 if (pickup && dropoff && user?.id) {
+                  if (savedCards.length === 0) {
+                    Alert.alert(
+                      'Card Required',
+                      'Please add a card before scheduling a ride.',
+                      [
+                        { text: 'Add Card', onPress: handleSaveCard },
+                        { text: 'Cancel', style: 'cancel' },
+                      ]
+                    );
+                    return;
+                  }
                   try {
                     const fare = calculatePrice(selectedVehicle);
                     const res = await fetch(`${getApiUrl()}/api/later-bookings`, {
@@ -3044,6 +3037,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                         dropoffLongitude: dropoffLocation?.longitude || null,
                         vehicleType: selectedVehicle,
                         estimatedFare: fare,
+                        paymentMethod: 'card',
                         pickupAt: finalPickup.toISOString(),
                         passengers: schedPassengers,
                         luggage: schedLuggage,
@@ -3055,9 +3049,11 @@ export default function RideRequestScreen({ navigation, route }: any) {
                       Alert.alert('Error', resBody.error || `Server error ${res.status}`);
                       return;
                     }
+                    const responseBody = await res.json();
+                    const ridePin = responseBody?.booking?.otp;
                     Alert.alert(
                       '🗓 Ride Scheduled!',
-                      `Your ${VEHICLE_OPTIONS.find(v => v.type === selectedVehicle)?.name} ride has been scheduled.\n\nPickup: ${formatDisplayDate(finalPickup)} at ${formatDisplayTime(finalPickup)}\nEstimated Fare: £${fare.toFixed(2)}`,
+                      `Your ${VEHICLE_OPTIONS.find(v => v.type === selectedVehicle)?.name} ride has been scheduled.\n\nPickup: ${formatDisplayDate(finalPickup)} at ${formatDisplayTime(finalPickup)}\nEstimated Fare: £${fare.toFixed(2)}${ridePin ? `\n\n🔐 Ride PIN: ${ridePin}` : ''}`,
                       [{ text: 'OK' }]
                     );
                   } catch (err) {
