@@ -40,6 +40,20 @@ const AUTH_STORAGE_KEY = "@uto_auth";
 
 import { api } from "@/lib/api";
 
+async function resolveAccountRole(userId: string, role?: string): Promise<string> {
+  const normalizedRole = String(role || "rider").toLowerCase();
+  if (normalizedRole === "driver" || normalizedRole === "both") return normalizedRole;
+
+  try {
+    const driver = await api.drivers.getByUserId(userId);
+    if (driver?.id) return "driver";
+  } catch (_) {
+    // Non-critical — use the role returned by the user endpoint.
+  }
+
+  return normalizedRole;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,12 +75,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             const userData = await api.users.get(parsed.id);
             if (userData) {
+              const resolvedRole = await resolveAccountRole(userData.id, userData.role || parsed.role);
               const refreshed: User = {
                 ...parsed,
                 fullName: userData.fullName || parsed.fullName,
                 phone: userData.phone || parsed.phone,
                 profileImage: userData.profileImage || parsed.profileImage,
-                role: userData.role || parsed.role,
+                role: resolvedRole,
                 walletBalance: typeof userData.walletBalance === 'number' ? userData.walletBalance : (parsed.walletBalance || 0),
                 rating: typeof userData.rating === 'number' ? userData.rating : parsed.rating,
                 totalRides: typeof userData.totalRides === 'number' ? userData.totalRides : parsed.totalRides,
@@ -92,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // We pass the email name part as a fallback fullName since google doesn't always provide it on just signIn
       const nameFallback = googleFullName || email.split('@')[0];
       const userData = await api.auth.login(email, password || "default", isGoogle, nameFallback);
+      const resolvedRole = await resolveAccountRole(userData.id, userData.role);
       const mappedUser: User = {
         id: userData.id,
         fullName: userData.fullName,
@@ -100,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         rating: typeof userData.rating === 'number' ? userData.rating : 0.0,
         totalRides: typeof userData.totalRides === 'number' ? userData.totalRides : 0,
         isGoogleUser: isGoogle,
-        role: userData.role,
+        role: resolvedRole,
         walletBalance: typeof userData.walletBalance === 'number' ? userData.walletBalance : 0,
       };
 
@@ -151,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Step 3: Store user locally and mark as authenticated
+    const resolvedRole = await resolveAccountRole(userData.id, userData.role || role);
     const mappedUser: User = {
       id: userData.id,
       fullName: userData.fullName,
@@ -158,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phone: userData.phone || "",
       rating: typeof userData.rating === 'number' ? userData.rating : 0.0,
       totalRides: typeof userData.totalRides === 'number' ? userData.totalRides : 0,
-      role: userData.role,
+      role: resolvedRole,
       walletBalance: typeof userData.walletBalance === 'number' ? userData.walletBalance : 0,
     };
 

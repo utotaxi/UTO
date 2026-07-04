@@ -26,6 +26,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   const io = setupSocketIO(httpServer);
 
+  const withResolvedUserRole = async (user: any) => {
+    if (!user?.id) return user;
+    if (String(user.role || "").toLowerCase() === "both") return user;
+
+    try {
+      const driver = await storage.getDriverByUserId(user.id);
+      if (driver) {
+        if (String(user.role || "").toLowerCase() !== "driver") {
+          storage.updateUser(user.id, { role: "driver" }).catch((err) => {
+            console.warn(`⚠️ Could not persist driver role for user ${user.id}:`, err);
+          });
+        }
+        return { ...user, role: "driver" };
+      }
+    } catch (err) {
+      console.warn(`⚠️ Could not resolve driver role for user ${user.id}:`, err);
+    }
+
+    return { ...user, role: user.role || "rider" };
+  };
+
   // ─── Health check endpoint (used by Railway for monitoring) ───
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({
@@ -360,7 +381,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "This account has been deleted." });
       }
 
-      res.json({ user });
+      res.json({ user: await withResolvedUserRole(user) });
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Failed to login" });
@@ -396,7 +417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      res.json({ user });
+      res.json({ user: await withResolvedUserRole(user) });
     } catch (error) {
       console.error("Get user error:", error);
       res.status(500).json({ error: "Failed to get user" });
@@ -409,7 +430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      res.json({ user });
+      res.json({ user: await withResolvedUserRole(user) });
     } catch (error) {
       console.error("Update user error:", error);
       res.status(500).json({ error: "Failed to update user" });

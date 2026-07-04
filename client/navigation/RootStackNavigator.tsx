@@ -169,6 +169,11 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function MainNavigator() {
   const { currentMode } = useMode();
+  const { user } = useAuth();
+  const accountRole = String(user?.role || "rider").toLowerCase();
+
+  if (accountRole === "driver") return <DriverTabNavigator />;
+  if (accountRole === "rider") return <RiderTabNavigator />;
 
   return currentMode === "rider" ? <RiderTabNavigator /> : <DriverTabNavigator />;
 }
@@ -183,7 +188,7 @@ export default function RootStackNavigator() {
     if (!isAuthenticated || !user?.role) return;
     const role = String(user.role).toLowerCase();
     setUserRole(role === "both" ? "both" : role === "driver" ? "driver" : "rider");
-  }, [isAuthenticated, user?.role]);
+  }, [isAuthenticated, setUserRole, user?.role]);
 
   if (authLoading || modeLoading) {
     return (
