@@ -27,7 +27,7 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signIn: (email: string, password: string, isGoogle?: boolean, googleFullName?: string) => Promise<User | null>;
+  signIn: (email: string, password: string, isGoogle?: boolean, googleFullName?: string, requestedRole?: string) => Promise<User | null>;
   signUp: (fullName: string, email: string, password: string, role?: string, driverDetails?: DriverDetails) => Promise<User>;
   signOut: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
@@ -40,8 +40,9 @@ const AUTH_STORAGE_KEY = "@uto_auth";
 
 import { api } from "@/lib/api";
 
-async function resolveAccountRole(userId: string, role?: string): Promise<string> {
+async function resolveAccountRole(userId: string, role?: string, requestedRole?: string): Promise<string> {
   const normalizedRole = String(role || "rider").toLowerCase();
+  const normalizedRequestedRole = String(requestedRole || "").toLowerCase();
   if (normalizedRole === "driver" || normalizedRole === "both") return normalizedRole;
 
   try {
@@ -50,6 +51,8 @@ async function resolveAccountRole(userId: string, role?: string): Promise<string
   } catch (_) {
     // Non-critical — use the role returned by the user endpoint.
   }
+
+  if (normalizedRequestedRole === "driver") return "driver";
 
   return normalizedRole;
 }
@@ -101,13 +104,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signIn = async (email: string, password: string, isGoogle: boolean = false, googleFullName?: string): Promise<User | null> => {
+  const signIn = async (email: string, password: string, isGoogle: boolean = false, googleFullName?: string, requestedRole?: string): Promise<User | null> => {
     try {
       // Use API to login (pass fullName if we have it from google, otherwise undefined)
       // We pass the email name part as a fallback fullName since google doesn't always provide it on just signIn
       const nameFallback = googleFullName || email.split('@')[0];
       const userData = await api.auth.login(email, password || "default", isGoogle, nameFallback);
-      const resolvedRole = await resolveAccountRole(userData.id, userData.role);
+      const resolvedRole = await resolveAccountRole(userData.id, userData.role, requestedRole);
       const mappedUser: User = {
         id: userData.id,
         fullName: userData.fullName,

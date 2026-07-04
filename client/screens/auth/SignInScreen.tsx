@@ -128,7 +128,7 @@ export default function SignInScreen({ navigation, route }: any) {
 
       console.log("🔑 Google OAuth: authenticated as", userEmail);
 
-      const signedInUser = await signIn(userEmail, "google", true, userFullName);
+      const signedInUser = await signIn(userEmail, "google", true, userFullName, selectedRole);
       if (!signedInUser) {
         throw new Error("Failed to sign in");
       }
@@ -175,7 +175,7 @@ export default function SignInScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      const signedInUser = await signIn(email, password);
+      const signedInUser = await signIn(email, password, false, undefined, selectedRole);
       if (!signedInUser) {
         throw new Error("Invalid email or password");
       }

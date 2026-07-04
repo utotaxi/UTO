@@ -173,7 +173,6 @@ function MainNavigator() {
   const accountRole = String(user?.role || "rider").toLowerCase();
 
   if (accountRole === "driver") return <DriverTabNavigator />;
-  if (accountRole === "rider") return <RiderTabNavigator />;
 
   return currentMode === "rider" ? <RiderTabNavigator /> : <DriverTabNavigator />;
 }
@@ -187,7 +186,9 @@ export default function RootStackNavigator() {
   useEffect(() => {
     if (!isAuthenticated || !user?.role) return;
     const role = String(user.role).toLowerCase();
-    setUserRole(role === "both" ? "both" : role === "driver" ? "driver" : "rider");
+    if (role === "driver" || role === "both") {
+      setUserRole(role);
+    }
   }, [isAuthenticated, setUserRole, user?.role]);
 
   if (authLoading || modeLoading) {
