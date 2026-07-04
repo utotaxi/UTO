@@ -127,14 +127,12 @@ export default function ScheduledJobDetailsScreen() {
   const msUntilPickup = new Date(booking.pickup_at).getTime() - now;
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
   const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
-  const fare = booking.estimated_fare;
-  const penalty = fare ? (parseFloat(String(fare)) * 0.5) : 0;
   const driverOwnsThis = booking.driver_id === user?.id || booking.assigned_driver_id === user?.id;
 
   const handleAccept = async () => {
     Alert.alert(
       'Accept Booking',
-      'By accepting this booking, you confirm your availability to complete the trip.\n\n• Cancellations made more than 3 hours before pickup will not incur any charges.\n• Cancellations made within 3 hours of pickup may result in a charge of up to 50% of the fare.',
+      'By accepting this booking, you confirm your availability to complete the trip. If you later cancel, the booking will be released back to marketplace or ASAP dispatch for another driver.',
       [
         { text: 'Go Back', style: 'cancel' },
         {
@@ -178,15 +176,7 @@ export default function ScheduledJobDetailsScreen() {
         try { resBody = await res.json(); } catch (_) {}
         throw new Error(resBody.error || 'Failed to cancel');
       }
-      if (withinThreeHours && penalty > 0) {
-        Alert.alert(
-          'Booking Cancelled',
-          `A penalty of £${penalty.toFixed(2)} has been recorded against your account.`,
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
-      } else {
-        Alert.alert('Cancelled', 'Booking cancelled successfully.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-      }
+      Alert.alert('Booking Released', 'The booking has been released for another driver.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
       setShowCancelModal(false);
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'Could not cancel the booking. Please try again.');
@@ -318,14 +308,14 @@ export default function ScheduledJobDetailsScreen() {
               <>
                 <Text style={s.modalTitle}>Late Cancellation Warning</Text>
                 <Text style={s.modalDesc}>
-                  This pickup is less than 3 hours away. Cancelling now may result in a penalty of up to 50% of the journey fare (£{penalty.toFixed(2)}) and may affect your driver account.
+                  This pickup is less than 3 hours away. Cancelling now will release the booking for ASAP dispatch to nearby available drivers.
                 </Text>
               </>
             ) : (
               <>
                 <Text style={s.modalTitle}>Cancel Booking</Text>
                 <Text style={s.modalDesc}>
-                  Free cancellation is available until 3 hours before pickup. If you cancel within 3 hours of pickup, a fee of up to 50% of the fare may apply.
+                  Cancelling will release this booking back to the marketplace for another driver.
                 </Text>
               </>
             )}

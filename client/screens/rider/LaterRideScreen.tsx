@@ -22,6 +22,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useRide } from '@/context/RideContext';
 import { getApiUrl } from '@/lib/query-client';
 import { api } from '@/lib/api';
+import { useStripe } from '@stripe/stripe-react-native';
 
 const UTO_YELLOW = '#FFD000';
 
@@ -54,6 +55,7 @@ export default function LaterRideScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { calculateDynamicFare } = useRide();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   // Passengers & luggage
   const [passengers, setPassengers] = useState(1);
@@ -222,10 +224,27 @@ export default function LaterRideScreen({ navigation }: any) {
     setIsSaving(true);
     const finalFare = estimatedFare ? Math.max(0, estimatedFare - couponDiscount) : null;
     try {
-      const savedCards = user?.id ? await api.payments.getSavedCards(user.id) : [];
-      if (!savedCards || savedCards.length === 0) {
-        Alert.alert('Card Required', 'Please add a card in your account before scheduling a ride.');
-        return;
+      let paymentIntentId: string | null = null;
+      if (finalFare && finalFare > 0) {
+        const paymentIntent = await api.payments.createIntent(finalFare, user?.stripeCustomerId);
+        const { error: initError } = await initPaymentSheet({
+          paymentIntentClientSecret: paymentIntent.clientSecret,
+          merchantDisplayName: 'UTO Rides',
+          style: 'alwaysDark',
+        });
+
+        if (initError) {
+          Alert.alert('Payment Error', initError.message || 'Could not start card payment.');
+          return;
+        }
+
+        const { error: presentError } = await presentPaymentSheet();
+        if (presentError) {
+          Alert.alert('Payment Required', presentError.message || 'Please complete card payment to schedule this ride.');
+          return;
+        }
+
+        paymentIntentId = paymentIntent.paymentIntentId;
       }
 
       const res = await fetch(`${getApiUrl()}/api/later-bookings`, {
@@ -242,6 +261,7 @@ export default function LaterRideScreen({ navigation }: any) {
           pickupAt: finalPickup.toISOString(),
           estimatedFare: finalFare,
           paymentMethod: 'card',
+          paymentIntentId,
           vehicleType: selectedVehicle,
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
           durationMinutes: durationMin ?? null,

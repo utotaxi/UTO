@@ -105,7 +105,7 @@
 // });
 
 //client/navigation/RootStackNavigator.tsx 
-import React from "react";
+import React, { useEffect } from "react";
 import { ActivityIndicator, View, StyleSheet } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
@@ -175,9 +175,15 @@ function MainNavigator() {
 
 export default function RootStackNavigator() {
   const screenOptions = useScreenOptions();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { isLoading: modeLoading } = useMode();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
+  const { isLoading: modeLoading, setUserRole } = useMode();
   const { theme } = useTheme();
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.role) return;
+    const role = String(user.role).toLowerCase();
+    setUserRole(role === "both" ? "both" : role === "driver" ? "driver" : "rider");
+  }, [isAuthenticated, user?.role]);
 
   if (authLoading || modeLoading) {
     return (

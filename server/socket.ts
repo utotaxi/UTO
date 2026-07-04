@@ -3983,6 +3983,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           else if (update.status === "completed") {
             updateData.completed_at = new Date().toISOString();
             updateData.payment_status = "completed";
+            updateData.payment_method = "card";
             // Ensure driver_id is ALWAYS set on completion
             if (resolvedDriverId) updateData.driver_id = resolvedDriverId;
             if (typeof update.earlyCompletionReason === "string" && update.earlyCompletionReason.trim()) {
@@ -4009,7 +4010,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const completedFare = Number(clientTotalFare || completedRide?.final_price || completedRide?.estimated_price || 0);
               const paymentStatus = String(completedRide?.payment_status || "").toLowerCase();
               const alreadyPrepaid = new Set(["prepaid", "card_charged", "paid", "succeeded", "prepaid_retained"]).has(paymentStatus);
-              if (completedRide?.payment_method === "card" && completedFare > 0 && completedRide.rider_id && !alreadyPrepaid) {
+              if (completedRide && completedFare > 0 && completedRide.rider_id && !alreadyPrepaid) {
                 const { data: riderUser } = await supabase
                   .from("users")
                   .select("stripe_customer_id")
@@ -4067,7 +4068,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             try {
               const { data: cancelledRide, error: cancelledRideErr } = await supabase
                 .from("rides")
-                .select("rider_id, driver_id, status, accepted_at, estimated_price, final_price, payment_method, payment_intent_id")
+                .select("rider_id, driver_id, status, accepted_at, estimated_price, final_price, payment_method, payment_intent_id, payment_status")
                 .eq("id", update.rideId)
                 .single();
 
@@ -4077,6 +4078,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const isDriverAlreadyAtPickup = cancelledRide && ["arrived", "at_pickup", "in_progress"].includes(cancelledRide.status);
               const cancelledBy = String((update as any).cancelledBy || "").toLowerCase();
               const riderInitiatedCancellation = cancelledBy === "rider";
+              const cancellationPaymentStatus = String(cancelledRide?.payment_status || "").toLowerCase();
+              const cancellationAlreadyPrepaid = new Set(["prepaid", "card_charged", "paid", "succeeded", "prepaid_retained"]).has(cancellationPaymentStatus);
               // Product rule: rider has a strict 1-minute free-cancel window from
               // acceptance time before any cancellation fee can be captured.
               const shouldChargeCancellationFee =
@@ -4103,7 +4106,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   let cardCaptureSuccess = false;
                   let capturedPaymentIntentId: string | undefined;
 
-                  if (cancelledRide.payment_method === "card" && cancelledRide.payment_intent_id) {
+                  if (cancellationAlreadyPrepaid) {
+                    cardCaptureSuccess = true;
+                    capturedPaymentIntentId = cancelledRide.payment_intent_id || undefined;
+                    updateData.payment_status = "prepaid_retained";
+                    (update as any).chargedVia = "prepaid";
+                    (update as any).chargedAmount = cancellationFeeAmount;
+                  } else if (cancelledRide.payment_method === "card" && cancelledRide.payment_intent_id) {
                     const captureResult = await capturePaymentIntent(cancelledRide.payment_intent_id, cancellationFeeAmount);
                     cardCaptureSuccess = captureResult.success;
                     capturedPaymentIntentId = captureResult.paymentIntentId;
@@ -4370,31 +4379,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
               } else {
                 console.warn(`⚠️ Ride ${update.rideId} completed but driver_id=${rideData.driver_id}, fareAmount=${fareAmount} — skipping earnings update`);
               }
-              // Check if payment method is cash to insert payment record natively (Cards are charged and inserted earlier)
-              if (rideData.payment_method !== "card") {
-                const { error: paymentError } = await supabase.from("payments").insert({
-                  ride_id: update.rideId,
-                  user_id: rideData.rider_id,
-                  amount: fareAmount,
-                  currency: "gbp",
-                  status: "succeeded",
-                  payment_method: "cash",
-                  completed_at: new Date().toISOString()
-                });
-                if (paymentError) {
-                  console.error("❌ Failed to insert completed ride payment:", paymentError);
-                } else {
-                  console.log(`✅ Inserted payment £${fareAmount} for completed ride ${update.rideId}`);
-                }
-
-                // ✅ Also update the ride to mark it as fully paid/completed 
-                await supabase.from("rides").update({ payment_status: "paid" }).eq("id", update.rideId);
-              }
-
               // ✅ Insert wallet_transaction so the rider can see the fare in their transaction history
               if (rideData.rider_id && fareAmount > 0) {
                 try {
-                  const payMethod = rideData.payment_method === "card" ? "card" : "cash";
                   const { error: walletTxnErr } = await supabase
                     .from("wallet_transactions")
                     .insert({
@@ -4402,7 +4389,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                       ride_id: update.rideId,
                       amount: fareAmount,
                       type: "debit",
-                      description: `Ride fare — paid by ${payMethod}`,
+                      description: "Ride fare — paid by card",
                     });
                   if (walletTxnErr) {
                     console.warn("⚠️ Failed to insert ride fare wallet_transaction:", walletTxnErr.message);
@@ -4702,6 +4689,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     // Handle driver confirming payment was collected
     socket.on("ride:payment_collected", async (data: { rideId: string; amount?: number; extraAmount?: number }) => {
+      console.warn(`⚠️ Ignoring legacy cash payment collection event for ride ${data.rideId}; payments are card-only.`);
+      return;
+
       console.log('💰 ═══════════ PAYMENT COLLECTED EVENT ═══════════');
       console.log('💰 rideId:', data.rideId, 'amount:', data.amount, 'extraAmount:', data.extraAmount);
 
@@ -4727,9 +4717,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
               .eq("user_id", payingDriverId)
               .single();
 
-            if (driverByUserId) {
-              console.log(`🔄 payment_collected — Resolved auth user_id ${payingDriverId} → driver table id ${driverByUserId.id}`);
-              payingDriverId = driverByUserId.id;
+            const resolvedDriverId = (driverByUserId as any)?.id;
+            if (resolvedDriverId) {
+              console.log(`🔄 payment_collected — Resolved auth user_id ${payingDriverId} → driver table id ${resolvedDriverId}`);
+              payingDriverId = resolvedDriverId;
             }
           }
         } catch (_) {
@@ -4745,8 +4736,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
             .select("driver_id")
             .eq("id", data.rideId)
             .single();
-          if (existingRide?.driver_id) {
-            payingDriverId = existingRide.driver_id;
+          const existingRideDriverId = (existingRide as any)?.driver_id;
+          if (existingRideDriverId) {
+            payingDriverId = existingRideDriverId;
             console.log(`🔍 payment_collected — Resolved driver_id from ride record: ${payingDriverId}`);
           }
         } catch (_) {
@@ -4826,7 +4818,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   .single();
 
                 if (driverRecord) {
-                  const currentEarnings = driverRecord.total_earnings || 0;
+                  const currentEarnings = Number(driverRecord?.total_earnings || 0);
                   const newEarnings = currentEarnings + expectedFare;
                   const { error: earningsErr } = await supabase
                     .from("drivers")
@@ -4894,7 +4886,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   });
 
                 if (txnErr) {
-                  console.warn("⚠️ Failed to insert wallet_transaction (table may not exist):", txnErr.message);
+                  console.warn("⚠️ Failed to insert wallet_transaction (table may not exist):", txnErr?.message);
                 } else {
                   console.log(`✅ Wallet transaction recorded for user ${rideRow.rider_id}`);
                 }

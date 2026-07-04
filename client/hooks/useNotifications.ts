@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import { getApiUrl } from "@/lib/query-client";
 import * as Notifications from "expo-notifications";
+import { navigateFromNotification } from "@/navigation/navigationRef";
 
 try {
   Notifications.setNotificationHandler({
@@ -35,8 +36,18 @@ export interface NotificationData {
     | "ride_completed"
     | "ride_cancelled"
     | "payment_collected"
-    | "no_show";
+    | "no_show"
+    | "ride_request"
+    | "scheduled_marketplace_created"
+    | "marketplace_reminder"
+    | "scheduled_booking_reminder"
+    | "scheduled_booking_drive_to_pickup"
+    | "scheduled_ride_live";
   rideId?: string;
+  bookingId?: string;
+  sourceTable?: string;
+  target?: string;
+  screen?: string;
   message?: string;
 }
 
@@ -75,6 +86,17 @@ export function useNotifications(userId?: string) {
           }
         }
       );
+
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        const rawData = response?.notification?.request?.content?.data;
+        if (isNotificationData(rawData)) {
+          handleNotificationResponse(rawData);
+        }
+      })
+      .catch(() => {
+        // Non-critical; foreground listeners still handle future taps.
+      });
 
     return () => {
       mounted = false;
@@ -159,7 +181,7 @@ async function savePushToken(userId: string, token: string) {
 
 function handleNotificationResponse(data: NotificationData) {
   console.log("Notification response:", data);
-  // Navigation handling can be added here if needed
+  navigateFromNotification(data);
 }
 
 /**

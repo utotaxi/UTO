@@ -19,7 +19,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Location from "expo-location";
-import * as Notifications from "expo-notifications";
 import { Feather, MaterialIcons } from "@expo/vector-icons";
 import Animated, {
   FadeIn,
@@ -97,8 +96,6 @@ export default function DriverHomeScreen({ navigation }: any) {
   const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
   const [routeDistanceText, setRouteDistanceText] = useState<string | null>(null);
   const [routeDurationText, setRouteDurationText] = useState<string | null>(null);
-  const [collectedAmountStr, setCollectedAmountStr] = useState<string>("");
-  const [showOtherAmount, setShowOtherAmount] = useState(false);
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
   const [paidWaitingElapsedSec, setPaidWaitingElapsedSec] = useState(0);
   const [acceptedElapsedSec, setAcceptedElapsedSec] = useState(0);
@@ -107,46 +104,6 @@ export default function DriverHomeScreen({ navigation }: any) {
   const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
   const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(null);
   const [earlyCompleteOtherText, setEarlyCompleteOtherText] = useState("");
-
-  // Cash payment flow state
-  const [cashChangeMode, setCashChangeMode] = useState<'input' | 'noChange' | 'changeGiven' | null>(null);
-
-  const handleNotificationNavigation = useCallback((rawData: any) => {
-    const data = rawData || {};
-    if (typeof data !== "object") return;
-
-    if ((data.type === "scheduled_booking_reminder" || data.type === "scheduled_booking_drive_to_pickup") && data.bookingId) {
-      (navigation as any).navigate("AccountTab", {
-        screen: "ScheduledJobDetails",
-        params: {
-          bookingId: String(data.bookingId),
-          openDriveToPickup: true,
-        },
-      });
-    }
-  }, [navigation]);
-
-  useEffect(() => {
-    let mounted = true;
-
-    Notifications.getLastNotificationResponseAsync()
-      .then((response) => {
-        if (!mounted || !response) return;
-        handleNotificationNavigation(response.notification?.request?.content?.data);
-      })
-      .catch(() => {
-        // ignore non-critical notification bootstrap errors
-      });
-
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      handleNotificationNavigation(response.notification?.request?.content?.data);
-    });
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, [handleNotificationNavigation]);
 
   // Haversine distance calculation (returns meters)
   const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -160,12 +117,6 @@ export default function DriverHomeScreen({ navigation }: any) {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   };
-
-  useEffect(() => {
-    if (completedRidePayment) {
-      setCollectedAmountStr((completedRidePayment.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment.fareAmount || 0)).toString());
-    }
-  }, [completedRidePayment]);
 
   const activeRideRef = useRef(activeRideRequest);
   useEffect(() => {
@@ -1216,128 +1167,24 @@ export default function DriverHomeScreen({ navigation }: any) {
                 <MaterialIcons name="check" size={32} color="#FFFFFF" />
               </View>
               <Text style={styles.paymentTitle}>Trip Completed!</Text>
-              <Text style={styles.paymentSubtitle}>Collect payment from the rider</Text>
+              <Text style={styles.paymentSubtitle}>Payment handled by card</Text>
             </View>
 
             {/* Amount card — dark card, huge white price */}
             <View style={styles.paymentAmountCard}>
-              <Text style={styles.paymentAmountLabel}>AMOUNT TO COLLECT</Text>
-              
-              {completedRidePayment?.paymentMethod === 'cash' ? (() => {
-                const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
-                const collected = Number(collectedAmountStr) || 0;
-                const change = collected - expected;
-                // Generate smart quick-select amounts
-                const exactAmount = expected;
-                const quickAmounts = [exactAmount];
-                // Add common round-up values
-                [5, 10, 15, 20, 50].forEach(v => {
-                  if (v > exactAmount && !quickAmounts.includes(v)) quickAmounts.push(v);
-                });
-                // Also add nearest £5 ceiling
-                const nearest5 = Math.ceil(exactAmount / 5) * 5;
-                if (nearest5 > exactAmount && !quickAmounts.includes(nearest5)) {
-                  quickAmounts.push(nearest5);
-                  quickAmounts.sort((a, b) => a - b);
-                }
-                // Keep max 5 quick amounts
-                const displayAmounts = quickAmounts.slice(0, 5);
+              <Text style={styles.paymentAmountLabel}>CARD PAYMENT</Text>
+              <Text style={styles.paymentAmountPrice}>
+                {formatPrice(completedRidePayment?.fareAmount || 0)}
+              </Text>
 
-                return (
-                  <View style={{ flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-                    {/* Show the fare amount */}
-                    <Text style={[styles.paymentAmountPrice, { marginBottom: 16 }]}>
-                      £{expected.toFixed(2)}
-                    </Text>
-
-                    {/* Quick-select denomination buttons */}
-                    <Text style={{ color: '#9CA3AF', fontSize: 12, fontWeight: '600', letterSpacing: 1, marginBottom: 10 }}>CASH RECEIVED</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
-                      {displayAmounts.map(amt => (
-                        <Pressable
-                          key={amt}
-                          onPress={() => { setCollectedAmountStr(amt.toString()); setShowOtherAmount(false); }}
-                          style={{
-                            paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
-                            backgroundColor: collected === amt ? UTOColors.driver.primary : '#2A2A2A',
-                            borderWidth: 1.5,
-                            borderColor: collected === amt ? UTOColors.driver.primary : '#333',
-                            minWidth: 60, alignItems: 'center',
-                          }}
-                        >
-                          <Text style={{
-                            fontSize: 16, fontWeight: '700',
-                            color: collected === amt ? '#000' : '#FFF',
-                          }}>
-                            {amt === exactAmount ? `£${amt.toFixed(2)}` : `£${amt}`}
-                          </Text>
-                          {amt === exactAmount && (
-                            <Text style={{ fontSize: 10, color: collected === amt ? '#000' : '#9CA3AF', marginTop: 2 }}>Exact</Text>
-                          )}
-                        </Pressable>
-                      ))}
-                      {/* Other button */}
-                      <Pressable
-                        onPress={() => { setShowOtherAmount(true); setCollectedAmountStr(''); }}
-                        style={{
-                          paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
-                          backgroundColor: showOtherAmount ? UTOColors.driver.primary : '#2A2A2A',
-                          borderWidth: 1.5,
-                          borderColor: showOtherAmount ? UTOColors.driver.primary : '#333',
-                          minWidth: 60, alignItems: 'center',
-                        }}
-                      >
-                        <Text style={{
-                          fontSize: 16, fontWeight: '700',
-                          color: showOtherAmount ? '#000' : '#FFF',
-                        }}>Other</Text>
-                      </Pressable>
-                    </View>
-
-                    {/* Other amount text input */}
-                    {showOtherAmount && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 4 }}>
-                        <Text style={{ color: '#FFF', fontSize: 28, fontWeight: '700' }}>£</Text>
-                        <TextInput
-                          style={{ color: '#FFF', fontSize: 28, fontWeight: '700', minWidth: 80, borderBottomWidth: 1.5, borderBottomColor: UTOColors.driver.primary, paddingHorizontal: 8, paddingVertical: 4, textAlign: 'center' }}
-                          keyboardType="decimal-pad"
-                          placeholder="0.00"
-                          placeholderTextColor="#555"
-                          value={collectedAmountStr}
-                          onChangeText={setCollectedAmountStr}
-                          autoFocus
-                        />
-                      </View>
-                    )}
-
-                    {/* Change calculation message */}
-                    {change > 0 && (
-                      <View style={{ backgroundColor: '#10B981' + '20', borderRadius: 10, padding: 12, marginTop: 10, width: '100%', alignItems: 'center' }}>
-                        <Text style={{ color: '#10B981', fontSize: 18, fontWeight: '700' }}>
-                          Give £{change.toFixed(2)} change to passenger
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              })() : (
-                <Text style={styles.paymentAmountPrice}>
-                  {formatPrice(completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0))}
-                </Text>
-              )}
-
-              <View style={[styles.paymentCashBadge, { 
-                backgroundColor: completedRidePayment?.paymentMethod === 'card' ? UTOColors.primary + "1A" : "#10B9811A"
-              }]}>
+              <View style={[styles.paymentCashBadge, { backgroundColor: UTOColors.primary + "1A" }]}>
                 <MaterialIcons 
-                  name={completedRidePayment?.paymentMethod === 'card' ? "credit-card" : "payments"} 
+                  name="credit-card"
                   size={16} 
-                  color={completedRidePayment?.paymentMethod === 'card' ? UTOColors.primary : "#10B981"} 
+                  color={UTOColors.primary}
                 />
-                <Text style={[styles.paymentCashText, { 
-                  color: completedRidePayment?.paymentMethod === 'card' ? UTOColors.primary : "#10B981" 
-                }]}>
-                  {completedRidePayment?.paymentMethod === 'card' ? 'Card Payment' : 'Cash Payment'}
+                <Text style={[styles.paymentCashText, { color: UTOColors.primary }]}>
+                  Card Payment
                 </Text>
               </View>
             </View>
@@ -1392,76 +1239,17 @@ export default function DriverHomeScreen({ navigation }: any) {
               </View>
             </View>
 
-            {/* Cash change summary for cash payments */}
-            {completedRidePayment?.paymentMethod === 'cash' && Number(collectedAmountStr) > 0 && (() => {
-              const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
-              const collected = Number(collectedAmountStr);
-              const change = collected - expected;
-              if (change > 0) {
-                return (
-                  <View style={{ backgroundColor: '#1E1E1E', borderRadius: 16, padding: 20, marginHorizontal: 0, marginBottom: 16, borderWidth: 1, borderColor: '#2A2A2A' }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <Text style={{ color: '#9CA3AF', fontSize: 14 }}>Trip total</Text>
-                      <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>£{expected.toFixed(2)}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <Text style={{ color: '#9CA3AF', fontSize: 14 }}>Cash received</Text>
-                      <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>£{collected.toFixed(2)}</Text>
-                    </View>
-                    <View style={{ height: 1, backgroundColor: '#333', marginVertical: 8 }} />
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                      <Text style={{ color: '#10B981', fontSize: 16, fontWeight: '700' }}>Change</Text>
-                      <Text style={{ color: '#10B981', fontSize: 16, fontWeight: '700' }}>£{change.toFixed(2)}</Text>
-                    </View>
-                  </View>
-                );
-              }
-              return null;
-            })()}
-
           </ScrollView>
 
           {/* Sticky bottom buttons */}
           <View style={[styles.paymentBottomBar, { paddingBottom: tabBarHeight > 0 ? tabBarHeight + 8 : Math.max(insets.bottom, 16) + 8 }]}>
-            {completedRidePayment?.paymentMethod === 'cash' && Number(collectedAmountStr) > (completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0)) ? (
-              <View style={{ width: '100%', gap: 10 }}>
-                <Pressable
-                  onPress={() => {
-                    const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
-                    const collected = Number(collectedAmountStr);
-                    const extra = Math.max(0, collected - expected);
-                    dismissPaymentCollection(collected, extra);
-                  }}
-                  style={[styles.paymentCollectBtn, { backgroundColor: '#10B981' }]}
-                >
-                  <MaterialIcons name="account-balance-wallet" size={20} color="#FFFFFF" />
-                  <Text style={[styles.paymentCollectBtnText, { color: '#FFFFFF' }]}>No change given – add £{(Number(collectedAmountStr) - (completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0))).toFixed(2)} as credit</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    const expected = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
-                    dismissPaymentCollection(expected, 0);
-                  }}
-                  style={styles.paymentCollectBtn}
-                >
-                  <MaterialIcons name="check-circle" size={22} color="#000000" />
-                  <Text style={styles.paymentCollectBtnText}>Change given in cash</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable
-                onPress={() => {
-                  const expectedAmount = completedRidePayment?.amountToCollect !== undefined ? completedRidePayment.amountToCollect : (completedRidePayment?.fareAmount || 0);
-                  const collected = Number(collectedAmountStr) || expectedAmount;
-                  const extraAmount = Math.max(0, collected - expectedAmount);
-                  dismissPaymentCollection(collected, extraAmount);
-                }}
-                style={styles.paymentCollectBtn}
-              >
-                <MaterialIcons name="check-circle" size={22} color="#000000" />
-                <Text style={styles.paymentCollectBtnText}>Payment Collected</Text>
-              </Pressable>
-            )}
+            <Pressable
+              onPress={() => dismissPaymentCollection()}
+              style={styles.paymentCollectBtn}
+            >
+              <MaterialIcons name="check-circle" size={22} color="#000000" />
+              <Text style={styles.paymentCollectBtnText}>Done</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>

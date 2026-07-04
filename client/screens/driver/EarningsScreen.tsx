@@ -697,17 +697,17 @@ export default function EarningsScreen() {
                     {formatPrice(selectedTrip.farePrice)}
                   </Text>
                   <View style={[styles.tripDetailFareBadge, {
-                    backgroundColor: selectedTrip.paymentMethod === 'card' ? UTOColors.primary + "20" : SUCCESS + "20"
+                    backgroundColor: UTOColors.primary + "20"
                   }]}>
                     <MaterialIcons
-                      name={selectedTrip.paymentMethod === 'card' ? "credit-card" : "payments"}
+                      name="credit-card"
                       size={14}
-                      color={selectedTrip.paymentMethod === 'card' ? UTOColors.primary : SUCCESS}
+                      color={UTOColors.primary}
                     />
                     <Text style={[styles.tripDetailFareBadgeText, {
-                      color: selectedTrip.paymentMethod === 'card' ? UTOColors.primary : SUCCESS
+                      color: UTOColors.primary
                     }]}>
-                      {selectedTrip.paymentMethod === 'card' ? 'Card Payment' : 'Cash Payment'}
+                      Card Payment
                     </Text>
                   </View>
                 </View>

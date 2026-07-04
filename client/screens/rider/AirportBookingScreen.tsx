@@ -19,7 +19,9 @@ import * as Haptics from 'expo-haptics';
 import { LocationInputAutocomplete } from '@/components/LocationInputAutocomplete';
 import { useAuth } from '@/context/AuthContext';
 import { useRide } from '@/context/RideContext';
+import { api } from '@/lib/api';
 import { getApiUrl } from '@/lib/query-client';
+import { useStripe } from '@stripe/stripe-react-native';
 
 const UTO_YELLOW = '#FFD000';
 
@@ -48,6 +50,7 @@ export default function AirportBookingScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { calculateDynamicFare } = useRide();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   // Locations
   const [pickup, setPickup] = useState('');
@@ -407,6 +410,35 @@ export default function AirportBookingScreen({ navigation }: any) {
     setIsSaving(true);
     const finalFare = estimatedFare ? Math.max(0, estimatedFare - couponDiscount) : null;
     try {
+      const collectScheduledPayment = async (amount: number, label: string) => {
+        const paymentIntent = await api.payments.createIntent(amount, user?.stripeCustomerId);
+        const { error: initError } = await initPaymentSheet({
+          paymentIntentClientSecret: paymentIntent.clientSecret,
+          merchantDisplayName: 'UTO Rides',
+          style: 'alwaysDark',
+        });
+
+        if (initError) {
+          throw new Error(initError.message || `Could not start ${label} card payment.`);
+        }
+
+        const { error: presentError } = await presentPaymentSheet();
+        if (presentError) {
+          throw new Error(presentError.message || `Please complete ${label} card payment to schedule this ride.`);
+        }
+
+        return paymentIntent.paymentIntentId;
+      };
+
+      const paymentIntentId = finalFare && finalFare > 0
+        ? await collectScheduledPayment(finalFare, 'outbound')
+        : null;
+
+      let returnPaymentIntentId: string | null = null;
+      if (isReturnJourney && returnScheduledTime && returnEstimatedFare && returnEstimatedFare > 0) {
+        returnPaymentIntentId = await collectScheduledPayment(returnEstimatedFare, 'return')
+      }
+
       const res = await fetch(`${getApiUrl()}/api/later-bookings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -420,6 +452,8 @@ export default function AirportBookingScreen({ navigation }: any) {
           dropoffLongitude: dropoffLocation?.longitude ?? null,
           pickupAt: scheduledTime.toISOString(),
           estimatedFare: finalFare,
+          paymentMethod: 'card',
+          paymentIntentId,
           vehicleType: selectedVehicle,
           distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
           durationMinutes: durationMin ?? null,
@@ -459,6 +493,8 @@ export default function AirportBookingScreen({ navigation }: any) {
             dropoffLongitude: rDropoffLoc?.longitude ?? null,
             pickupAt: returnScheduledTime.toISOString(),
             estimatedFare: returnEstimatedFare ?? null,
+            paymentMethod: 'card',
+            paymentIntentId: returnPaymentIntentId,
             vehicleType: returnSelectedVehicle,
             distanceMiles: distanceKm ? distanceKm * 0.621371 : null,
             durationMinutes: durationMin ?? null,

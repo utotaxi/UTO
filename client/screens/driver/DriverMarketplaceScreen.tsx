@@ -91,9 +91,6 @@ function BookingCard({
 
   const fareStr = item.estimated_fare ? `£${parseFloat(String(item.estimated_fare)).toFixed(2)}` : 'N/A';
 
-  const deadlineDate = new Date(new Date(item.pickup_at).getTime() - THREE_HOURS_MS);
-  const deadlineStr = fmtTime(deadlineDate.toISOString());
-
   return (
     <Pressable style={s.card} onPress={() => onPress(item)}>
       <View style={s.cardHeader}>
@@ -183,15 +180,15 @@ function BookingCard({
       </View>
 
       <View style={s.cancellationPolicyBox}>
-        <Text style={s.deadlineText}>Free cancellation until: {deadlineStr}</Text>
-        <Text style={s.lateText}>Late cancellation fee applies after: {deadlineStr}</Text>
+        <Text style={s.deadlineText}>Accepted bookings stay assigned to you until pickup.</Text>
+        <Text style={s.lateText}>If you cancel, the booking is released for another driver.</Text>
       </View>
 
       {/* Late cancel warning for driver */}
       {item.status === 'driver_accepted' && driverOwnsThis && isLateCancelWindow && item.estimated_fare && (
         <View style={s.lateCancelWarning}>
           <Text style={s.lateCancelText}>
-            ⚠️ Cancelling within 3 hours: you'll be charged 50% (£{(parseFloat(String(item.estimated_fare)) * 0.5).toFixed(2)})
+            Cancelling close to pickup releases this booking for ASAP dispatch.
           </Text>
         </View>
       )}
@@ -235,7 +232,7 @@ export default function DriverMarketplaceScreen() {
   const handleAccept = async (id: string) => {
     Alert.alert(
       'Accept Booking',
-      'By accepting this booking, you agree that if you cancel within 3 hours of the scheduled pickup, you will be responsible for 50% of the journey fare as a cancellation penalty.',
+      'By accepting this booking, you confirm your availability to complete the trip. If you later cancel, the booking will be released back to the marketplace or ASAP dispatch pool.',
       [
         { text: 'Back', style: 'cancel' },
         {
@@ -263,20 +260,17 @@ export default function DriverMarketplaceScreen() {
     const msUntilPickup = new Date(item.pickup_at).getTime() - now;
     const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
     const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
-    const fare = item.estimated_fare;
-    const penalty = fare ? (parseFloat(String(fare)) * 0.5) : 0;
-
     const message = withinThreeHours
-      ? `You are cancelling within 3 hours of the scheduled pickup. A 50% penalty of £${penalty.toFixed(2)} will be charged to your account.\n\nDo you want to proceed?`
-      : 'You are cancelling this booking. No penalty applies as it is more than 3 hours before pickup.';
+      ? 'You are cancelling close to pickup. The booking will be released for ASAP dispatch to nearby available drivers.'
+      : 'You are cancelling this booking. It will be released back to the marketplace.';
 
     Alert.alert(
-      withinThreeHours ? 'Cancellation Penalty' : (item.status === 'scheduled' ? 'Decline Booking' : 'Cancel Booking'),
+      withinThreeHours ? 'Release Booking' : (item.status === 'scheduled' ? 'Decline Booking' : 'Cancel Booking'),
       message,
       [
         { text: 'Keep It', style: 'cancel' },
         {
-          text: item.status === 'scheduled' ? 'Decline' : (withinThreeHours ? 'Cancel & Accept Penalty' : 'Cancel Booking'),
+          text: item.status === 'scheduled' ? 'Decline' : (withinThreeHours ? 'Release Booking' : 'Cancel Booking'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -297,13 +291,7 @@ export default function DriverMarketplaceScreen() {
                 try { resBody = await res.json(); } catch (_) {}
                 throw new Error(resBody.error || 'Failed to cancel');
               }
-              if (withinThreeHours && penalty > 0) {
-                Alert.alert(
-                  'Booking Cancelled',
-                  `A penalty of £${penalty.toFixed(2)} has been recorded against your account.`,
-                  [{ text: 'OK' }]
-                );
-              }
+              Alert.alert('Booking Released', 'The booking has been released for another driver.');
               loadBookings();
             } catch (err) {
               Alert.alert('Error', err instanceof Error ? err.message : 'Could not cancel the booking. Please try again.');
@@ -330,7 +318,7 @@ export default function DriverMarketplaceScreen() {
       <View style={s.policyBanner}>
         <MaterialIcons name="info-outline" size={16} color="#92610A" style={{ marginRight: 6 }} />
         <Text style={s.policyText}>
-          Any cancellation within 3 hours of pickup: you will be responsible for 50% of the journey fare
+          If you cancel an accepted booking, it will be released back to marketplace or ASAP dispatch for another driver.
         </Text>
       </View>
 

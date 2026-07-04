@@ -829,8 +829,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Generate the public URL
       const { data: publicUrlData } = sb.storage.from("driver_documents").getPublicUrl(fileName);
+      const publicUrl = publicUrlData.publicUrl;
 
-      res.status(200).json({ url: publicUrlData.publicUrl });
+      if (/^document[A-Za-z0-9]+Url$/.test(docType)) {
+        const statusKey = docType.replace(/Url$/, "Status");
+        try {
+          await storage.updateDriver(driver.id, {
+            [docType]: publicUrl,
+            [statusKey]: "pending",
+          });
+        } catch (updateErr) {
+          console.warn(`⚠️ Uploaded ${docType} but failed to update driver profile ${driver.id}:`, updateErr);
+        }
+      }
+
+      res.status(200).json({ url: publicUrl });
     } catch (error: any) {
       console.error("Document upload error:", error);
       res.status(500).json({ error: error?.message || "Failed to upload document" });
@@ -1338,31 +1351,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(generateMockRoute());
       }
 
-      // Later booking (reservation) endpoint with 4‑hour validation
-      app.post("/api/later-bookings", async (req: Request, res: Response) => {
-        try {
-          const { userId, pickup_time, ...rest } = req.body;
-          if (!userId || !pickup_time) {
-            return res.status(400).json({ error: "userId and pickup_time are required" });
-          }
-          const pickupDate = new Date(pickup_time);
-          const now = new Date();
-          if (pickupDate.getTime() - now.getTime() < 4 * 60 * 60 * 1000) {
-            return res.status(400).json({ error: "Bookings must be made at least 4 hours in advance" });
-          }
-          const payload = { user_id: userId, pickup_time: pickupDate.toISOString(), ...rest };
-          const { data, error } = await supabase.from("later_bookings").insert(payload).select().single();
-          if (error) {
-            console.error("Failed to insert later booking", error);
-            return res.status(500).json({ error: "Failed to create reservation" });
-          }
-          return res.status(201).json({ laterBooking: data });
-        } catch (e) {
-          console.error("Later booking error", e);
-          res.status(500).json({ error: "Server error" });
-        }
-      });
-
       // Sort routes by fastest traffic-aware duration (duration_in_traffic preferred)
       data.routes.sort((a: any, b: any) => {
         const durA = a.legs?.reduce((sum: number, leg: any) =>
@@ -1527,7 +1515,8 @@ const missingLaterBookingColumns = new Set<string>();
 const missingLaterBookingAcceptColumns = new Set<string>();
 const missingLaterBookingCancelColumns = new Set<string>();
 const missingLaterBookingActivationColumns = new Set<string>();
-const scheduledReminderBucketByBooking = new Map<string, number>();
+const scheduledReminderBucketByBooking = new Map<string, string>();
+let lastMarketplaceReminderKey: string | null = null;
 
 const sendExpoPushNotification = async (
   token: string,
@@ -1557,13 +1546,34 @@ const sendExpoPushNotification = async (
   }
 };
 
-const formatReminderWindow = (msUntilPickup: number): string => {
-  const totalMinutes = Math.max(0, Math.round(msUntilPickup / 60000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0 && minutes > 0) return `${hours} hour${hours === 1 ? "" : "s"} ${minutes} minute${minutes === 1 ? "" : "s"}`;
-  if (hours > 0) return `${hours} hour${hours === 1 ? "" : "s"}`;
-  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+const getScheduledReminderBucket = (msUntilPickup: number): { key: string; label: string; contactPassenger: boolean } | null => {
+  if (msUntilPickup <= 0) return null;
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  if (msUntilPickup <= 30 * minute) return { key: "30m", label: "30 minutes", contactPassenger: true };
+  if (msUntilPickup <= hour) return { key: "1h", label: "1 hour", contactPassenger: true };
+  if (msUntilPickup <= 3 * hour) return { key: "3h", label: "3 hours", contactPassenger: false };
+  if (msUntilPickup <= 4 * hour) return { key: "4h", label: "4 hours", contactPassenger: false };
+  if (msUntilPickup <= 6 * hour) return { key: "6h", label: "6 hours", contactPassenger: false };
+  return null;
+};
+
+const getLondonDateTimeParts = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    dateKey: `${byType.year}-${byType.month}-${byType.day}`,
+    hour: Number(byType.hour),
+    minute: Number(byType.minute),
+  };
 };
 
 const normalizeVehicleType = (value: any): string => {
@@ -1717,6 +1727,7 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
       vehicleType, estimatedFare, distanceMiles: clientDistanceMiles, durationMinutes: clientDurationMinutes,
       flightNumber, isRoundTrip, bookingType, passengers, luggage,
       couponCode, discountAmount,
+      paymentIntentId,
       returnPickupAddress, returnPickupLatitude, returnPickupLongitude,
       returnDropoffAddress, returnDropoffLatitude, returnDropoffLongitude,
     } = req.body;
@@ -1783,26 +1794,34 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
     let prepaidPaymentIntentId: string | null = null;
 
     if (finalEstimatedFare > 0) {
-      if (!stripeCustomerId) {
-        return res.status(400).json({ error: "Please add a card before scheduling this ride." });
+      if (paymentIntentId) {
+        const confirmed = await confirmPayment(paymentIntentId);
+        if (!confirmed) {
+          return res.status(400).json({ error: "Scheduled ride payment was not completed. Please try again." });
+        }
+        prepaidPaymentIntentId = paymentIntentId;
+      } else {
+        if (!stripeCustomerId) {
+          return res.status(400).json({ error: "Please add a card before scheduling this ride." });
+        }
+
+        const chargeReference = `later_${riderId}_${Date.now()}`;
+        const chargeResult = await chargeSavedCard(
+          stripeCustomerId,
+          finalEstimatedFare,
+          chargeReference,
+          "gbp",
+          "ride_fare",
+        );
+
+        if (!chargeResult.success || !chargeResult.paymentIntentId) {
+          return res.status(400).json({
+            error: chargeResult.error || "Prepaid scheduled rides require a card payment. Please try again.",
+          });
+        }
+
+        prepaidPaymentIntentId = chargeResult.paymentIntentId;
       }
-
-      const chargeReference = `later_${riderId}_${Date.now()}`;
-      const chargeResult = await chargeSavedCard(
-        stripeCustomerId,
-        finalEstimatedFare,
-        chargeReference,
-        "gbp",
-        "ride_fare",
-      );
-
-      if (!chargeResult.success || !chargeResult.paymentIntentId) {
-        return res.status(400).json({
-          error: chargeResult.error || "Prepaid scheduled rides require a saved card. Please add a card and try again.",
-        });
-      }
-
-      prepaidPaymentIntentId = chargeResult.paymentIntentId;
     }
 
     // Pre-provide the ride PIN at booking time so the rider can see it in
@@ -1928,6 +1947,8 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
               sendExpoPushNotification(row.push_token, title, body, {
                 type: "scheduled_marketplace_created",
                 bookingId: data.id,
+                target: "Marketplace",
+                screen: "Marketplace",
               }),
             ),
         );
@@ -2292,42 +2313,14 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
         console.log(`✅ Free cancel: rider ${riderId}, refundAmount=£${refundAmount}`);
       }
     } else if (cancelledBy === 'driver') {
-      // Driver cancellation within 3 hours: 50% penalty
-      if (withinThreeHours || pastPickup) {
-        const driverPenalty = Number((estimatedFare * 0.5).toFixed(2));
-        const driverDeductionAmount = -Math.abs(driverPenalty);
-        penaltyNote = `Driver late cancellation — 50% penalty of £${driverPenalty.toFixed(2)} applies.`;
-        statusToSet = statusForReleasedBooking;
-        driverCancelType = 'late_cancellation';
-        driverPenaltyApplied = true;
-        lateCancellationFee = driverPenalty;
-        releaseDriverAssignment = true;
-        if (bookingDriverId && driverPenalty > 0) {
-          try {
-            // Add a deduction record for the driver
-            const scheduledPenaltyLabel = formatScheduledBookingCancellationPenalty(bookingId);
-            await upsertDriverPenaltyDeduction(sb, {
-              driverId: bookingDriverId,
-              amount: driverDeductionAmount,
-              type: DRIVER_DEDUCTION_TYPE.PENALTY,
-              reason: scheduledPenaltyLabel,
-              createdAt: now.toISOString(),
-            });
-            // Also deduct from driver's total_earnings
-            const { data: driverData } = await sb.from('drivers').select('total_earnings').eq('id', bookingDriverId).single();
-            const currentEarnings = Number(driverData?.total_earnings || 0);
-            const newEarnings = Number((currentEarnings - driverPenalty).toFixed(2));
-            await sb.from('drivers').update({ total_earnings: newEarnings }).eq('id', bookingDriverId);
-          } catch (penaltyErr) {
-            console.error('Failed to record driver penalty:', penaltyErr);
-          }
-        }
-      } else {
-        penaltyNote = 'Driver cancelled more than 3 hours before pickup — no penalty.';
-        statusToSet = statusForReleasedBooking;
-        driverCancelType = 'free_cancellation';
-        releaseDriverAssignment = true;
-      }
+      penaltyNote = withinThreeHours || pastPickup
+        ? 'Driver cancelled close to pickup — booking released for ASAP dispatch. No rider charge applies.'
+        : 'Driver cancelled — booking released back to marketplace. No rider charge applies.';
+      statusToSet = statusForReleasedBooking;
+      driverCancelType = withinThreeHours || pastPickup ? 'released_for_dispatch' : 'released_to_marketplace';
+      driverPenaltyApplied = false;
+      lateCancellationFee = 0;
+      releaseDriverAssignment = true;
     }
 
     const updatePayload: any = {
@@ -2463,8 +2456,7 @@ app.post("/api/rides/:id/rating", async (req: Request, res: Response) => {
   }
 });
 
-const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 3 * 60 * 60 * 1000;
-const SCHEDULED_DRIVER_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 const triggerScheduledDriverReminders = async () => {
   const nowTs = Date.now();
@@ -2491,11 +2483,13 @@ const triggerScheduledDriverReminders = async () => {
   for (const booking of acceptedBookings) {
     const pickupTs = pickupTimestamp(booking);
     const msUntilPickup = pickupTs - nowTs;
-    const bucket = Math.floor(msUntilPickup / SCHEDULED_DRIVER_REMINDER_INTERVAL_MS);
+    const reminderBucket = getScheduledReminderBucket(msUntilPickup);
+    if (!reminderBucket) continue;
+
     const reminderKey = `${booking.source_table}:${booking.id}`;
     activeReminderKeys.add(reminderKey);
 
-    if (scheduledReminderBucketByBooking.get(reminderKey) === bucket) {
+    if (scheduledReminderBucketByBooking.get(reminderKey) === reminderBucket.key) {
       continue;
     }
 
@@ -2521,21 +2515,28 @@ const triggerScheduledDriverReminders = async () => {
     const pickupLabel = booking.pickup_address || "pickup location";
     const dropoffLabel = booking.dropoff_address || "destination";
     const rideDetails = `${pickupLabel} to ${dropoffLabel}`;
-    const reminderWindow = formatReminderWindow(msUntilPickup);
-    const body = `Ride ${rideDetails} is going to start in ${reminderWindow} please reach to the pickup location`;
+    const title = reminderBucket.contactPassenger
+      ? "Have you contacted the passenger?"
+      : "You have upcoming booking!";
+    const body = reminderBucket.contactPassenger
+      ? "Have you contact the passenger? See upcoming booking!"
+      : `You have upcoming booking! Ride ${rideDetails} is going to start in ${reminderBucket.label} please reach to the pickup location`;
 
     await sendExpoPushNotification(
       userRow.push_token,
-      "Upcoming Scheduled Ride",
+      title,
       body,
       {
         type: "scheduled_booking_reminder",
         bookingId: booking.id,
         sourceTable: booking.source_table,
+        target: "ScheduledJobDetails",
+        screen: "ScheduledJobDetails",
+        reminderBucket: reminderBucket.key,
       },
     );
 
-    scheduledReminderBucketByBooking.set(reminderKey, bucket);
+    scheduledReminderBucketByBooking.set(reminderKey, reminderBucket.key);
   }
 
   for (const key of Array.from(scheduledReminderBucketByBooking.keys())) {
@@ -2555,6 +2556,74 @@ triggerScheduledDriverReminders().catch((err) => {
   console.error("Initial scheduled driver reminder check failed:", err);
 });
 
+const triggerMarketplaceCheckReminders = async () => {
+  const london = getLondonDateTimeParts();
+  const shouldSendThisSlot =
+    london.hour >= 6 &&
+    (london.hour - 6) % 6 === 0 &&
+    london.minute < 30;
+
+  if (!shouldSendThisSlot) return;
+
+  const slotKey = `${london.dateKey}:${london.hour}`;
+  if (lastMarketplaceReminderKey === slotKey) return;
+
+  const { data: driverRows, error: driverErr } = await sb
+    .from("drivers")
+    .select("user_id")
+    .not("user_id", "is", null);
+
+  if (driverErr) {
+    console.warn("⚠️ Could not load drivers for marketplace reminders:", driverErr.message);
+    return;
+  }
+
+  const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
+  if (driverUserIds.length === 0) {
+    lastMarketplaceReminderKey = slotKey;
+    return;
+  }
+
+  const { data: driverUsers, error: usersErr } = await sb
+    .from("users")
+    .select("id, push_token")
+    .in("id", driverUserIds);
+
+  if (usersErr) {
+    console.warn("⚠️ Could not load driver push tokens for marketplace reminders:", usersErr.message);
+    return;
+  }
+
+  await Promise.all(
+    (driverUsers || [])
+      .filter((row: any) => row.push_token)
+      .map((row: any) =>
+        sendExpoPushNotification(
+          row.push_token,
+          "Marketplace Reminder",
+          "Have you checked the marketplace?",
+          {
+            type: "marketplace_reminder",
+            target: "Marketplace",
+            screen: "Marketplace",
+          },
+        ),
+      ),
+  );
+
+  lastMarketplaceReminderKey = slotKey;
+};
+
+setInterval(() => {
+  triggerMarketplaceCheckReminders().catch((err) => {
+    console.error("Marketplace reminder engine error:", err);
+  });
+}, 30 * 60 * 1000);
+
+triggerMarketplaceCheckReminders().catch((err) => {
+  console.error("Initial marketplace reminder check failed:", err);
+});
+
 // ─── Scheduled Bookings Live Activation Engine ───
 // Runs every minute. Any booking within 60 minutes of its pickup time is
 // converted into a real live ride:
@@ -2563,7 +2632,7 @@ triggerScheduledDriverReminders().catch((err) => {
 //   • still unassigned → dispatched to the nearest online drivers exactly
 //     like an immediate (ASAP) booking.
 // From that point all live-ride policies apply (PIN verification, no-show,
-// driver 50% / rider 100% cancellation fees, etc.).
+// rider cancellation rules, completion, etc.).
 const SCHEDULED_ACTIVATION_RETRY_MS = 5 * 60 * 1000;   // retry dispatch every 5 min if no driver found
 const SCHEDULED_ACTIVATION_GRACE_MS = 30 * 60 * 1000;  // keep trying up to 30 min past pickup
 

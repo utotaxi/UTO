@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -22,6 +22,7 @@ import { queryClient } from "@/lib/query-client";
 import { StripeProvider } from "@stripe/stripe-react-native";
 
 import RootStackNavigator from "@/navigation/RootStackNavigator";
+import { navigationRef } from "@/navigation/navigationRef";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ModeProvider } from "@/context/ModeContext";
@@ -119,7 +120,7 @@ function AppShell() {
   const { isAuthenticated } = useAuth();
   return (
     <ErrorBoundary resetKey={isAuthenticated}>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <RootStackNavigator />
       </NavigationContainer>
       <StatusBar style="auto" />
