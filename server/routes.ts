@@ -769,6 +769,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/drivers/:id/pending-dispatch", async (req: Request, res: Response) => {
+    try {
+      const requestedDriverId = req.params.id as string;
+      if (!requestedDriverId) {
+        return res.status(400).json({ error: "Driver id is required" });
+      }
+
+      let resolvedDriverId = requestedDriverId;
+      const directDriver = await storage.getDriver(requestedDriverId);
+      if (!directDriver) {
+        const byUserId = await storage.getDriverByUserId(requestedDriverId);
+        if (!byUserId) {
+          return res.status(404).json({ error: "Driver not found" });
+        }
+        resolvedDriverId = byUserId.id;
+      }
+
+      const pendingRide = await scheduledRideHooks.getPendingDispatchForDriver?.(resolvedDriverId);
+      if (!pendingRide) {
+        return res.json({ ride: null });
+      }
+
+      res.json({ ride: pendingRide });
+    } catch (error) {
+      console.error("Get pending dispatch exception:", error);
+      res.status(500).json({ error: "Failed to fetch pending dispatch" });
+    }
+  });
+
+  app.post("/api/rides/:rideId/start-trip", async (req: Request, res: Response) => {
+    try {
+      const rideId = req.params.rideId as string;
+      const { pin, driverId } = req.body || {};
+      if (!rideId || !pin || !driverId) {
+        return res.status(400).json({ error: "rideId, pin, and driverId are required" });
+      }
+
+      let resolvedDriverId = String(driverId);
+      const directDriver = await storage.getDriver(resolvedDriverId);
+      if (!directDriver) {
+        const byUserId = await storage.getDriverByUserId(resolvedDriverId);
+        if (!byUserId) {
+          return res.status(404).json({ error: "Driver not found" });
+        }
+        resolvedDriverId = byUserId.id;
+      }
+
+      const { data: ride, error: rideErr } = await supabase
+        .from("rides")
+        .select("id, driver_id, status, otp, rider_id")
+        .eq("id", rideId)
+        .maybeSingle();
+
+      if (rideErr || !ride) {
+        return res.status(404).json({ error: "Ride not found" });
+      }
+
+      if (ride.driver_id && ride.driver_id !== resolvedDriverId) {
+        return res.status(403).json({ error: "This ride is assigned to another driver" });
+      }
+
+      if (!["accepted", "arrived", "at_pickup", "arriving"].includes(String(ride.status || "").toLowerCase())) {
+        return res.status(400).json({ error: `Cannot start ride in status: ${ride.status}` });
+      }
+
+      const expectedPin = String(ride.otp || "").trim();
+      if (!expectedPin || String(pin).trim() !== expectedPin) {
+        return res.status(400).json({ error: "Invalid PIN" });
+      }
+
+      const startedAt = new Date().toISOString();
+      const { data: updatedRide, error: updateErr } = await supabase
+        .from("rides")
+        .update({
+          status: "in_progress",
+          started_at: startedAt,
+          driver_id: resolvedDriverId,
+        })
+        .eq("id", rideId)
+        .select()
+        .single();
+
+      if (updateErr) {
+        return res.status(500).json({ error: updateErr.message || "Failed to start ride" });
+      }
+
+      io.to(`rider:${ride.rider_id}`).emit("ride:update", {
+        rideId,
+        status: "in_progress",
+        startedAt,
+      });
+      io.to(`driver:${resolvedDriverId}`).emit("ride:update", {
+        rideId,
+        status: "in_progress",
+        startedAt,
+      });
+
+      res.json({ success: true, ride: updatedRide });
+    } catch (error: any) {
+      console.error("Start trip error:", error);
+      res.status(500).json({ error: error?.message || "Failed to start trip" });
+    }
+  });
+
   app.get("/api/drivers/user/:userId", async (req: Request, res: Response) => {
     try {
       const driver = await storage.getDriverByUserId(req.params.userId as string);

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Linking, Platform } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Linking, Platform, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -7,8 +7,12 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { getApiUrl } from '@/lib/query-client';
 import { useAuth } from '@/context/AuthContext';
 import { UTOColors } from '@/constants/theme';
+import { getSocket } from '@/lib/socket';
 
 const UTO_YELLOW = '#FFD000';
+const ACTIVATION_WINDOW_MS = 60 * 60 * 1000;
+
+type LiveRideStatus = 'accepted' | 'arrived' | 'at_pickup' | 'arriving' | 'in_progress' | 'completed' | 'cancelled' | string;
 
 function fmtDateTimeFull(iso: string | null | undefined) {
   if (!iso) return 'N/A';
@@ -44,6 +48,46 @@ export default function ScheduledJobDetailsScreen() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [cancelOtherText, setCancelOtherText] = useState("");
+  const [liveRideId, setLiveRideId] = useState<string | null>(initialParams?.booking?.live_ride_id || null);
+  const [liveRideStatus, setLiveRideStatus] = useState<LiveRideStatus | null>(null);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinValue, setPinValue] = useState("");
+  const [pinError, setPinError] = useState(false);
+  const [isStartingTrip, setIsStartingTrip] = useState(false);
+  const [isFinishingTrip, setIsFinishingTrip] = useState(false);
+  const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
+  const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(null);
+  const [earlyCompleteOther, setEarlyCompleteOther] = useState("");
+
+  const refreshLiveRideStatus = useCallback(async (rideId?: string | null) => {
+    const targetRideId = rideId || liveRideId || booking?.live_ride_id;
+    if (!targetRideId) return;
+    try {
+      const res = await fetch(`${getApiUrl()}/api/rides/${targetRideId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const status = String(data?.ride?.status || "").toLowerCase() as LiveRideStatus;
+      if (status) setLiveRideStatus(status);
+      if (!liveRideId && targetRideId) setLiveRideId(targetRideId);
+    } catch (err) {
+      console.warn("Could not refresh live ride status:", err);
+    }
+  }, [booking?.live_ride_id, liveRideId]);
+
+  useEffect(() => {
+    if (booking?.live_ride_id) {
+      setLiveRideId(booking.live_ride_id);
+      refreshLiveRideStatus(booking.live_ride_id);
+    }
+  }, [booking?.live_ride_id, refreshLiveRideStatus]);
+
+  useEffect(() => {
+    if (!liveRideId) return;
+    const interval = setInterval(() => {
+      refreshLiveRideStatus(liveRideId);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [liveRideId, refreshLiveRideStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +172,11 @@ export default function ScheduledJobDetailsScreen() {
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
   const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
   const driverOwnsThis = booking.driver_id === user?.id || booking.assigned_driver_id === user?.id;
+  const withinActivationWindow = msUntilPickup <= ACTIVATION_WINDOW_MS;
+  const tripIsLive = !!liveRideId;
+  const tripInProgress = liveRideStatus === "in_progress";
+  const tripReadyToStart = tripIsLive && !tripInProgress && liveRideStatus !== "completed" && liveRideStatus !== "cancelled";
+  const canStartTrip = driverOwnsThis && booking.status === "driver_accepted" && (tripReadyToStart || withinActivationWindow);
 
   const handleAccept = async () => {
     Alert.alert(
@@ -181,6 +230,127 @@ export default function ScheduledJobDetailsScreen() {
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'Could not cancel the booking. Please try again.');
     }
+  };
+
+  const openNavigationToDropoff = () => {
+    if (!booking?.dropoff_address) return;
+    const lat = Number(booking?.dropoff_latitude);
+    const lng = Number(booking?.dropoff_longitude);
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    const encodedAddress = encodeURIComponent(booking.dropoff_address);
+    const label = encodeURIComponent("Drop-off");
+    const appUrl = hasCoords
+      ? Platform.select({
+          ios: `maps:0,0?q=${label}@${lat},${lng}`,
+          android: `google.navigation:q=${lat},${lng}`,
+          default: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+        })
+      : Platform.select({
+          ios: `maps:0,0?q=${encodedAddress}`,
+          android: `google.navigation:q=${encodedAddress}`,
+          default: `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`,
+        });
+    const fallbackWebUrl = hasCoords
+      ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+
+    if (appUrl) {
+      Linking.openURL(appUrl).catch(() => Linking.openURL(fallbackWebUrl).catch(() => {
+        Alert.alert("Navigation unavailable", "Could not open maps on this device.");
+      }));
+    }
+  };
+
+  const handleStartTrip = async () => {
+    let rideId = liveRideId || booking?.live_ride_id;
+    if (!rideId) {
+      try {
+        const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          rideId = data?.booking?.live_ride_id || null;
+          if (rideId) {
+            setLiveRideId(rideId);
+            setBooking(data.booking);
+          }
+        }
+      } catch (_) {}
+    }
+    if (!rideId) {
+      Alert.alert("Not Yet Active", "This booking will become available to start closer to pickup time. Please try again shortly.");
+      return;
+    }
+    if (pinValue.length < 4) return;
+    setIsStartingTrip(true);
+    setPinError(false);
+    try {
+      const res = await fetch(`${getApiUrl()}/api/rides/${rideId}/start-trip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pinValue, driverId: user?.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPinError(true);
+        setPinValue("");
+        Alert.alert("Invalid PIN", data?.error || "The PIN you entered is incorrect. Please ask the rider for their 4-digit PIN.");
+        return;
+      }
+      setLiveRideStatus("in_progress");
+      setShowPinModal(false);
+      setPinValue("");
+      Alert.alert("Trip Started", "Navigate to the drop-off location. Tap Finish when you arrive.");
+    } catch (err) {
+      Alert.alert("Error", "Could not start the trip. Please try again.");
+    } finally {
+      setIsStartingTrip(false);
+    }
+  };
+
+  const finishTrip = async (reason?: string) => {
+    if (!liveRideId) return;
+    setIsFinishingTrip(true);
+    try {
+      const socket = getSocket();
+      socket.emit("ride:status", {
+        rideId: liveRideId,
+        status: "completed",
+        driverId: user?.id,
+        ...(reason?.trim() ? { earlyCompletionReason: reason.trim() } : {}),
+      });
+      setLiveRideStatus("completed");
+      setShowEarlyCompleteModal(false);
+      Alert.alert("Trip Completed", "This scheduled ride has been marked as completed. Payment was already collected.", [
+        { text: "OK", onPress: () => navigation.goBack() },
+      ]);
+    } catch (err) {
+      Alert.alert("Error", "Could not complete the trip. Please try again.");
+    } finally {
+      setIsFinishingTrip(false);
+    }
+  };
+
+  const handleFinishTrip = () => {
+    Alert.alert(
+      "Finish Trip",
+      "Confirm you have reached the drop-off location and the passenger has been dropped off.",
+      [
+        { text: "Not Yet", style: "cancel" },
+        {
+          text: "Finish Trip",
+          onPress: () => finishTrip(),
+        },
+      ]
+    );
+  };
+
+  const submitEarlyCompletion = () => {
+    if (!earlyCompleteReason) {
+      Alert.alert("Reason Required", "Please select a reason for early completion.");
+      return;
+    }
+    const finalReason = earlyCompleteReason === "Other" ? earlyCompleteOther : earlyCompleteReason;
+    finishTrip(finalReason);
   };
 
   return (
@@ -288,7 +458,56 @@ export default function ScheduledJobDetailsScreen() {
             <Text style={s.acceptBtnText}>Accept Booking</Text>
           </Pressable>
         )}
-        {booking.status === 'driver_accepted' && driverOwnsThis && (
+        {booking.status === 'driver_accepted' && driverOwnsThis && tripInProgress && (
+          <>
+            <Pressable style={s.driveBtn} onPress={openNavigationToDropoff}>
+              <Text style={s.driveBtnText}>Navigate To Destination</Text>
+            </Pressable>
+            <Pressable style={[s.acceptBtn, { backgroundColor: '#10B981' }]} onPress={handleFinishTrip} disabled={isFinishingTrip}>
+              {isFinishingTrip ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={[s.acceptBtnText, { color: '#FFFFFF' }]}>Finish Trip</Text>
+              )}
+            </Pressable>
+          </>
+        )}
+        {booking.status === 'driver_accepted' && driverOwnsThis && !tripInProgress && canStartTrip && (
+          <>
+            <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
+              <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
+            </Pressable>
+            <Pressable style={s.acceptBtn} onPress={async () => {
+              setPinError(false);
+              setPinValue("");
+              let rideId = liveRideId || booking?.live_ride_id;
+              if (!rideId) {
+                try {
+                  const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}`);
+                  if (res.ok) {
+                    const data = await res.json();
+                    rideId = data?.booking?.live_ride_id || null;
+                    if (rideId) {
+                      setLiveRideId(rideId);
+                      setBooking(data.booking);
+                    }
+                  }
+                } catch (_) {}
+              }
+              if (!rideId) {
+                Alert.alert("Not Yet Active", "This booking will become available to start closer to pickup time.");
+                return;
+              }
+              setShowPinModal(true);
+            }}>
+              <Text style={s.acceptBtnText}>Start Trip</Text>
+            </Pressable>
+            <Pressable style={s.cancelBtn} onPress={() => setShowCancelModal(true)}>
+              <Text style={s.cancelBtnText}>Cancel Booking</Text>
+            </Pressable>
+          </>
+        )}
+        {booking.status === 'driver_accepted' && driverOwnsThis && !tripInProgress && !canStartTrip && (
           <>
             <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
               <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
@@ -299,6 +518,85 @@ export default function ScheduledJobDetailsScreen() {
           </>
         )}
       </View>
+
+      {/* PIN Entry Modal */}
+      <Modal visible={showPinModal} transparent animationType="slide" onRequestClose={() => setShowPinModal(false)}>
+        <View style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <Text style={s.modalTitle}>Enter Rider PIN</Text>
+            <Text style={s.modalDesc}>
+              Ask the rider for their 4-digit PIN to start this scheduled trip.
+            </Text>
+            {pinError ? (
+              <Text style={{ color: '#DC2626', marginTop: 8, fontWeight: '600' }}>Wrong PIN. Please try again.</Text>
+            ) : null}
+            <TextInput
+              style={s.pinInput}
+              value={pinValue}
+              onChangeText={(text) => setPinValue(text.replace(/\D/g, "").slice(0, 4))}
+              keyboardType="number-pad"
+              maxLength={4}
+              placeholder="••••"
+              secureTextEntry
+            />
+            <View style={s.modalActions}>
+              <Pressable style={s.modalBackBtn} onPress={() => { setShowPinModal(false); setPinValue(""); setPinError(false); }}>
+                <Text style={s.modalBackBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[s.modalConfirmBtn, { backgroundColor: pinValue.length === 4 ? UTOColors.primary : '#D1D5DB' }]}
+                onPress={handleStartTrip}
+                disabled={pinValue.length < 4 || isStartingTrip}
+              >
+                {isStartingTrip ? (
+                  <ActivityIndicator color="#000000" />
+                ) : (
+                  <Text style={[s.modalConfirmBtnText, { color: '#000000' }]}>Start Trip</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Early Completion Modal */}
+      {showEarlyCompleteModal && (
+        <View style={s.modalOverlay}>
+          <View style={s.modalContent}>
+            <Text style={s.modalTitle}>Early Completion</Text>
+            <Text style={s.modalDesc}>Please select a reason for completing before reaching the destination:</Text>
+            {['Passenger request', 'Traffic restriction', 'Wrong address', 'Other'].map((reason) => (
+              <Pressable
+                key={reason}
+                style={[s.reasonOption, earlyCompleteReason === reason && s.reasonOptionSelected]}
+                onPress={() => setEarlyCompleteReason(reason)}
+              >
+                <View style={[s.radioOuter, earlyCompleteReason === reason && s.radioOuterSelected]}>
+                  {earlyCompleteReason === reason && <View style={s.radioInner} />}
+                </View>
+                <Text style={s.reasonText}>{reason}</Text>
+              </Pressable>
+            ))}
+            {earlyCompleteReason === 'Other' && (
+              <TextInput
+                style={s.otherInput}
+                placeholder="Please describe the reason..."
+                value={earlyCompleteOther}
+                onChangeText={setEarlyCompleteOther}
+                multiline
+              />
+            )}
+            <View style={s.modalActions}>
+              <Pressable style={s.modalBackBtn} onPress={() => setShowEarlyCompleteModal(false)}>
+                <Text style={s.modalBackBtnText}>Go Back</Text>
+              </Pressable>
+              <Pressable style={[s.modalConfirmBtn, { backgroundColor: '#10B981' }]} onPress={submitEarlyCompletion}>
+                <Text style={s.modalConfirmBtnText}>Finish Trip</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
 
       {/* Cancellation Modal */}
       {showCancelModal && (
@@ -404,6 +702,17 @@ const s = StyleSheet.create({
   modalBackBtnText: { color: '#374151', fontSize: 15, fontWeight: '600' },
   modalConfirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
   modalConfirmBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  pinInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    fontSize: 24,
+    letterSpacing: 12,
+    textAlign: 'center',
+    fontWeight: '700',
+  },
 });
 
 //client/screens/driver/ScheduledJobDetailsScreen.tsx

@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 import { getApiUrl } from "@/lib/query-client";
 import * as Notifications from "expo-notifications";
 import { navigateFromNotification } from "@/navigation/navigationRef";
+import { emitRideRequestNotification } from "@/lib/rideNotificationBridge";
 
 try {
   Notifications.setNotificationHandler({
@@ -74,6 +75,8 @@ export function useNotifications(userId?: string) {
     notificationListener.current =
       Notifications?.addNotificationReceivedListener((notif) => {
         setNotification(notif);
+        const rawData = notif?.request?.content?.data;
+        handleIncomingNotificationData(rawData);
       });
 
     responseListener.current =
@@ -160,6 +163,14 @@ async function registerForPushNotifications(): Promise<string | null> {
       vibrationPattern: [0, 250, 250, 250],
       lightColor: "#F7C948",
     });
+    Notifications.setNotificationChannelAsync("ride-requests", {
+      name: "Ride Requests",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 500, 250, 500],
+      lightColor: "#F7C948",
+      sound: "default",
+      bypassDnd: true,
+    });
   }
 
   return token;
@@ -179,8 +190,19 @@ async function savePushToken(userId: string, token: string) {
   }
 }
 
+function handleIncomingNotificationData(rawData: unknown) {
+  if (!rawData || typeof rawData !== "object") return;
+  const data = rawData as Record<string, any>;
+  const type = String(data.type || data.target || "");
+  if (type === "ride_request" || type === "ride_requested") {
+    const rideId = data.rideId ? String(data.rideId) : "";
+    if (rideId) emitRideRequestNotification(rideId);
+  }
+}
+
 function handleNotificationResponse(data: NotificationData) {
   console.log("Notification response:", data);
+  handleIncomingNotificationData(data);
   navigateFromNotification(data);
 }
 

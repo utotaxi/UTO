@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from "react";
-import { Alert, Platform, Vibration } from "react-native";
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from "react";
+import { Alert, AppState, Platform, Vibration } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import { getSocket, connectAsDriver, onNewRide, onRideUpdate, onRideExpired } from "@/lib/socket";
@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { normalizeBackendTimestamp } from "@/lib/dateTime";
 import { sendLocalNotification } from "@/hooks/useNotifications";
+import { onRideRequestNotification } from "@/lib/rideNotificationBridge";
 import {
   DRIVER_DEDUCTION_TYPE,
   formatLiveRideCancellationPenalty,
@@ -159,6 +160,31 @@ const TRIP_HISTORY_KEY = "@uto_trip_history";
 const ONLINE_STATUS_KEY = "@uto_online_status";
 const ACTIVE_RIDE_KEY = "@uto_active_ride";
 
+function mapRidePayload(ride: any): RideRequest {
+  return {
+    id: ride.id,
+    riderName: ride.riderName || ride.rider_name || "Rider",
+    riderPhone: ride.riderPhone || ride.rider_phone || ride.phone || "",
+    pickupAddress: ride.pickupAddress || ride.pickup_address || ride.pickupLocation?.address || "Pickup location",
+    dropoffAddress: ride.dropoffAddress || ride.dropoff_address || ride.dropoffLocation?.address || "Dropoff location",
+    pickupLatitude: ride.pickupLatitude || ride.pickup_latitude || ride.pickupLocation?.latitude || 0,
+    pickupLongitude: ride.pickupLongitude || ride.pickup_longitude || ride.pickupLocation?.longitude || 0,
+    dropoffLatitude: ride.dropoffLatitude || ride.dropoff_latitude || ride.dropoffLocation?.latitude || 0,
+    dropoffLongitude: ride.dropoffLongitude || ride.dropoff_longitude || ride.dropoffLocation?.longitude || 0,
+    estimatedFare: ride.estimatedPrice || ride.estimated_price || ride.farePrice || ride.fare_price || 0,
+    distanceMiles: ride.distance || ride.distanceMiles || ride.distance_miles || ride.distanceKm || ride.distance_km || 0,
+    durationMinutes: ride.estimatedDuration || ride.estimated_duration || ride.durationMinutes || ride.duration_minutes || 0,
+    pickupDistance: ride.pickupDistance || 0,
+    otp: ride.otp,
+    paymentMethod: "card",
+    walletDeduction: ride.walletDeduction || 0,
+    expectedCollectAmount:
+      ride.expectedCollectAmount !== undefined
+        ? ride.expectedCollectAmount
+        : (ride.estimatedPrice || ride.farePrice || 0),
+  };
+}
+
 // Trip history is always loaded from AsyncStorage cache + refreshed from Supabase
 
 // 🔊 Play a LOUD alert sound + strong vibration when a new ride request arrives
@@ -294,85 +320,78 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline]);
 
+  const handleRidePayload = useCallback((ride: any) => {
+    const mappedRequest = mapRidePayload(ride);
+
+    if (ride.scheduledPreAccepted) {
+      if (activeRideRequestRef.current && activeRideRequestRef.current.id !== ride.id) {
+        console.warn("⚠️ Scheduled ride went live but driver is busy with another ride:", activeRideRequestRef.current.id);
+        return;
+      }
+
+      setActiveRideRequest(mappedRequest);
+      setRideState("accepted");
+
+      const scheduledTrip: Trip = {
+        id: mappedRequest.id,
+        riderName: mappedRequest.riderName,
+        pickupAddress: mappedRequest.pickupAddress,
+        dropoffAddress: mappedRequest.dropoffAddress,
+        farePrice: mappedRequest.estimatedFare,
+        distanceMiles: mappedRequest.distanceMiles,
+        durationMinutes: mappedRequest.durationMinutes,
+        completedAt: "",
+        paymentMethod: "card",
+      };
+      setActiveRide(scheduledTrip);
+      AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(scheduledTrip)).catch((err) =>
+        console.warn("⚠️ Failed to persist scheduled active ride:", err)
+      );
+      playRideAlert();
+      sendLocalNotification(
+        "🗓 Scheduled Ride Starting",
+        `Your scheduled pickup for ${mappedRequest.riderName} at ${mappedRequest.pickupAddress} starts soon. Head to the pickup now.`,
+        { type: "scheduled_ride_live", rideId: ride.id }
+      );
+      return;
+    }
+
+    if (!isOnlineRef.current || activeRideRequestRef.current) return;
+
+    setActiveRideRequest(mappedRequest);
+    setRideState("incoming");
+    playRideAlert();
+    sendLocalNotification(
+      "🚕 New Ride Request",
+      `${ride.riderName || "A rider"} needs a ride from ${ride.pickupAddress || ride.pickup_address || "nearby"}`,
+      { type: "ride_requested", rideId: ride.id }
+    );
+  }, []);
+
+  const fetchPendingDispatch = useCallback(async () => {
+    const driverId = driverProfile?.id || user?.id;
+    if (!driverId || !isOnlineRef.current || activeRideRequestRef.current) return;
+
+    try {
+      const res = await fetch(`${getApiUrl()}/api/drivers/${driverId}/pending-dispatch`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.ride?.id) {
+        console.log("📲 Restored pending ride dispatch from server:", data.ride.id);
+        handleRidePayload(data.ride);
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to fetch pending dispatch:", err);
+    }
+  }, [driverProfile?.id, user?.id, handleRidePayload]);
+
   useEffect(() => {
     let cleanup: (() => void) | undefined;
 
     try {
       cleanup = onNewRide((ride: any) => {
-        console.log('🚕 Driver received new ride request via socket payload:', JSON.stringify(ride, null, 2));
-
-        const mappedRequest: RideRequest = {
-          id: ride.id,
-          riderName: ride.riderName || ride.rider_name || "Rider",
-          riderPhone: ride.riderPhone || ride.rider_phone || ride.phone || "",
-          pickupAddress: ride.pickupAddress || ride.pickup_address || ride.pickupLocation?.address || "Pickup location",
-          dropoffAddress: ride.dropoffAddress || ride.dropoff_address || ride.dropoffLocation?.address || "Dropoff location",
-          pickupLatitude: ride.pickupLatitude || ride.pickup_latitude || ride.pickupLocation?.latitude || 0,
-          pickupLongitude: ride.pickupLongitude || ride.pickup_longitude || ride.pickupLocation?.longitude || 0,
-          dropoffLatitude: ride.dropoffLatitude || ride.dropoff_latitude || ride.dropoffLocation?.latitude || 0,
-          dropoffLongitude: ride.dropoffLongitude || ride.dropoff_longitude || ride.dropoffLocation?.longitude || 0,
-          estimatedFare: ride.estimatedPrice || ride.estimated_price || ride.farePrice || ride.fare_price || 0,
-          distanceMiles: ride.distance || ride.distanceMiles || ride.distance_miles || ride.distanceKm || ride.distance_km || 0,
-          durationMinutes: ride.estimatedDuration || ride.estimated_duration || ride.durationMinutes || ride.duration_minutes || 0,
-          pickupDistance: ride.pickupDistance || 0,  // Real distance from server Haversine calculation
-          otp: ride.otp,
-          paymentMethod: "card",
-          walletDeduction: ride.walletDeduction || 0,
-          expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || ride.farePrice || 0),
-        };
-
-        // ─── Scheduled booking going live (already accepted by THIS driver) ───
-        // The driver committed to this job in the marketplace, so it lands
-        // directly in the "accepted" phase — no accept/decline step, and it
-        // appears even if the online toggle is off (they committed to the job).
-        if (ride.scheduledPreAccepted) {
-          if (activeRideRequestRef.current && activeRideRequestRef.current.id !== ride.id) {
-            console.warn('⚠️ Scheduled ride went live but driver is busy with another ride:', activeRideRequestRef.current.id);
-            return;
-          }
-
-          setActiveRideRequest(mappedRequest);
-          setRideState("accepted");
-
-          const scheduledTrip: Trip = {
-            id: mappedRequest.id,
-            riderName: mappedRequest.riderName,
-            pickupAddress: mappedRequest.pickupAddress,
-            dropoffAddress: mappedRequest.dropoffAddress,
-            farePrice: mappedRequest.estimatedFare,
-            distanceMiles: mappedRequest.distanceMiles,
-            durationMinutes: mappedRequest.durationMinutes,
-            completedAt: "",
-            paymentMethod: "card",
-          };
-          setActiveRide(scheduledTrip);
-          saveActiveRide(scheduledTrip).catch((err) => console.warn("⚠️ Failed to persist scheduled active ride:", err));
-
-          // 🔊 Same loud alert as an immediate booking
-          playRideAlert();
-
-          sendLocalNotification(
-            "🗓 Scheduled Ride Starting",
-            `Your scheduled pickup for ${mappedRequest.riderName} at ${mappedRequest.pickupAddress} starts soon. Head to the pickup now.`,
-            { type: "scheduled_ride_live", rideId: ride.id }
-          );
-          return;
-        }
-
-        if (isOnlineRef.current && !activeRideRequestRef.current) {
-          setActiveRideRequest(mappedRequest);
-          setRideState("incoming");
-
-          // 🔊 Play loud beep sound + vibration for incoming ride
-          playRideAlert();
-
-          // 🔔 Notify driver of new ride request
-          sendLocalNotification(
-            "🚕 New Ride Request",
-            `${ride.riderName || "A rider"} needs a ride from ${ride.pickupAddress || ride.pickup_address || "nearby"}`,
-            { type: "ride_requested", rideId: ride.id }
-          );
-        }
+        console.log("🚕 Driver received new ride request via socket payload:", JSON.stringify(ride, null, 2));
+        handleRidePayload(ride);
       });
     } catch (err) {
       console.warn("Socket not available:", err);
@@ -381,7 +400,29 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return () => {
       if (cleanup) cleanup();
     };
-  }, []);
+  }, [handleRidePayload]);
+
+  useEffect(() => {
+    const unsubscribe = onRideRequestNotification(() => {
+      fetchPendingDispatch().catch((err) => console.warn("⚠️ Pending dispatch refresh failed:", err));
+    });
+    return unsubscribe;
+  }, [fetchPendingDispatch]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        fetchPendingDispatch().catch((err) => console.warn("⚠️ Pending dispatch refresh failed:", err));
+      }
+    });
+    return () => subscription.remove();
+  }, [fetchPendingDispatch]);
+
+  useEffect(() => {
+    if (isOnline) {
+      fetchPendingDispatch().catch((err) => console.warn("⚠️ Pending dispatch refresh failed:", err));
+    }
+  }, [isOnline, fetchPendingDispatch]);
 
   // Listen for expired ride requests (driver missed the 15-second dispatch window)
   useEffect(() => {

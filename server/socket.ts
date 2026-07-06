@@ -2245,10 +2245,13 @@ export const scheduledRideHooks: {
   activateAcceptedScheduledRide: ((rideData: any, driverId: string) => Promise<boolean>) | null;
   // Cancel a live ride that originated from a scheduled booking (rider/driver cancelled the booking)
   cancelScheduledLiveRide: ((rideId: string, cancelledBy?: string) => Promise<void>) | null;
+  // Return the ride currently dispatched to a driver (for background / push recovery)
+  getPendingDispatchForDriver: ((driverId: string) => Promise<any | null>) | null;
 } = {
   dispatchScheduledRide: null,
   activateAcceptedScheduledRide: null,
   cancelScheduledLiveRide: null,
+  getPendingDispatchForDriver: null,
 };
 
 const SCHEDULED_RIDE_ID_PREFIX = "sched_";
@@ -2415,7 +2418,8 @@ class MinHeap {
 }
 
 const RADIUS_MILES = DEFAULT_DRIVER_RADIUS_MILES; // 5-mile radius for driver eligibility
-const DISPATCH_TIMEOUT_MS = 60000; // 60-second timeout so backgrounded drivers can unlock and respond
+const DISPATCH_TIMEOUT_MS = 60000; // 60-second timeout when driver socket is connected
+const DISPATCH_TIMEOUT_BACKGROUND_MS = 120000; // 120-second timeout when driver is online but app is backgrounded
 const ARRIVED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes waiting for rider
 
 const normalizeVehicleType = (value: any): string => {
@@ -2698,8 +2702,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
             sound: "default",
             title: "🚕 New Ride Request",
             body: `New ride from ${enrichedRide.pickupLocation?.address || enrichedRide.pickupAddress || "nearby"} — £${(enrichedRide.farePrice || enrichedRide.estimatedPrice || 0).toFixed(2)}`,
-            data: { type: "ride_request", rideId },
+            data: { type: "ride_request", rideId, target: "DriveTab", screen: "DriveTab" },
             priority: "high",
+            channelId: "ride-requests",
           };
           
           fetch("https://exp.host/--/api/v2/push/send", {
@@ -2719,13 +2724,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.warn(`⚠️ Could not send push notification to driver ${entry.driverId}:`, pushErr);
     }
 
-    // Start 15-second countdown
+    // Start countdown — longer when driver has no active socket (app backgrounded)
+    const driverSocketConnected = !!connectedDrivers.get(entry.driverId);
+    const dispatchTimeoutMs = driverSocketConnected ? DISPATCH_TIMEOUT_MS : DISPATCH_TIMEOUT_BACKGROUND_MS;
     state.timer = setTimeout(() => {
-      console.log(`⏱️ Driver ${entry!.driverId} did not respond within ${DISPATCH_TIMEOUT_MS / 1000}s — moving to next`);
+      console.log(`⏱️ Driver ${entry!.driverId} did not respond within ${dispatchTimeoutMs / 1000}s — moving to next`);
       // Notify the timed-out driver to clear their screen
       io.to(`driver:${entry!.driverId}`).emit("ride:expired", { rideId });
       dispatchToNextDriver(rideId);
-    }, DISPATCH_TIMEOUT_MS);
+    }, dispatchTimeoutMs);
   }
 
       const handleRideRequest = async (rideData: any, sourceSocketId: string | null) => {
@@ -3154,6 +3161,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
   }
 
   // ─── Scheduled booking → live ride hooks (used by the activation engine) ──
+
+  scheduledRideHooks.getPendingDispatchForDriver = async (rawDriverId: string) => {
+    const actualDriverId = await resolveDriverTableId(rawDriverId);
+    if (!actualDriverId) return null;
+
+    for (const [, state] of dispatchQueues.entries()) {
+      if (state.cancelled || state.currentDriverId !== actualDriverId) continue;
+      return {
+        ...state.rideData,
+        pickupDistance: state.rideData?.pickupDistance || 0,
+        _dispatchedTo: actualDriverId,
+      };
+    }
+    return null;
+  };
 
   // Unassigned scheduled booking: dispatch to nearby drivers like an ASAP ride
   scheduledRideHooks.dispatchScheduledRide = async (rideData: any) => {

@@ -390,19 +390,16 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   const handleCancel = () => {
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); } catch (_) { }
-    const driverHasArrived = currentStatus === "arrived" || currentStatus === "at_pickup";
-    const driverIsOnWay = currentStatus === "accepted";
     const acceptedAtMs = activeRide?.acceptedAt ? new Date(activeRide.acceptedAt).getTime() : 0;
     const acceptedElapsedMs = acceptedAtMs ? Date.now() - acceptedAtMs : Number.POSITIVE_INFINITY;
-    const withinFreeMinute = driverIsOnWay && acceptedElapsedMs < 60_000;
+    // First minute after driver acceptance is always free — even if driver has arrived.
+    const withinFreeMinute = acceptedAtMs > 0 && acceptedElapsedMs < 60_000;
     const freeSecondsRemaining = withinFreeMinute ? Math.max(1, Math.ceil((60_000 - acceptedElapsedMs) / 1000)) : 0;
     const fareAmount = (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0;
-    const cancellationFeeApplies = fareAmount > 0 && (driverHasArrived || (driverIsOnWay && !withinFreeMinute));
+    const cancellationFeeApplies = fareAmount > 0 && !withinFreeMinute;
 
     if (cancellationFeeApplies) {
-      const feeReason = driverHasArrived
-        ? "Your driver has already arrived."
-        : "Your free cancellation period has ended and your driver is on the way.";
+      const feeReason = "Your free cancellation period has ended.";
       Alert.alert(
         "Cancellation Fee Applies",
         `${feeReason} Cancelling now will result in a 100% cancellation fee of £${(fareAmount * 1).toFixed(2)} being charged to your wallet.`,
