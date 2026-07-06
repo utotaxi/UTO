@@ -958,17 +958,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (/^document[A-Za-z0-9]+Url$/.test(docType)) {
         const statusKey = docType.replace(/Url$/, "Status");
-        try {
-          await storage.updateDriver(driver.id, {
-            [docType]: publicUrl,
-            [statusKey]: "pending",
-          });
-        } catch (updateErr) {
-          console.warn(`⚠️ Uploaded ${docType} but failed to update driver profile ${driver.id}:`, updateErr);
+        const updatedDriver = await storage.updateDriver(driver.id, {
+          [docType]: publicUrl,
+          [statusKey]: "pending",
+        });
+        if (!updatedDriver) {
+          console.error(`❌ Uploaded ${docType} but failed to persist driver profile ${driver.id}`);
+          return res.status(500).json({ error: "Document uploaded but failed to save to driver profile. Please try again." });
         }
       }
 
-      res.status(200).json({ url: publicUrl });
+      res.status(200).json({ url: publicUrl, driverId: driver.id });
     } catch (error: any) {
       console.error("Document upload error:", error);
       res.status(500).json({ error: error?.message || "Failed to upload document" });

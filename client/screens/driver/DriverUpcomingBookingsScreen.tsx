@@ -34,6 +34,7 @@ interface LaterBooking {
   created_at: string;
   estimated_fare?: number | null;
   driver_id?: string | null;
+  assigned_driver_id?: string | null;
   passengers?: number;
   luggage?: number;
   booking_type?: string;
@@ -88,6 +89,7 @@ function UpcomingBookingCard({
   const now = Date.now();
   const msUntilPickup = new Date(item.pickup_at).getTime() - now;
   const isUpcoming = msUntilPickup > 0;
+  const isExpired = msUntilPickup <= 0;
   const hoursLeft = Math.floor(msUntilPickup / (1000 * 60 * 60));
   const minutesLeft = Math.floor((msUntilPickup % (1000 * 60 * 60)) / (1000 * 60));
 
@@ -95,13 +97,17 @@ function UpcomingBookingCard({
     <Pressable style={s.card} onPress={() => onPress(item)}>
       {/* Status Badge */}
       <View style={s.cardHeader}>
-        <View style={[s.statusBadge, { backgroundColor: '#10B98120' }]}>
-          <Text style={[s.statusText, { color: '#059669' }]}>ACCEPTED</Text>
+        <View style={[s.statusBadge, { backgroundColor: isExpired ? '#FEE2E220' : '#10B98120' }]}>
+          <Text style={[s.statusText, { color: isExpired ? '#DC2626' : '#059669' }]}>
+            {isExpired ? 'EXPIRED' : 'ACCEPTED'}
+          </Text>
         </View>
-        {isUpcoming && (
+        {isUpcoming ? (
           <Text style={s.countdownText}>
             {hoursLeft > 0 ? `${hoursLeft}h ${minutesLeft}m` : `${minutesLeft}m`} until pickup
           </Text>
+        ) : (
+          <Text style={[s.countdownText, { color: '#DC2626' }]}>Pickup time passed</Text>
         )}
         <Feather name="chevron-right" size={20} color="#9CA3AF" />
       </View>
@@ -181,8 +187,19 @@ export default function DriverUpcomingBookingsScreen() {
       const data = await res.json();
       // Filter to only show bookings accepted by this driver
       const accepted = (data.bookings || []).filter(
-        (b: LaterBooking) => b.status === 'driver_accepted' && b.driver_id === user?.id
+        (b: LaterBooking) =>
+          b.status === 'driver_accepted' &&
+          (b.driver_id === user?.id || b.assigned_driver_id === user?.id),
       );
+      accepted.sort((a: LaterBooking, b: LaterBooking) => {
+        const aTs = new Date(a.pickup_at).getTime();
+        const bTs = new Date(b.pickup_at).getTime();
+        const nowTs = Date.now();
+        const aUpcoming = aTs >= nowTs;
+        const bUpcoming = bTs >= nowTs;
+        if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+        return aUpcoming ? aTs - bTs : bTs - aTs;
+      });
       setBookings(accepted);
     } catch (err) {
       console.warn('Upcoming bookings load error:', err);

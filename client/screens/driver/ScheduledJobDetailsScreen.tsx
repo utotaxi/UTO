@@ -171,12 +171,30 @@ export default function ScheduledJobDetailsScreen() {
   const msUntilPickup = new Date(booking.pickup_at).getTime() - now;
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
   const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
-  const driverOwnsThis = booking.driver_id === user?.id || booking.assigned_driver_id === user?.id;
-  const withinActivationWindow = msUntilPickup <= ACTIVATION_WINDOW_MS;
+  const driverOwnsThis =
+    booking.driver_id === user?.id ||
+    booking.assigned_driver_id === user?.id;
+  const isUpcomingRide = msUntilPickup > 0;
   const tripIsLive = !!liveRideId;
   const tripInProgress = liveRideStatus === "in_progress";
-  const tripReadyToStart = tripIsLive && !tripInProgress && liveRideStatus !== "completed" && liveRideStatus !== "cancelled";
-  const canStartTrip = driverOwnsThis && booking.status === "driver_accepted" && (tripReadyToStart || withinActivationWindow);
+  const isExpiredRide =
+    msUntilPickup <= 0 &&
+    !tripInProgress &&
+    liveRideStatus !== "in_progress" &&
+    booking.status !== "completed";
+  const withinActivationWindow =
+    isUpcomingRide && msUntilPickup <= ACTIVATION_WINDOW_MS;
+  const tripReadyToStart =
+    tripIsLive &&
+    !tripInProgress &&
+    liveRideStatus !== "completed" &&
+    liveRideStatus !== "cancelled";
+  const canStartTrip =
+    driverOwnsThis &&
+    booking.status === "driver_accepted" &&
+    isUpcomingRide &&
+    !tripInProgress;
+  const canStartTripNow = canStartTrip && (tripReadyToStart || withinActivationWindow);
 
   const handleAccept = async () => {
     Alert.alert(
@@ -367,9 +385,13 @@ export default function ScheduledJobDetailsScreen() {
       <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={s.card}>
           <View style={s.cardHeader}>
-            <View style={[s.statusBadge, booking.status === 'cancelled' && s.statusBadgeCancelled]}>
-              <Text style={[s.statusText, booking.status === 'cancelled' && s.statusTextCancelled]}>
-                {booking.isUrgentScheduled ? 'URGENT SCHEDULED RIDE' : booking.status.toUpperCase().replace('_', ' ')}
+            <View style={[s.statusBadge, (booking.status === 'cancelled' || isExpiredRide) && s.statusBadgeCancelled]}>
+              <Text style={[s.statusText, (booking.status === 'cancelled' || isExpiredRide) && s.statusTextCancelled]}>
+                {isExpiredRide
+                  ? 'EXPIRED RIDE'
+                  : booking.isUrgentScheduled
+                    ? 'URGENT SCHEDULED RIDE'
+                    : booking.status.toUpperCase().replace('_', ' ')}
               </Text>
             </View>
             <Text style={s.fareText}>{booking.estimated_fare ? `£${parseFloat(String(booking.estimated_fare)).toFixed(2)}` : 'N/A'}</Text>
@@ -472,6 +494,14 @@ export default function ScheduledJobDetailsScreen() {
             </Pressable>
           </>
         )}
+        {booking.status === 'driver_accepted' && driverOwnsThis && isExpiredRide && !tripInProgress && (
+          <View style={s.expiredBanner}>
+            <Text style={s.expiredBannerTitle}>Expired Ride</Text>
+            <Text style={s.expiredBannerText}>
+              This pickup time has passed. The ride can no longer be started from here.
+            </Text>
+          </View>
+        )}
         {booking.status === 'driver_accepted' && driverOwnsThis && !tripInProgress && canStartTrip && (
           <>
             <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
@@ -494,23 +524,16 @@ export default function ScheduledJobDetailsScreen() {
                   }
                 } catch (_) {}
               }
-              if (!rideId) {
-                Alert.alert("Not Yet Active", "This booking will become available to start closer to pickup time.");
+              if (!rideId || !canStartTripNow) {
+                Alert.alert(
+                  "Not Yet Active",
+                  "This booking will become available to start within 60 minutes of pickup time.",
+                );
                 return;
               }
               setShowPinModal(true);
             }}>
               <Text style={s.acceptBtnText}>Start Trip</Text>
-            </Pressable>
-            <Pressable style={s.cancelBtn} onPress={() => setShowCancelModal(true)}>
-              <Text style={s.cancelBtnText}>Cancel Booking</Text>
-            </Pressable>
-          </>
-        )}
-        {booking.status === 'driver_accepted' && driverOwnsThis && !tripInProgress && !canStartTrip && (
-          <>
-            <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
-              <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
             </Pressable>
             <Pressable style={s.cancelBtn} onPress={() => setShowCancelModal(true)}>
               <Text style={s.cancelBtnText}>Cancel Booking</Text>
@@ -685,6 +708,15 @@ const s = StyleSheet.create({
   cancelBtnText: { color: '#DC2626', fontSize: 16, fontWeight: '700' },
   driveBtn: { backgroundColor: UTOColors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
   driveBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
+  expiredBanner: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  expiredBannerTitle: { fontSize: 16, fontWeight: '700', color: '#DC2626', marginBottom: 6 },
+  expiredBannerText: { fontSize: 14, color: '#7F1D1D', lineHeight: 20 },
 
   modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 100 },
   modalContent: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, width: '100%', maxHeight: '90%' },

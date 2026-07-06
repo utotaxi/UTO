@@ -16,6 +16,7 @@ import { Feather, MaterialIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/context/AuthContext";
 import { useDriver, DriverProfile } from "@/context/DriverContext";
 import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
 import { api } from "@/lib/api";
@@ -188,7 +189,8 @@ function DocumentItem({ config, profile, isUploading, onUpload }: DocumentItemPr
 export default function DriverDocumentsScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const { driverProfile, setDriverProfile } = useDriver();
+  const { user } = useAuth();
+  const { driverProfile, setDriverProfile, refreshData } = useDriver();
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
 
   const vehicleName = driverProfile
@@ -215,7 +217,7 @@ export default function DriverDocumentsScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         quality: 0.5,
         base64: true,
@@ -223,16 +225,9 @@ export default function DriverDocumentsScreen() {
 
       if (result.canceled) return;
 
-      if (!driverProfile) {
+      const uploadTargetId = driverProfile?.id || user?.id;
+      if (!uploadTargetId) {
         Alert.alert("Error", "Driver profile not loaded.");
-        return;
-      }
-
-      if (!driverProfile.id) {
-        Alert.alert(
-          "Profile Sync Required",
-          "Your profile ID is missing. Please pull to refresh your dashboard or restart the app to sync your latest data."
-        );
         return;
       }
 
@@ -244,21 +239,22 @@ export default function DriverDocumentsScreen() {
       setUploadingDoc(urlKey as string);
 
       const uploadedUrl = await api.drivers.uploadDocument(
-        driverProfile.id,
+        uploadTargetId,
         result.assets[0].base64,
         urlKey as string,
         result.assets[0].mimeType || "image/jpeg"
       );
 
-      const updatedProfile = { ...driverProfile };
+      const updatedProfile = { ...(driverProfile || { id: uploadTargetId } as DriverProfile) };
       (updatedProfile as any)[urlKey] = uploadedUrl;
-      (updatedProfile as any)[statusKey] = "pending"; // Reset to pending after re-upload
+      (updatedProfile as any)[statusKey] = "pending";
       await setDriverProfile(updatedProfile);
+      await refreshData();
 
       Alert.alert("Success ✅", "Document uploaded successfully! It will be reviewed by our team.");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error picking document:", error);
-      Alert.alert("Error", "Could not upload document. Please try again.");
+      Alert.alert("Error", error?.message || "Could not upload document. Please try again.");
     } finally {
       setUploadingDoc(null);
     }

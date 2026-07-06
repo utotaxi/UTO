@@ -503,7 +503,7 @@ export class SupabaseStorage implements IStorage {
     let data: any = null;
     let error: any = null;
     for (let attempt = 0; attempt < 3; attempt++) {
-      const result = await supabase
+      let result = await supabase
         .from("drivers")
         .update(snakeData)
         .eq("id", id)
@@ -511,6 +511,19 @@ export class SupabaseStorage implements IStorage {
         .single();
       data = result?.data;
       error = result?.error;
+
+      if ((error || !data) && Object.keys(snakeData).length > 0) {
+        const fallbackResult = await supabase
+          .from("drivers")
+          .update(snakeData)
+          .eq("user_id", id)
+          .select()
+          .single();
+        if (fallbackResult.data) {
+          data = fallbackResult.data;
+          error = fallbackResult.error;
+        }
+      }
 
       const missingColumn = getMissingSchemaColumn(error);
       if (missingColumn && missingColumn in snakeData) {
