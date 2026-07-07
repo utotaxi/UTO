@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import * as Location from 'expo-location';
 import { getApiUrl } from '@/lib/query-client';
 import { useAuth } from '@/context/AuthContext';
 import { UTOColors } from '@/constants/theme';
@@ -11,6 +12,7 @@ import { getSocket } from '@/lib/socket';
 
 const UTO_YELLOW = '#FFD000';
 const ACTIVATION_WINDOW_MS = 60 * 60 * 1000;
+const DROP_OFF_COMPLETION_RADIUS_METERS = 200;
 
 type LiveRideStatus = 'accepted' | 'arrived' | 'at_pickup' | 'arriving' | 'in_progress' | 'completed' | 'cancelled' | string;
 
@@ -32,6 +34,18 @@ function fmtTime(iso: string | null | undefined) {
   if (!iso) return 'N/A';
   const d = new Date(iso);
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+}
+
+function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const R = 6371_000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 export default function ScheduledJobDetailsScreen() {
@@ -58,6 +72,7 @@ export default function ScheduledJobDetailsScreen() {
   const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
   const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(null);
   const [earlyCompleteOther, setEarlyCompleteOther] = useState("");
+  const [isCheckingArrival, setIsCheckingArrival] = useState(false);
 
   const refreshLiveRideStatus = useCallback(async (rideId?: string | null) => {
     const targetRideId = rideId || liveRideId || booking?.live_ride_id;
@@ -348,18 +363,80 @@ export default function ScheduledJobDetailsScreen() {
     }
   };
 
-  const handleFinishTrip = () => {
-    Alert.alert(
-      "Finish Trip",
-      "Confirm you have reached the drop-off location and the passenger has been dropped off.",
-      [
-        { text: "Not Yet", style: "cancel" },
-        {
-          text: "Finish Trip",
-          onPress: () => finishTrip(),
-        },
-      ]
-    );
+  const handleFinishTrip = async () => {
+    const dropoffLat = Number(booking?.dropoff_latitude);
+    const dropoffLng = Number(booking?.dropoff_longitude);
+    const hasDropoffCoords = Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng);
+
+    if (!hasDropoffCoords) {
+      Alert.alert(
+        "Finish Trip",
+        "Drop-off coordinates are unavailable for this booking. Confirm the rider has been dropped off before finishing.",
+        [
+          { text: "Not Yet", style: "cancel" },
+          { text: "Finish Trip", onPress: () => finishTrip() },
+        ]
+      );
+      return;
+    }
+
+    setIsCheckingArrival(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          "Location Needed",
+          "Please allow location access to confirm you are near the destination, or use End Early if the passenger requested an early drop-off."
+        );
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const distanceMeters = haversineDistanceMeters(
+        position.coords.latitude,
+        position.coords.longitude,
+        dropoffLat,
+        dropoffLng,
+      );
+
+      if (distanceMeters > DROP_OFF_COMPLETION_RADIUS_METERS) {
+        Alert.alert(
+          "Destination Not Reached",
+          `You are still about ${Math.round(distanceMeters)}m from the drop-off. Use End Early only if the passenger requested to finish early.`,
+          [
+            { text: "Keep Driving", style: "cancel" },
+            {
+              text: "End Early",
+              onPress: () => {
+                setEarlyCompleteReason(null);
+                setEarlyCompleteOther("");
+                setShowEarlyCompleteModal(true);
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Finish Trip",
+        "You are near the drop-off location. Confirm the passenger has been dropped off.",
+        [
+          { text: "Not Yet", style: "cancel" },
+          { text: "Finish Trip", onPress: () => finishTrip() },
+        ]
+      );
+    } catch (err) {
+      Alert.alert(
+        "Location Check Failed",
+        "We could not confirm your location. Please try again, or use End Early only if the passenger requested to finish early."
+      );
+    } finally {
+      setIsCheckingArrival(false);
+    }
   };
 
   const submitEarlyCompletion = () => {
@@ -485,12 +562,27 @@ export default function ScheduledJobDetailsScreen() {
             <Pressable style={s.driveBtn} onPress={openNavigationToDropoff}>
               <Text style={s.driveBtnText}>Navigate To Destination</Text>
             </Pressable>
-            <Pressable style={[s.acceptBtn, { backgroundColor: '#10B981' }]} onPress={handleFinishTrip} disabled={isFinishingTrip}>
-              {isFinishingTrip ? (
+            <Pressable
+              style={[s.acceptBtn, { backgroundColor: '#10B981' }]}
+              onPress={handleFinishTrip}
+              disabled={isFinishingTrip || isCheckingArrival}
+            >
+              {isFinishingTrip || isCheckingArrival ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text style={[s.acceptBtnText, { color: '#FFFFFF' }]}>Finish Trip</Text>
               )}
+            </Pressable>
+            <Pressable
+              style={[s.cancelBtn, { marginTop: 10, backgroundColor: '#FEF3C7' }]}
+              onPress={() => {
+                setEarlyCompleteReason(null);
+                setEarlyCompleteOther("");
+                setShowEarlyCompleteModal(true);
+              }}
+              disabled={isFinishingTrip || isCheckingArrival}
+            >
+              <Text style={[s.cancelBtnText, { color: '#92400E' }]}>End Early</Text>
             </Pressable>
           </>
         )}

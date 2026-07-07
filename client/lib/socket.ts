@@ -2,6 +2,7 @@
 
 import { AppState, AppStateStatus } from 'react-native';
 import { io, Socket } from "socket.io-client";
+import { getApiUrl } from "@/lib/query-client";
 
 let socket: Socket | null = null;
 let currentDriverId: string | null = null;
@@ -24,10 +25,14 @@ export interface RideUpdate {
 
 export function getSocket(): Socket {
   if (!socket) {
-    // Get server URL from environment
-    const serverUrl = process.env.EXPO_PUBLIC_DOMAIN || 'http://192.168.1.7:3000';
+    // Keep Socket.IO on the exact same origin as the REST API so the app never
+    // talks to one backend for HTTP and a different backend for realtime events.
+    const serverUrl = getApiUrl();
 
     console.log('🔌 Connecting to socket server:', serverUrl);
+    // #region agent log
+    fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'D',location:'client/lib/socket.ts:getSocket',message:'Socket target selected',data:{serverUrl},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
@@ -148,6 +153,16 @@ export function connectAsDriver(driverId: string) {
   currentDriverId = driverId;
   socket.emit('driver:connect', driverId);
   console.log('🚗 Connected as driver:', driverId);
+}
+
+// Explicitly go offline (driver toggled off or logged out). This is the only
+// client action that takes the driver offline server-side; simply backgrounding
+// the app keeps them online so they still receive ride requests via push.
+export function goOffline(driverId: string) {
+  const socket = getSocket();
+  socket.emit('driver:go_offline', driverId);
+  currentDriverId = null;
+  console.log('🔴 Driver going offline:', driverId);
 }
 
 // Connect as rider

@@ -240,6 +240,45 @@ export async function capturePaymentIntent(
   }
 }
 
+/**
+ * Release (void) an uncaptured card authorization hold.
+ *
+ * When a rider requests a card ride we place a manual-capture authorization
+ * hold on their saved card (see authorizeSavedCard). If the ride is cancelled
+ * for free (before a driver is assigned, or within the 1-minute free window,
+ * or the driver cancels) we must cancel that PaymentIntent so the hold is
+ * released and the rider is never charged. Without this the hold lingers on
+ * the card for days and appears to the customer as a charge.
+ */
+export async function releaseAuthorization(
+  paymentIntentId: string
+): Promise<{ success: boolean; alreadyFinal?: boolean; error?: string }> {
+  if (!stripe) {
+    return { success: false, error: "Stripe is not configured" };
+  }
+
+  if (!paymentIntentId) {
+    return { success: false, error: "No PaymentIntent ID provided" };
+  }
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    // Nothing to release if it was already captured/settled/canceled.
+    if (["succeeded", "canceled"].includes(paymentIntent.status)) {
+      return { success: true, alreadyFinal: true };
+    }
+
+    const canceled = await stripe.paymentIntents.cancel(paymentIntentId);
+    console.log(`↩️ Released card authorization ${paymentIntentId} (status: ${canceled.status})`);
+    return { success: canceled.status === "canceled" };
+  } catch (error: any) {
+    // If it's already been captured or can't be canceled, treat as non-fatal.
+    console.error("Error releasing card authorization:", error.message || error);
+    return { success: false, error: error.message || "Unknown Stripe cancel error" };
+  }
+}
+
 export async function refundPayment(paymentIntentId: string): Promise<boolean> {
   if (!stripe) {
     console.error("Stripe is not configured");

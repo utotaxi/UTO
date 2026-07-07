@@ -1641,6 +1641,7 @@ const missingLaterBookingAcceptColumns = new Set<string>();
 const missingLaterBookingCancelColumns = new Set<string>();
 const missingLaterBookingActivationColumns = new Set<string>();
 const scheduledReminderBucketByBooking = new Map<string, string>();
+const announcedMarketplaceBookingKeys = new Set<string>();
 let lastMarketplaceReminderKey: string | null = null;
 
 const sendExpoPushNotification = async (
@@ -1668,6 +1669,70 @@ const sendExpoPushNotification = async (
     });
   } catch (err) {
     console.warn("⚠️ Failed to send Expo push notification:", err);
+  }
+};
+
+const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
+  try {
+    const { data: driverRows } = await sb
+      .from("drivers")
+      .select("user_id")
+      .not("user_id", "is", null);
+    const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
+    if (driverUserIds.length > 0) {
+      const { data: driverUsers } = await sb
+        .from("users")
+        .select("id, push_token")
+        .in("id", driverUserIds);
+      const title = "🗓 New Scheduled Ride";
+      const riderLabel = booking?.rider_name || booking?.customer_name || booking?.passenger_name || "rider";
+      const body = `ride has been scheduled by ${riderLabel} please go to the market place and pick the ride`;
+      await Promise.all(
+        (driverUsers || [])
+          .filter((row: any) => row.push_token)
+          .map((row: any) =>
+            sendExpoPushNotification(row.push_token, title, body, {
+              type: "scheduled_marketplace_created",
+              bookingId: booking.id,
+              sourceTable: booking.source_table || booking.sourceTable || null,
+              target: "Marketplace",
+              screen: "Marketplace",
+            }),
+          ),
+      );
+    }
+  } catch (notifyErr) {
+    console.warn("⚠️ Failed to notify drivers about scheduled booking:", notifyErr);
+  }
+};
+
+const announceExternalMarketplaceBookings = async () => {
+  const [laterBookingsRaw, webBookerRaw] = await Promise.all([
+    fetchLaterBookingsFromTable("later_bookings"),
+    fetchLaterBookingsFromTable("web_booker"),
+  ]);
+
+  const marketplaceBookings = [
+    ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
+    ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
+  ].filter((booking: any) => String(booking.status || "").toLowerCase() === "scheduled");
+
+  const activeKeys = new Set<string>();
+  for (const booking of marketplaceBookings) {
+    const bookingKey = `${booking.source_table}:${booking.id}`;
+    activeKeys.add(bookingKey);
+    if (announcedMarketplaceBookingKeys.has(bookingKey)) continue;
+
+    const enrichedBooking = stripPinForDrivers((await attachRiderDetails([booking]))[0] || booking);
+    await notifyDriversAboutMarketplaceBooking(enrichedBooking);
+    io.emit("later-booking:update", { type: "created", booking: enrichedBooking });
+    announcedMarketplaceBookingKeys.add(bookingKey);
+  }
+
+  for (const key of Array.from(announcedMarketplaceBookingKeys)) {
+    if (!activeKeys.has(key)) {
+      announcedMarketplaceBookingKeys.delete(key);
+    }
   }
 };
 
@@ -2052,35 +2117,12 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
     }
 
     // Notify all drivers that a new marketplace booking is available.
-    try {
-      const { data: driverRows } = await sb
-        .from("drivers")
-        .select("user_id")
-        .not("user_id", "is", null);
-      const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
-      if (driverUserIds.length > 0) {
-        const { data: driverUsers } = await sb
-          .from("users")
-          .select("id, push_token")
-          .in("id", driverUserIds);
-        const title = "🗓 New Scheduled Ride";
-        const body = `ride has been scheduled by ${rider.fullName || "rider"} please go to the market place and pick the ride`;
-        await Promise.all(
-          (driverUsers || [])
-            .filter((row: any) => row.push_token)
-            .map((row: any) =>
-              sendExpoPushNotification(row.push_token, title, body, {
-                type: "scheduled_marketplace_created",
-                bookingId: data.id,
-                target: "Marketplace",
-                screen: "Marketplace",
-              }),
-            ),
-        );
-      }
-    } catch (notifyErr) {
-      console.warn("⚠️ Failed to notify drivers about scheduled booking:", notifyErr);
-    }
+    await notifyDriversAboutMarketplaceBooking({
+      ...data,
+      source_table: "later_bookings",
+      rider_name: rider.fullName || "rider",
+    });
+    announcedMarketplaceBookingKeys.add(`later_bookings:${data.id}`);
 
     // Broadcast without the PIN (drivers also receive this event); the rider
     // gets the PIN in the direct response below.
@@ -2747,6 +2789,16 @@ setInterval(() => {
 
 triggerMarketplaceCheckReminders().catch((err) => {
   console.error("Initial marketplace reminder check failed:", err);
+});
+
+setInterval(() => {
+  announceExternalMarketplaceBookings().catch((err) => {
+    console.error("Marketplace booking announcement engine error:", err);
+  });
+}, 60 * 1000);
+
+announceExternalMarketplaceBookings().catch((err) => {
+  console.error("Initial marketplace booking announcement failed:", err);
 });
 
 // ─── Scheduled Bookings Live Activation Engine ───

@@ -2227,7 +2227,7 @@ import { Server as HTTPServer } from "http";
 import { Server, Socket } from "socket.io";  // ✅ CORRECT - Use socket.io for server
 import { supabase } from "./db";
 import { EventEmitter } from "events";
-import { capturePaymentIntent, chargeSavedCard } from "./stripe";
+import { capturePaymentIntent, chargeSavedCard, releaseAuthorization } from "./stripe";
 import { DEFAULT_DRIVER_RADIUS_MILES, haversineDistanceMiles } from "../server/services/driverMatching";
 import { DRIVER_DEDUCTION_TYPE, formatLiveRideCancellationPenalty } from "../shared/driverDeductions";
 import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
@@ -3414,6 +3414,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
     console.log(`✅ Client connected: ${socket.id}`);
 
     socket.on("driver:connect", async (driverId: string) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'pre-fix',hypothesisId:'C',location:'server/socket.ts:driver-connect',message:'Driver connect event',data:{driverId,socketId:socket.id},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const actualDriverId = await resolveDriverTableId(driverId);
       if (!actualDriverId) {
         console.warn(`⚠️ driver:connect ignored — ${driverId} is not a valid drivers.id or drivers.user_id`);
@@ -3471,6 +3474,30 @@ export function setupSocketIO(httpServer: HTTPServer) {
       } catch (error) {
         console.error("Error updating driver status:", error);
       }
+    });
+
+    // Explicit "go offline" — the ONLY thing that takes a driver offline in the
+    // DB. Triggered when the driver toggles themselves offline or logs out.
+    // A dropped socket (backgrounding / switching apps) no longer does this.
+    socket.on("driver:go_offline", async (driverId: string) => {
+      const actualDriverId = await resolveDriverTableId(driverId);
+      if (!actualDriverId) {
+        console.warn(`⚠️ driver:go_offline ignored — ${driverId} is not a valid driver id`);
+        return;
+      }
+      connectedDrivers.delete(actualDriverId);
+      try {
+        await supabase
+          .from("drivers")
+          .update({ is_online: false, is_available: false })
+          .eq("id", actualDriverId);
+        console.log(`🔴 Driver ${actualDriverId} went OFFLINE explicitly`);
+      } catch (error) {
+        console.error("Error setting driver offline:", error);
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'C',location:'server/socket.ts:go_offline',message:'Driver explicitly offline',data:{driverId:actualDriverId},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     });
 
     socket.on("rider:connect", (riderId: string) => {
@@ -3606,6 +3633,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
     });
 
     socket.on("ride:request", async (rideData: any) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'pre-fix',hypothesisId:'C',location:'server/socket.ts:ride-request',message:'Ride request event',data:{rideId:rideData?.id,riderId:rideData?.riderId,paymentMethod:rideData?.paymentMethod},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       await handleRideRequest(rideData, socket.id);
     });
 
@@ -3872,6 +3902,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     socket.on("ride:status", async (update: RideUpdate) => {
       console.log('📊 Ride status update:', update.rideId, '→', update.status, 'driverInfo:', (update as any).driverInfo ? 'present' : 'absent');
+      // #region agent log
+      fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'pre-fix',hypothesisId:'A',location:'server/socket.ts:ride-status',message:'Ride status event',data:{rideId:update?.rideId,status:update?.status,cancelledBy:(update as any)?.cancelledBy,driverId:(update as any)?.driverId,socketId:socket.id},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
 
       try {
         // ─── Resolve driver ID from multiple sources ─────────────────────────────────────
@@ -4109,6 +4142,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 riderInitiatedCancellation &&
                 isAfterFreeMinute;
 
+              // #region agent log
+              fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'A',location:'server/socket.ts:cancel-decision',message:'Cancellation decision',data:{rideId:update.rideId,cancelledBy,riderInitiatedCancellation,acceptedAt,acceptedElapsedMs,isAfterFreeMinute,isDriverAlreadyAtPickup,shouldChargeCancellationFee,paymentMethod:cancelledRide?.payment_method,hadPaymentIntent:!!cancelledRide?.payment_intent_id,paymentStatus:cancelledRide?.payment_status},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+
               if (cancelledRide && shouldChargeCancellationFee) {
                 const fullFareAmount = Number(cancelledRide.final_price || cancelledRide.estimated_price || 0);
                 const cancellationFeeAmount = Number((fullFareAmount * 1).toFixed(2));
@@ -4237,8 +4274,32 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 if (!riderInitiatedCancellation) {
                   (update as any).cancellationPolicy = "driver_cancelled_no_fee";
                 } else if (!isAfterFreeMinute) {
-                  (update as any).cancellationPolicy = "free_minute";
+                  (update as any).cancellationPolicy = acceptedAt > 0 ? "free_minute" : "free_before_assignment";
                 }
+
+                // Free cancellation → release the card authorization hold so the
+                // rider is never charged. Covers: cancel before a driver is
+                // assigned (#1) and cancel within the 1-minute free window (#2).
+                let authReleased = false;
+                if (
+                  cancelledRide &&
+                  cancelledRide.payment_method === "card" &&
+                  cancelledRide.payment_intent_id &&
+                  !cancellationAlreadyPrepaid
+                ) {
+                  const releaseResult = await releaseAuthorization(cancelledRide.payment_intent_id);
+                  authReleased = releaseResult.success;
+                  if (releaseResult.success) {
+                    updateData.payment_status = "authorization_released";
+                    (update as any).chargedVia = "released";
+                  } else {
+                    console.warn(`⚠️ Could not release card hold for ride ${update.rideId}: ${releaseResult.error}`);
+                  }
+                }
+
+                // #region agent log
+                fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'A',location:'server/socket.ts:free-cancel',message:'Free cancellation - releasing hold',data:{rideId:update.rideId,cancelledBy,acceptedAt,acceptedElapsedMs,isAfterFreeMinute,policy:(update as any).cancellationPolicy,paymentMethod:cancelledRide?.payment_method,hadPaymentIntent:!!cancelledRide?.payment_intent_id,cancellationAlreadyPrepaid,authReleased},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
               }
             } catch (cancelFeeErr) {
               console.error("❌ Error processing cancellation fee:", cancelFeeErr);
@@ -4948,42 +5009,42 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
       for (const [driverId, socketId] of connectedDrivers.entries()) {
         if (socketId === socket.id) {
-          // Check if driver has an active ride — if so, give a grace period
-          // to allow reconnection after switching to Google Maps
-          let hasActiveRide = false;
-          for (const [, rideInfo] of activeRides.entries()) {
-            if (rideInfo.driverSocketId === socket.id) {
-              hasActiveRide = true;
-              break;
-            }
-          }
-
-          const disconnectGraceMs = hasActiveRide ? 30_000 : 120_000;
-          if (hasActiveRide) {
-            console.log(`⏳ Driver ${driverId} disconnected during active ride — waiting 30s before marking offline`);
-          } else {
-            console.log(`⏳ Driver ${driverId} disconnected while online — waiting 120s before marking offline`);
-          }
+          // A socket disconnect happens whenever the OS suspends the app, the
+          // driver switches to another app (e.g. Google Maps), the screen
+          // locks, or the network blips. It does NOT mean the driver went
+          // offline. We therefore keep `is_online = true` in the DB so the
+          // dispatcher keeps offering rides (delivered via Expo push even when
+          // the app is backgrounded/killed). The driver only becomes offline
+          // when they explicitly toggle off / log out (driver:go_offline).
+          //
+          // We wait a short grace period before removing the socket from the
+          // in-memory map so a quick reconnect keeps foreground behaviour, but
+          // we never touch the DB online flag here.
+          const disconnectGraceMs = 15_000;
+          console.log(`⏳ Driver ${driverId} socket dropped (backgrounded / switched app) — keeping is_online=true, delivering via push`);
 
           setTimeout(async () => {
-              // Check if driver reconnected with a NEW socket in the meantime
               const currentSocketId = connectedDrivers.get(driverId);
               if (currentSocketId && currentSocketId !== socket.id) {
-                console.log(`✅ Driver ${driverId} reconnected with new socket ${currentSocketId} — keeping online`);
-                return; // Driver reconnected, don't mark offline
+                console.log(`✅ Driver ${driverId} reconnected with new socket ${currentSocketId}`);
+                return; // Driver reconnected with a fresh socket
               }
-              // Driver did NOT reconnect — mark offline
               if (!currentSocketId || currentSocketId === socket.id) {
                 connectedDrivers.delete(driverId);
-                console.log(`📊 Driver ${driverId} did not reconnect within ${Math.round(disconnectGraceMs / 1000)}s — marking offline. Remaining: ${connectedDrivers.size}`);
+                console.log(`📊 Driver ${driverId} socket removed from live map (still is_online in DB). Live sockets: ${connectedDrivers.size}`);
+                // Refresh last_seen so staleness tooling still has a signal,
+                // but deliberately DO NOT set is_online=false here.
                 try {
                   await supabase
                     .from("drivers")
-                    .update({ is_online: false, is_available: false })
+                    .update({ is_available: true, last_seen_at: new Date().toISOString() })
                     .eq("id", driverId);
                 } catch (error) {
-                  console.error("Error updating driver status on disconnect:", error);
+                  console.error("Error refreshing driver last_seen on disconnect:", error);
                 }
+                // #region agent log
+                fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'C',location:'server/socket.ts:disconnect',message:'Driver socket dropped - kept online',data:{driverId,liveSockets:connectedDrivers.size},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
               }
             }, disconnectGraceMs);
           break;

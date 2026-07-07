@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useRe
 import { Alert, AppState, Platform, Vibration } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
-import { getSocket, connectAsDriver, onNewRide, onRideUpdate, onRideExpired } from "@/lib/socket";
+import { getSocket, connectAsDriver, goOffline, onNewRide, onRideUpdate, onRideExpired } from "@/lib/socket";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
@@ -849,6 +849,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       await AsyncStorage.setItem(ONLINE_STATUS_KEY, online.toString());
     } catch (error) {
       console.error("Failed to save online status:", error);
+    }
+
+    // Sync online state to the server. Going online (re)registers the driver
+    // socket so they receive ride requests; going offline explicitly tells the
+    // server to stop dispatching. Backgrounding the app does NOT go offline.
+    const driverId = driverProfile?.id || user?.id;
+    if (!driverId) return;
+    try {
+      if (online) {
+        connectAsDriver(driverId);
+      } else {
+        goOffline(driverId);
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to sync online status to server:", err);
     }
   };
 
