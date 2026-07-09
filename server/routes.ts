@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { setupSocketIO, scheduledRideHooks } from "./socket";
 import {
   authorizeSavedCard,
+  capturePaymentIntent,
   chargeSavedCard,
   createPaymentIntent,
   createCustomer,
@@ -13,6 +14,7 @@ import {
   deletePaymentMethod,
   getPaymentMethods,
   refundPayment,
+  releaseAuthorization,
 } from "./stripe";
 import { insertUserSchema, insertRideSchema, insertDriverSchema } from "@shared/schema";
 import {
@@ -1047,13 +1049,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/payments/create-intent", async (req: Request, res: Response) => {
     try {
-      const { amount, customerId } = req.body;
+      const { amount, customerId, rideId, captureMethod } = req.body;
 
       if (!amount || amount <= 0) {
         return res.status(400).json({ error: "Invalid amount" });
       }
 
-      const result = await createPaymentIntent(amount, "gbp", customerId);
+      // Default to manual capture so booking only places a hold; money is
+      // taken later on complete / no-show / late rider cancel.
+      const result = await createPaymentIntent(amount, "gbp", customerId, {
+        captureMethod: captureMethod === "automatic" ? "automatic" : "manual",
+        rideId: typeof rideId === "string" ? rideId : undefined,
+      });
       if (!result) {
         return res.status(500).json({ error: "Failed to create payment intent" });
       }
@@ -1781,6 +1788,12 @@ const normalizeLaterBooking = (
   const rawStatus = String(booking?.status || "").toLowerCase();
   const status = rawStatus === "marketplace" ? "scheduled" : (rawStatus || "scheduled");
   const assignedDriverId = booking?.assigned_driver_id ?? booking?.driver_id ?? null;
+  const storedFare = Number(booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? 0);
+  const discountAmount = Math.max(0, Number(booking?.discount_amount ?? 0));
+  // estimated_fare is the rider-facing (discounted) amount stored at booking.
+  // Drivers must see the pre-discount fare = discounted + discount_amount.
+  const riderFare = Number.isFinite(storedFare) ? storedFare : 0;
+  const driverFare = Number((riderFare + discountAmount).toFixed(2));
 
   return {
     ...booking,
@@ -1790,7 +1803,9 @@ const normalizeLaterBooking = (
     dropoff_address: booking?.dropoff_address ?? booking?.dropoff_location ?? booking?.dropoffAddress ?? "",
     pickup_at: booking?.pickup_at ?? booking?.scheduled_time ?? booking?.scheduled_pickup_time ?? booking?.pickup_time ?? null,
     dropoff_by: booking?.dropoff_by ?? booking?.dropoff_time ?? null,
-    estimated_fare: booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null,
+    estimated_fare: riderFare > 0 ? riderFare : (booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null),
+    discount_amount: discountAmount,
+    driver_fare: driverFare > 0 ? driverFare : (booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null),
     vehicle_type: normalizeVehicleType(booking?.vehicle_type ?? booking?.ride_type ?? booking?.vehicleType),
     driver_id: assignedDriverId,
     assigned_driver_id: assignedDriverId,
@@ -1980,14 +1995,17 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
     }
 
     const finalEstimatedFare = Math.max(0, Number(estimatedFare ?? 0));
-    let bookingPaymentStatus = finalEstimatedFare > 0 ? "prepaid" : "free";
+    const appliedDiscount = Math.max(0, Number(discountAmount ?? 0));
+    // Hold only — do not take money at schedule time. Capture later on
+    // complete / no-show / late rider cancel (same as on-demand rides).
+    let bookingPaymentStatus = finalEstimatedFare > 0 ? "authorized" : "free";
     let prepaidPaymentIntentId: string | null = null;
 
     if (finalEstimatedFare > 0) {
       if (paymentIntentId) {
         const confirmed = await confirmPayment(paymentIntentId);
         if (!confirmed) {
-          return res.status(400).json({ error: "Scheduled ride payment was not completed. Please try again." });
+          return res.status(400).json({ error: "Card authorization was not completed. Please try again." });
         }
         prepaidPaymentIntentId = paymentIntentId;
       } else {
@@ -1996,21 +2014,20 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
         }
 
         const chargeReference = `later_${riderId}_${Date.now()}`;
-        const chargeResult = await chargeSavedCard(
+        const authResult = await authorizeSavedCard(
           stripeCustomerId,
           finalEstimatedFare,
           chargeReference,
           "gbp",
-          "ride_fare",
         );
 
-        if (!chargeResult.success || !chargeResult.paymentIntentId) {
+        if (!authResult.success || !authResult.paymentIntentId) {
           return res.status(400).json({
-            error: chargeResult.error || "Prepaid scheduled rides require a card payment. Please try again.",
+            error: authResult.error || "Could not authorize your card for this scheduled ride. Please try again.",
           });
         }
 
-        prepaidPaymentIntentId = chargeResult.paymentIntentId;
+        prepaidPaymentIntentId = authResult.paymentIntentId;
       }
     }
 
@@ -2043,7 +2060,7 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
         payment_status: bookingPaymentStatus,
         payment_intent_id: prepaidPaymentIntentId,
         coupon_code: couponCode ?? null,
-        discount_amount: discountAmount ?? 0,
+        discount_amount: appliedDiscount,
         return_pickup_address: returnPickupAddress ?? null,
         return_pickup_latitude: returnPickupLatitude ?? null,
         return_pickup_longitude: returnPickupLongitude ?? null,
@@ -2093,7 +2110,7 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
     if (error) {
       console.error("Supabase insert error:", error);
       if (prepaidPaymentIntentId) {
-        await refundPayment(prepaidPaymentIntentId);
+        await releaseAuthorization(prepaidPaymentIntentId);
       }
       return res.status(500).json({ error: error.message || "Database error" });
     }
@@ -2398,8 +2415,11 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
     const bookingPaymentMethod = String(normalizedBooking.payment_method || "card").toLowerCase();
     const bookingPaymentStatus = String(normalizedBooking.payment_status || "").toLowerCase();
     const bookingPaymentIntentId = normalizedBooking.payment_intent_id || null;
-    const prepaidStatusSet = new Set(["prepaid", "paid", "card_charged", "completed", "succeeded"]);
-    const isPrepaidBooking = bookingPaymentMethod === "card" && !!bookingPaymentIntentId && prepaidStatusSet.has(bookingPaymentStatus);
+    const alreadyCapturedStatusSet = new Set(["prepaid", "prepaid_retained", "paid", "card_charged", "card_captured", "completed", "succeeded"]);
+    const isAuthorizedHold = bookingPaymentMethod === "card" && !!bookingPaymentIntentId && (
+      bookingPaymentStatus === "authorized" || !alreadyCapturedStatusSet.has(bookingPaymentStatus)
+    );
+    const isAlreadyCaptured = bookingPaymentMethod === "card" && !!bookingPaymentIntentId && alreadyCapturedStatusSet.has(bookingPaymentStatus);
 
     let cancellationFee = 0;
     let refundAmount = 0;
@@ -2414,24 +2434,53 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
 
     if (cancelledBy === 'rider') {
       if (withinThreeHours || pastPickup) {
-        // Charge 100% cancellation fee for late cancellation
+        // Charge 100% cancellation fee for late cancellation (rider-facing discounted fare)
         const halfFare = estimatedFare * 1;
         cancellationFee = halfFare;
-        if (isPrepaidBooking) {
+        if (isAlreadyCaptured) {
           penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} retained from prepaid fare.`;
+        } else if (isAuthorizedHold) {
+          penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} captured from card hold.`;
         } else {
           penaltyNote = `Late cancellation within 3 hours — 100% fee of £${halfFare.toFixed(2)} charged.`;
         }
 
-        // Deduct from rider wallet (allowing negative balance) only when this
-        // booking wasn't already prepaid on card at schedule time.
-        if (!isPrepaidBooking && riderId && halfFare > 0) {
+        // Capture authorized hold, or charge wallet if no card hold exists.
+        if (isAuthorizedHold && bookingPaymentIntentId && halfFare > 0) {
+          try {
+            const captureResult = await capturePaymentIntent(bookingPaymentIntentId, halfFare);
+            if (!captureResult.success) {
+              console.warn(`⚠️ Scheduled late-cancel capture failed: ${captureResult.error}`);
+              // Fall through to wallet charge below
+              const { data: riderRow } = await sb.from('users').select('wallet_balance, stripe_customer_id').eq('id', riderId).single();
+              if (riderRow?.stripe_customer_id) {
+                await releaseAuthorization(bookingPaymentIntentId).catch(() => {});
+                const chargeResult = await chargeSavedCard(riderRow.stripe_customer_id, halfFare, bookingId, "gbp", "cancellation_fee");
+                if (!chargeResult.success) {
+                  const currentBalance = riderRow?.wallet_balance || 0;
+                  const newBalance = Number((currentBalance - halfFare).toFixed(2));
+                  await sb.from('users').update({ wallet_balance: newBalance }).eq('id', riderId);
+                  await sb.from('wallet_transactions').insert({
+                    user_id: riderId,
+                    ride_id: null,
+                    amount: halfFare,
+                    type: 'debit',
+                    description: `100% Late cancellation fee (£${halfFare.toFixed(2)}) for booking ${bookingId}`,
+                  });
+                }
+              }
+            } else {
+              console.log(`✅ Scheduled late-cancel captured £${halfFare} for booking ${bookingId}`);
+            }
+          } catch (captureErr) {
+            console.error('Failed to capture card for late cancel:', captureErr);
+          }
+        } else if (!isAlreadyCaptured && riderId && halfFare > 0) {
           try {
             const { data: riderRow } = await sb.from('users').select('wallet_balance').eq('id', riderId).single();
             const currentBalance = riderRow?.wallet_balance || 0;
             const newBalance = Number((currentBalance - halfFare).toFixed(2));
             await sb.from('users').update({ wallet_balance: newBalance }).eq('id', riderId);
-            // Record wallet transaction
             await sb.from('wallet_transactions').insert({
               user_id: riderId,
               ride_id: null,
@@ -2466,14 +2515,22 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
           console.warn(`⚠️ No driver assigned to booking ${bookingId} - cannot credit earnings`);
         }
       } else {
-        // Free cancellation — issue full refund
+        // Free cancellation — release authorization hold (no money was taken yet)
         refundAmount = estimatedFare > 0 ? estimatedFare : 0;
-        if (isPrepaidBooking && bookingPaymentIntentId) {
-          const refunded = await refundPayment(bookingPaymentIntentId);
-          if (!refunded) {
-            return res.status(500).json({ error: "Failed to refund prepaid amount. Please try again." });
+        if ((isAuthorizedHold || isAlreadyCaptured) && bookingPaymentIntentId) {
+          if (isAlreadyCaptured) {
+            const refunded = await refundPayment(bookingPaymentIntentId);
+            if (!refunded) {
+              return res.status(500).json({ error: "Failed to refund prepaid amount. Please try again." });
+            }
+            penaltyNote = `Free cancellation — more than 3 hours before pickup. Prepaid amount £${refundAmount.toFixed(2)} refunded.`;
+          } else {
+            const released = await releaseAuthorization(bookingPaymentIntentId);
+            if (!released.success && !released.alreadyFinal) {
+              return res.status(500).json({ error: "Failed to release card hold. Please try again." });
+            }
+            penaltyNote = `Free cancellation — more than 3 hours before pickup. Card hold of £${refundAmount.toFixed(2)} released.`;
           }
-          penaltyNote = `Free cancellation — more than 3 hours before pickup. Prepaid amount £${refundAmount.toFixed(2)} refunded.`;
         } else {
           penaltyNote = 'Free cancellation — more than 3 hours before pickup.';
         }
@@ -2497,11 +2554,11 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
       cancellation_note: penaltyNote,
       cancelled_by: cancelledBy || 'rider',
     };
-    if (cancelledBy === 'rider' && isPrepaidBooking) {
+    if (cancelledBy === 'rider' && (isAlreadyCaptured || isAuthorizedHold)) {
       if (cancellationFee > 0) {
-        updatePayload.payment_status = "prepaid_retained";
+        updatePayload.payment_status = isAlreadyCaptured ? "prepaid_retained" : "cancellation_fee_card_captured";
       } else if (bookingPaymentIntentId) {
-        updatePayload.payment_status = "refunded";
+        updatePayload.payment_status = isAlreadyCaptured ? "refunded" : "authorization_released";
       }
     }
     if (cancelledBy === 'driver') {
@@ -2890,8 +2947,10 @@ setInterval(async () => {
             latitude: Number(booking.dropoff_latitude) || 0,
             longitude: Number(booking.dropoff_longitude) || 0,
           },
-          farePrice: Number(booking.estimated_fare) || 0,
-          estimatedPrice: Number(booking.estimated_fare) || 0,
+          farePrice: Number(booking.driver_fare ?? (Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0))) || 0,
+          estimatedPrice: Number(booking.driver_fare ?? (Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0))) || 0,
+          discountAmount: Number(booking.discount_amount || 0),
+          couponCode: booking.coupon_code || null,
           distanceMiles: Number(booking.distance_miles) || 0,
           durationMinutes: Number(booking.duration_minutes) || 0,
           paymentMethod: booking.payment_method || "card",

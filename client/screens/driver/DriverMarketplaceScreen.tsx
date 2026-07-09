@@ -33,6 +33,8 @@ interface LaterBooking {
   status: string;
   created_at: string;
   estimated_fare?: number | null;
+  discount_amount?: number | null;
+  driver_fare?: number | null;
   driver_id?: string | null;
   passengers?: number;
   luggage?: number;
@@ -89,7 +91,10 @@ function BookingCard({
     return v.charAt(0).toUpperCase() + v.slice(1);
   };
 
-  const fareStr = item.estimated_fare ? `£${parseFloat(String(item.estimated_fare)).toFixed(2)}` : 'N/A';
+  const fareValue = item.driver_fare != null
+    ? Number(item.driver_fare)
+    : Number(item.estimated_fare || 0) + Number(item.discount_amount || 0);
+  const fareStr = fareValue > 0 ? `£${fareValue.toFixed(2)}` : 'N/A';
 
   return (
     <Pressable style={s.card} onPress={() => onPress(item)}>

@@ -246,8 +246,17 @@ export const api = {
       return res.json();
     },
 
-    async createIntent(amount: number, customerId?: string): Promise<{ clientSecret: string; paymentIntentId: string }> {
-      const res = await apiRequest("POST", "/api/payments/create-intent", { amount, customerId });
+    async createIntent(
+      amount: number,
+      customerId?: string,
+      options?: { rideId?: string; captureMethod?: "automatic" | "manual" },
+    ): Promise<{ clientSecret: string; paymentIntentId: string }> {
+      const res = await apiRequest("POST", "/api/payments/create-intent", {
+        amount,
+        customerId,
+        rideId: options?.rideId,
+        captureMethod: options?.captureMethod || "manual",
+      });
       return res.json();
     },
 

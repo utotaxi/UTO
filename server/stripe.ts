@@ -15,7 +15,8 @@ export const stripe = process.env.STRIPE_SECRET_KEY
 export async function createPaymentIntent(
   amount: number,
   currency: string = "gbp",
-  customerId?: string
+  customerId?: string,
+  options?: { captureMethod?: "automatic" | "manual"; rideId?: string }
 ): Promise<{ clientSecret: string; paymentIntentId: string } | null> {
   if (!stripe) {
     console.error("Stripe is not configured");
@@ -23,13 +24,24 @@ export async function createPaymentIntent(
   }
 
   try {
+    const captureMethod = options?.captureMethod || "manual";
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency,
       customer: customerId,
+      capture_method: captureMethod,
       automatic_payment_methods: {
         enabled: true,
       },
+      ...(options?.rideId
+        ? {
+            description: `Ride authorization for ride ${options.rideId}`,
+            metadata: {
+              ride_id: options.rideId,
+              charge_type: "ride_authorization",
+            },
+          }
+        : {}),
     });
 
     return {
@@ -187,7 +199,12 @@ export async function confirmPayment(paymentIntentId: string): Promise<boolean> 
 
   try {
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    return paymentIntent.status === "succeeded";
+    // Manual-capture authorizations land in requires_capture after the rider
+    // confirms the PaymentSheet. Auto-capture intents land in succeeded.
+    return (
+      paymentIntent.status === "succeeded" ||
+      paymentIntent.status === "requires_capture"
+    );
   } catch (error) {
     console.error("Error confirming payment:", error);
     return false;

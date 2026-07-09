@@ -33,6 +33,8 @@ interface LaterBooking {
   status: string;
   created_at: string;
   estimated_fare?: number | null;
+  discount_amount?: number | null;
+  driver_fare?: number | null;
   driver_id?: string | null;
   assigned_driver_id?: string | null;
   passengers?: number;
@@ -78,8 +80,11 @@ function UpcomingBookingCard({
   item: LaterBooking;
   onPress: (item: LaterBooking) => void;
 }) {
-  const fareStr = item.estimated_fare
-    ? `£${parseFloat(String(item.estimated_fare)).toFixed(2)}`
+  const fareValue = item.driver_fare != null
+    ? Number(item.driver_fare)
+    : Number(item.estimated_fare || 0) + Number(item.discount_amount || 0);
+  const fareStr = fareValue > 0
+    ? `£${fareValue.toFixed(2)}`
     : 'N/A';
 
   let jobType = 'Scheduled';

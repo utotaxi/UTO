@@ -390,19 +390,26 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   const handleCancel = () => {
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); } catch (_) { }
-    const acceptedAtMs = activeRide?.acceptedAt ? new Date(activeRide.acceptedAt).getTime() : 0;
-    const acceptedElapsedMs = acceptedAtMs ? Date.now() - acceptedAtMs : Number.POSITIVE_INFINITY;
-    // First minute after driver acceptance is always free — even if driver has arrived.
-    const withinFreeMinute = acceptedAtMs > 0 && acceptedElapsedMs < 60_000;
-    const freeSecondsRemaining = withinFreeMinute ? Math.max(1, Math.ceil((60_000 - acceptedElapsedMs) / 1000)) : 0;
-    const fareAmount = (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0;
+    const arrivedAtMs = (activeRide as any)?.driverArrivedAt
+      ? new Date((activeRide as any).driverArrivedAt).getTime()
+      : 0;
+    const arrivedElapsedMs = arrivedAtMs ? Date.now() - arrivedAtMs : 0;
+    // Free until driver arrives, then 1 free minute after arrival.
+    const driverHasArrived = ["arrived", "at_pickup", "in_progress"].includes(String(activeRide?.status || ""));
+    const withinFreeMinute = !driverHasArrived || (arrivedAtMs > 0 && arrivedElapsedMs < 60_000);
+    const freeSecondsRemaining = (driverHasArrived && arrivedAtMs > 0 && arrivedElapsedMs < 60_000)
+      ? Math.max(1, Math.ceil((60_000 - arrivedElapsedMs) / 1000))
+      : 0;
+    const fullFare = (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0;
+    const discount = Math.max(0, Number(activeRide?.discountAmount || 0));
+    const fareAmount = Math.max(0, fullFare - discount);
     const cancellationFeeApplies = fareAmount > 0 && !withinFreeMinute;
 
     if (cancellationFeeApplies) {
       const feeReason = "Your free cancellation period has ended.";
       Alert.alert(
         "Cancellation Fee Applies",
-        `${feeReason} Cancelling now will result in a 100% cancellation fee of £${(fareAmount * 1).toFixed(2)} being charged to your wallet.`,
+        `${feeReason} Cancelling now will result in a 100% cancellation fee of £${fareAmount.toFixed(2)} being charged.`,
         [
           { text: "Keep Ride", style: "cancel" },
           {
@@ -419,29 +426,30 @@ export default function RideTrackingScreen({ navigation }: any) {
           }
         ]
       );
-    } else {
-      Alert.alert(
-        "Cancel Ride",
-        withinFreeMinute
-          ? `Are you sure you want to cancel this ride? You are still inside the free cancellation period (${freeSecondsRemaining}s remaining). No cancellation fee will be charged.`
-          : "Are you sure you want to cancel this ride? No cancellation fee will be charged.",
-        [
-          { text: "No", style: "cancel" },
-          {
-            text: "Yes, Cancel",
-            style: "destructive",
-            onPress: () => {
-              try {
-                if (activeRide) cancelRide(activeRide.id, false);
-              } catch (e) {
-                console.error('Cancel ride error:', e);
-                navigateHome();
-              }
+      return;
+    }
+
+    Alert.alert(
+      "Cancel Ride",
+      freeSecondsRemaining > 0
+        ? `Are you sure you want to cancel this ride? You are still inside the free cancellation period (${freeSecondsRemaining}s remaining). No cancellation fee will be charged.`
+        : "Are you sure you want to cancel this ride? No cancellation fee will be charged.",
+      [
+        { text: "Keep Ride", style: "cancel" },
+        {
+          text: "Cancel Ride",
+          style: "destructive",
+          onPress: () => {
+            try {
+              if (activeRide) cancelRide(activeRide.id, false);
+            } catch (e) {
+              console.error('Cancel ride error:', e);
+              navigateHome();
             }
           }
-        ]
-      );
-    }
+        }
+      ]
+    );
   };
 
   const getDialablePhone = (rawPhone?: string) => {

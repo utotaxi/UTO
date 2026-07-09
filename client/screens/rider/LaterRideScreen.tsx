@@ -226,7 +226,9 @@ export default function LaterRideScreen({ navigation }: any) {
     try {
       let paymentIntentId: string | null = null;
       if (finalFare && finalFare > 0) {
-        const paymentIntent = await api.payments.createIntent(finalFare, user?.stripeCustomerId);
+        const paymentIntent = await api.payments.createIntent(finalFare, user?.stripeCustomerId, {
+          captureMethod: "manual",
+        });
         const { error: initError } = await initPaymentSheet({
           paymentIntentClientSecret: paymentIntent.clientSecret,
           merchantDisplayName: 'UTO Rides',

@@ -31,6 +31,7 @@ interface ScheduledRide {
   status: BookingStatus;
   created_at: string;
   estimated_fare?: number;
+  discount_amount?: number;
   distance_miles?: number;
   duration_minutes?: number;
   vehicle_type?: string;
@@ -70,11 +71,14 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
   const isLateCancelWindow = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
 
-  // Calculate dynamic fare if distance & duration are available, otherwise fallback
-  let displayFare = ride.estimated_fare;
-  if (ride.distance_miles && ride.duration_minutes) {
-    displayFare = calculateFare(ride.distance_miles, ride.duration_minutes, ride.vehicle_type || 'saloon');
-  }
+  // Rider always sees the discounted fare stored on the booking.
+  // Do NOT recalculate from distance (that would wipe the coupon).
+  const discount = Math.max(0, Number(ride.discount_amount || 0));
+  let displayFare = ride.estimated_fare != null
+    ? Number(ride.estimated_fare)
+    : (ride.distance_miles && ride.duration_minutes
+      ? Math.max(0, calculateFare(ride.distance_miles, ride.duration_minutes, ride.vehicle_type || 'saloon') - discount)
+      : undefined);
 
   return (
     <View style={cs.card}>

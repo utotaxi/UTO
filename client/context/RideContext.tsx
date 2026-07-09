@@ -1743,25 +1743,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
     setActiveRide(newRide);
     await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(newRide));
 
-    // Deduct wallet balance immediately if used
-    if (walletDeduction > 0) {
-      try {
-        await updateProfile({ walletBalance: walletBalance - walletDeduction });
-
-        // Record the transaction
-        if (user?.id) {
-          const { api } = await import('@/lib/api');
-          await api.payments.addWalletTransaction(user.id, {
-            rideId: newRide.id,
-            amount: walletDeduction,
-            type: "debit",
-            description: `Wallet deduction for ride ${newRide.id.slice(0, 12)}...`,
-          });
-        }
-      } catch (err) {
-        console.error('Failed to deduct wallet balance:', err);
-      }
-    }
+    // Do NOT debit wallet at booking time. Money (card capture or wallet)
+    // is only taken on complete / no-show / late rider cancel.
 
     // Broadcast ride request to all connected drivers via Socket.IO
     try {

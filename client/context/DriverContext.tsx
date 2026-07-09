@@ -451,8 +451,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       cleanupCancel = onRideUpdate((update: any) => {
         if (update.status === "cancelled" || update.status === "cancelled_no_show") {
           const currentRide = activeRideRequestRef.current;
+          const matchesActive =
+            currentRide && (currentRide.id === update.rideId || !update.rideId);
+
           // Only handle if this cancellation is for OUR active ride
-          if (currentRide && (currentRide.id === update.rideId || !update.rideId)) {
+          if (matchesActive) {
             console.log('🚫 Ride cancelled:', update.rideId, 'reason:', update.status);
 
             // ─── Handle no-show from server ────────────────────
@@ -469,13 +472,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                 refreshData().catch((err: any) => console.warn("⚠️ Post no-show refreshData failed:", err));
               }, 2000);
             } else {
-              // Normal rider-initiated cancellation
+              // Normal rider-initiated cancellation — show popup then clear UI
               setRideCancelledByRider(true);
 
               // 🔔 Notify driver of cancellation
               sendLocalNotification(
                 "❌ Ride Cancelled",
-                `${currentRide.riderName || "The rider"} has cancelled the ride.`,
+                `${currentRide?.riderName || "The rider"} has cancelled the ride.`,
                 { type: "ride_cancelled", rideId: update.rideId }
               );
 
@@ -490,6 +493,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             setTimeout(() => {
               refreshData().catch((err: any) => console.warn("⚠️ Post no-show refreshData failed:", err));
             }, 2000);
+          } else if (update.status === "cancelled" && update.rideId) {
+            // Even if we somehow lost local active-ride state, still surface the popup
+            // so the driver is not stuck on a cancelled ride screen.
+            setRideCancelledByRider(true);
+            setActiveRideRequest(null);
+            setActiveRide(null);
+            saveActiveRide(null).catch(() => {});
+            setRideState("none");
           }
         }
       });

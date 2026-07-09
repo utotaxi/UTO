@@ -4058,14 +4058,32 @@ export function setupSocketIO(httpServer: HTTPServer) {
             try {
               const { data: completedRide } = await supabase
                 .from("rides")
-                .select("rider_id, estimated_price, final_price, payment_method, payment_intent_id, payment_status")
+                .select("rider_id, estimated_price, final_price, payment_method, payment_intent_id, payment_status, discount_amount")
                 .eq("id", update.rideId)
                 .single();
 
-              const completedFare = Number(clientTotalFare || completedRide?.final_price || completedRide?.estimated_price || 0);
+              const fullFare = Number(completedRide?.estimated_price || 0);
+              const discount = Math.max(0, Number((completedRide as any)?.discount_amount || 0));
+              const waitingChargeAmt = Number(waitingCharge || 0);
+              // Rider pays discounted fare (+ waiting). Driver earnings use full fare separately.
+              const completedFare = Number(
+                (
+                  clientTotalFare > 0
+                    ? Math.max(0, clientTotalFare - discount)
+                    : Math.max(0, (completedRide?.final_price || fullFare) - discount) + waitingChargeAmt
+                ).toFixed(2)
+              );
               const paymentStatus = String(completedRide?.payment_status || "").toLowerCase();
-              const alreadyPrepaid = new Set(["prepaid", "card_charged", "paid", "succeeded", "prepaid_retained"]).has(paymentStatus);
-              if (completedRide && completedFare > 0 && completedRide.rider_id && !alreadyPrepaid) {
+              // Only skip if already captured/charged — "authorized" must still be captured.
+              const alreadyCaptured = new Set([
+                "prepaid",
+                "prepaid_retained",
+                "card_charged",
+                "card_captured",
+                "paid",
+                "succeeded",
+              ]).has(paymentStatus);
+              if (completedRide && completedFare > 0 && completedRide.rider_id && !alreadyCaptured) {
                 const { data: riderUser } = await supabase
                   .from("users")
                   .select("stripe_customer_id")
@@ -4078,6 +4096,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
                 if (!chargeResult.success && riderUser?.stripe_customer_id) {
                   console.warn(`⚠️ Capture failed for ride ${update.rideId}: ${chargeResult.error}. Falling back to saved-card charge.`);
+                  // Release any leftover auth hold before creating a new charge
+                  if (completedRide.payment_intent_id) {
+                    await releaseAuthorization(completedRide.payment_intent_id).catch(() => {});
+                  }
                   chargeResult = await chargeSavedCard(
                     riderUser.stripe_customer_id,
                     completedFare,
@@ -4106,9 +4128,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   console.warn(`⚠️ Card capture/charge failed for ride ${update.rideId}: ${chargeResult.error}`);
                   updateData.payment_status = "card_charge_failed";
                 }
-              } else if (alreadyPrepaid) {
+              } else if (alreadyCaptured) {
                 updateData.payment_status = completedRide?.payment_status || "prepaid";
-                console.log(`💳 Ride ${update.rideId} was prepaid earlier — skipping completion-time card capture`);
+                console.log(`💳 Ride ${update.rideId} was already charged — skipping completion-time card capture`);
               }
             } catch (cardChargeErr) {
               console.error(`❌ Card charge error on ride completion:`, cardChargeErr);
@@ -4118,37 +4140,44 @@ export function setupSocketIO(httpServer: HTTPServer) {
             updateData.cancelled_at = new Date().toISOString();
 
             // ── Server-side cancellation fee processing ──────────────────────
-            // Rider gets one free minute after driver assignment. After that,
-            // or once the driver has arrived, a 100% cancellation fee is owed.
+            // Rider gets one free minute after the driver arrives at pickup.
+            // After that free window, a 100% cancellation fee (discounted fare) is owed.
             try {
               const { data: cancelledRide, error: cancelledRideErr } = await supabase
                 .from("rides")
-                .select("rider_id, driver_id, status, accepted_at, estimated_price, final_price, payment_method, payment_intent_id, payment_status")
+                .select("rider_id, driver_id, status, accepted_at, arrived_at, estimated_price, final_price, payment_method, payment_intent_id, payment_status, discount_amount")
                 .eq("id", update.rideId)
                 .single();
 
-              const acceptedAt = cancelledRide?.accepted_at ? new Date(cancelledRide.accepted_at).getTime() : 0;
-              const acceptedElapsedMs = acceptedAt ? Date.now() - acceptedAt : 0;
-              const isAfterFreeMinute = acceptedAt > 0 && acceptedElapsedMs >= 60_000;
+              const arrivedAt = cancelledRide?.arrived_at
+                ? new Date(cancelledRide.arrived_at).getTime()
+                : 0;
+              const arrivedElapsedMs = arrivedAt ? Date.now() - arrivedAt : 0;
+              const isAfterFreeMinute = arrivedAt > 0 && arrivedElapsedMs >= 60_000;
               const isDriverAlreadyAtPickup = cancelledRide && ["arrived", "at_pickup", "in_progress"].includes(cancelledRide.status);
               const cancelledBy = String((update as any).cancelledBy || "").toLowerCase();
               const riderInitiatedCancellation = cancelledBy === "rider";
               const cancellationPaymentStatus = String(cancelledRide?.payment_status || "").toLowerCase();
-              const cancellationAlreadyPrepaid = new Set(["prepaid", "card_charged", "paid", "succeeded", "prepaid_retained"]).has(cancellationPaymentStatus);
-              // Product rule: rider has a strict 1-minute free-cancel window from
-              // acceptance time before any cancellation fee can be captured.
+              const cancellationAlreadyCaptured = new Set([
+                "prepaid",
+                "prepaid_retained",
+                "card_charged",
+                "card_captured",
+                "paid",
+                "succeeded",
+              ]).has(cancellationPaymentStatus);
+              // Product rule: free cancel until driver arrives, then 1 free minute
+              // after arrival. Charge only after that window.
               const shouldChargeCancellationFee =
                 !!cancelledRide &&
                 riderInitiatedCancellation &&
+                isDriverAlreadyAtPickup &&
                 isAfterFreeMinute;
-
-              // #region agent log
-              fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'A',location:'server/socket.ts:cancel-decision',message:'Cancellation decision',data:{rideId:update.rideId,cancelledBy,riderInitiatedCancellation,acceptedAt,acceptedElapsedMs,isAfterFreeMinute,isDriverAlreadyAtPickup,shouldChargeCancellationFee,paymentMethod:cancelledRide?.payment_method,hadPaymentIntent:!!cancelledRide?.payment_intent_id,paymentStatus:cancelledRide?.payment_status},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
 
               if (cancelledRide && shouldChargeCancellationFee) {
                 const fullFareAmount = Number(cancelledRide.final_price || cancelledRide.estimated_price || 0);
-                const cancellationFeeAmount = Number((fullFareAmount * 1).toFixed(2));
+                const discount = Math.max(0, Number((cancelledRide as any).discount_amount || 0));
+                const cancellationFeeAmount = Number(Math.max(0, fullFareAmount - discount).toFixed(2));
                 const riderId = cancelledRide.rider_id;
                 const rideInfo = activeRides.get(update.rideId);
                 const walletDeductionAlreadyTaken = Math.max(0, Number(rideInfo?.rideData?.walletDeduction || 0));
@@ -4165,7 +4194,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   let cardCaptureSuccess = false;
                   let capturedPaymentIntentId: string | undefined;
 
-                  if (cancellationAlreadyPrepaid) {
+                  if (cancellationAlreadyCaptured) {
                     cardCaptureSuccess = true;
                     capturedPaymentIntentId = cancelledRide.payment_intent_id || undefined;
                     updateData.payment_status = "prepaid_retained";
@@ -4273,19 +4302,20 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 (update as any).chargedVia = "none";
                 if (!riderInitiatedCancellation) {
                   (update as any).cancellationPolicy = "driver_cancelled_no_fee";
+                } else if (!isDriverAlreadyAtPickup) {
+                  (update as any).cancellationPolicy = "free_before_arrival";
                 } else if (!isAfterFreeMinute) {
-                  (update as any).cancellationPolicy = acceptedAt > 0 ? "free_minute" : "free_before_assignment";
+                  (update as any).cancellationPolicy = "free_minute_after_arrival";
                 }
 
                 // Free cancellation → release the card authorization hold so the
-                // rider is never charged. Covers: cancel before a driver is
-                // assigned (#1) and cancel within the 1-minute free window (#2).
+                // rider is never charged (before arrival, or within 1 min after).
                 let authReleased = false;
                 if (
                   cancelledRide &&
                   cancelledRide.payment_method === "card" &&
                   cancelledRide.payment_intent_id &&
-                  !cancellationAlreadyPrepaid
+                  !cancellationAlreadyCaptured
                 ) {
                   const releaseResult = await releaseAuthorization(cancelledRide.payment_intent_id);
                   authReleased = releaseResult.success;
@@ -4297,9 +4327,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   }
                 }
 
-                // #region agent log
-                fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'A',location:'server/socket.ts:free-cancel',message:'Free cancellation - releasing hold',data:{rideId:update.rideId,cancelledBy,acceptedAt,acceptedElapsedMs,isAfterFreeMinute,policy:(update as any).cancellationPolicy,paymentMethod:cancelledRide?.payment_method,hadPaymentIntent:!!cancelledRide?.payment_intent_id,cancellationAlreadyPrepaid,authReleased},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
+                console.log(
+                  `🆓 Free cancel for ride ${update.rideId}: policy=${(update as any).cancellationPolicy}, authReleased=${authReleased}`,
+                );
               }
             } catch (cancelFeeErr) {
               console.error("❌ Error processing cancellation fee:", cancelFeeErr);
@@ -4385,15 +4415,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
             io.to(`rider:${rideInfo.riderId}`).emit("ride:update", riderPayload);
           }
 
-          if (rideInfo.driverSocketId && rideInfo.driverSocketId !== socket.id) {
-            // Driver accepted - send directly to their socket
+          // Always notify the assigned driver on cancel so their active-ride UI clears
+          // and the "Ride Cancelled" popup can show — even if their socket changed.
+          if (update.status === "cancelled") {
+            if (rideInfo.driverSocketId) {
+              io.to(rideInfo.driverSocketId).emit("ride:update", update);
+            }
+            if (resolvedDriverId) {
+              io.to(`driver:${resolvedDriverId}`).emit("ride:update", update);
+            }
+            // Also broadcast so any driver still showing the incoming card clears it
+            socket.broadcast.emit("ride:update", update);
+            console.log(`📢 Forwarding cancellation of ride ${update.rideId} to driver(s)`);
+          } else if (rideInfo.driverSocketId && rideInfo.driverSocketId !== socket.id) {
             io.to(rideInfo.driverSocketId).emit("ride:update", update);
             console.log(`📢 Forwarding ride:update (${update.status}) to driver socket ${rideInfo.driverSocketId}`);
-          } else if (update.status === "cancelled") {
-            // Driver hasn't accepted yet (or pre-accept cancel) — broadcast to ALL drivers
-            // so any driver seeing the incoming request card clears it immediately
-            socket.broadcast.emit("ride:update", update);
-            console.log(`📢 Broadcasting cancellation of ride ${update.rideId} to all drivers`);
           }
         } else {
           // Fallback: DB lookup for socket routing
@@ -4403,6 +4439,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
               io.to(`rider:${rideRow.rider_id}`).emit("ride:update", update);
               if (rideRow.driver_id) {
                 io.to(`driver:${rideRow.driver_id}`).emit("ride:update", update);
+              }
+              if (update.status === "cancelled") {
+                socket.broadcast.emit("ride:update", update);
               }
             }
           } catch (_) {
@@ -4533,17 +4572,20 @@ export function setupSocketIO(httpServer: HTTPServer) {
           return;
         }
 
-        const fareAmount = rideRow.estimated_price || 0;
+        const fareAmount = Number(rideRow.estimated_price || 0);
+        const discount = Math.max(0, Number(rideRow.discount_amount || 0));
+        // Rider is charged the discounted amount; driver earnings use full fare below.
+        const riderChargeAmount = Number(Math.max(0, fareAmount - discount).toFixed(2));
         const ridePaymentMethod = rideRow.payment_method || "card";
 
-        console.log(`💳 No-show: ride ${data.rideId} payment_method=${ridePaymentMethod}, fare=£${fareAmount}`);
+        console.log(`💳 No-show: ride ${data.rideId} payment_method=${ridePaymentMethod}, riderCharge=£${riderChargeAmount}, driverFare=£${fareAmount}`);
 
         // ─── 2. Charge the rider's saved card via Stripe ────────────────────
         let stripeChargeSuccess = false;
         let stripePaymentIntentId: string | undefined;
         let stripeChargeError: string | undefined;
 
-        if (rideRow.rider_id && fareAmount > 0) {
+        if (rideRow.rider_id && riderChargeAmount > 0) {
           try {
             const { data: riderUser } = await supabase
               .from("users")
@@ -4554,15 +4596,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
             const stripeCustomerId = riderUser?.stripe_customer_id;
 
             if (rideRow.payment_method === "card" && rideRow.payment_intent_id) {
-              console.log(`💳 Capturing authorized PaymentIntent for no-show ride ${data.rideId}: £${fareAmount}`);
-              const chargeResult = await capturePaymentIntent(rideRow.payment_intent_id, fareAmount);
+              console.log(`💳 Capturing authorized PaymentIntent for no-show ride ${data.rideId}: £${riderChargeAmount}`);
+              const chargeResult = await capturePaymentIntent(rideRow.payment_intent_id, riderChargeAmount);
 
               stripeChargeSuccess = chargeResult.success;
               stripePaymentIntentId = chargeResult.paymentIntentId;
               stripeChargeError = chargeResult.error;
 
               if (stripeChargeSuccess) {
-                console.log(`✅ No-show fee £${fareAmount} captured from authorized card for ride ${data.rideId}`);
+                console.log(`✅ No-show fee £${riderChargeAmount} captured from authorized card for ride ${data.rideId}`);
               } else {
                 console.warn(`⚠️ Stripe card charge failed: ${stripeChargeError} — will fall back to wallet`);
               }
@@ -4570,7 +4612,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               console.log(`💳 Attempting fallback saved-card charge for rider ${rideRow.rider_id} (Stripe customer: ${stripeCustomerId})`);
               const chargeResult = await chargeSavedCard(
                 stripeCustomerId,
-                fareAmount,
+                riderChargeAmount,
                 data.rideId,
                 "gbp",
                 "no_show_fee"
@@ -4581,7 +4623,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               stripeChargeError = chargeResult.error;
 
               if (stripeChargeSuccess) {
-                console.log(`✅ No-show fee £${fareAmount} charged to saved card for ride ${data.rideId}`);
+                console.log(`✅ No-show fee £${riderChargeAmount} charged to saved card for ride ${data.rideId}`);
               } else {
                 console.warn(`⚠️ Stripe card charge failed: ${stripeChargeError} — will fall back to wallet`);
               }
@@ -4620,7 +4662,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         // ─── 4. If card charge failed, fall back to wallet deduction ─────────
-        if (!stripeChargeSuccess && rideRow.rider_id && fareAmount > 0) {
+        if (!stripeChargeSuccess && rideRow.rider_id && riderChargeAmount > 0) {
           try {
             const { data: userRow } = await supabase
               .from("users")
@@ -4629,21 +4671,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
               .single();
 
             const currentBalance = userRow?.wallet_balance || 0;
-            const newBalance = Math.max(0, currentBalance - fareAmount);
+            const newBalance = Math.max(0, currentBalance - riderChargeAmount);
 
             await supabase
               .from("users")
               .update({ wallet_balance: newBalance })
               .eq("id", rideRow.rider_id);
 
-            console.log(`💰 No-show penalty (wallet fallback): Debited £${fareAmount} from rider ${rideRow.rider_id} wallet (${currentBalance} → ${newBalance})`);
+            console.log(`💰 No-show penalty (wallet fallback): Debited £${riderChargeAmount} from rider ${rideRow.rider_id} wallet (${currentBalance} → ${newBalance})`);
 
             await supabase
               .from("wallet_transactions")
               .insert({
                 user_id: rideRow.rider_id,
                 ride_id: data.rideId,
-                amount: fareAmount,
+                amount: riderChargeAmount,
                 type: "debit",
                 description: `No-show cancellation fee — driver waited 10 minutes (card charge failed: ${stripeChargeError || 'unknown'})`,
               });
@@ -4653,12 +4695,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         // ─── 5. Record payment in payments table ─────────────────────────────
-        if (rideRow.rider_id && fareAmount > 0) {
+        if (rideRow.rider_id && riderChargeAmount > 0) {
           try {
             await supabase.from("payments").insert({
               ride_id: data.rideId,
               user_id: rideRow.rider_id,
-              amount: fareAmount,
+              amount: riderChargeAmount,
               currency: "gbp",
               status: "succeeded",
               payment_method: stripeChargeSuccess ? "card" : "wallet",

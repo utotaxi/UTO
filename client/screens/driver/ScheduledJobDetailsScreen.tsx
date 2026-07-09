@@ -471,7 +471,14 @@ export default function ScheduledJobDetailsScreen() {
                     : booking.status.toUpperCase().replace('_', ' ')}
               </Text>
             </View>
-            <Text style={s.fareText}>{booking.estimated_fare ? `£${parseFloat(String(booking.estimated_fare)).toFixed(2)}` : 'N/A'}</Text>
+            <Text style={s.fareText}>{
+              (() => {
+                const driverFare = booking.driver_fare != null
+                  ? Number(booking.driver_fare)
+                  : Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0);
+                return driverFare > 0 ? `£${driverFare.toFixed(2)}` : 'N/A';
+              })()
+            }</Text>
           </View>
 
           <View style={s.section}>

@@ -411,7 +411,9 @@ export default function AirportBookingScreen({ navigation }: any) {
     const finalFare = estimatedFare ? Math.max(0, estimatedFare - couponDiscount) : null;
     try {
       const collectScheduledPayment = async (amount: number, label: string) => {
-        const paymentIntent = await api.payments.createIntent(amount, user?.stripeCustomerId);
+        const paymentIntent = await api.payments.createIntent(amount, user?.stripeCustomerId, {
+          captureMethod: "manual",
+        });
         const { error: initError } = await initPaymentSheet({
           paymentIntentClientSecret: paymentIntent.clientSecret,
           merchantDisplayName: 'UTO Rides',
