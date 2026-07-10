@@ -1726,16 +1726,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
     };
 
-    if (normalizedPaymentMethod === "card" && user?.id) {
-      try {
-        const { api } = await import('@/lib/api');
-        const authorization = await api.payments.authorizeRide(user.id, newRide.id, discountedFare);
-        newRide.paymentIntentId = authorization.paymentIntentId;
-        newRide.paymentStatus = "authorized";
-      } catch (err: any) {
-        console.error("Failed to authorize card for ride:", err);
-        throw new Error(err?.message || "Could not authorize your card. Please try again.");
-      }
+    // ASAP rides: do not authorize or charge at booking. Card is charged once
+    // when the driver completes the trip (with coupon discount applied server-side).
+    if (normalizedPaymentMethod === "card") {
+      newRide.paymentStatus = "pending";
     }
 
     console.log(`🚕 Ride created: distance=${distanceMiles}mi, duration=${durationMinutes}min, fare=${fullFare}`);

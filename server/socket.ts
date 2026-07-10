@@ -2774,7 +2774,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               estimated_duration: Math.round(parseFloat(rideData.durationMinutes || 0)),
               payment_method: rideData.paymentMethod || "card",
               payment_intent_id: rideData.paymentIntentId || null,
-              payment_status: rideData.paymentStatus || (rideData.paymentIntentId ? "authorized" : null),
+              payment_status: rideData.paymentStatus || (rideData.paymentMethod === "card" ? "pending" : null),
               otp: typeof rideData.otp === "string" ? rideData.otp : null,
             };
 
@@ -4054,7 +4054,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             }
             // (arrived timer clear logic removed as it's now client-side)
 
-            // ─── Capture the manual card authorization if payment_method is 'card' ──────────────
+            // ─── Charge rider card once on trip completion (ASAP rides) ──────────────
             try {
               const { data: completedRide } = await supabase
                 .from("rides")
@@ -4065,16 +4065,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const fullFare = Number(completedRide?.estimated_price || 0);
               const discount = Math.max(0, Number((completedRide as any)?.discount_amount || 0));
               const waitingChargeAmt = Number(waitingCharge || 0);
-              // Rider pays discounted fare (+ waiting). Driver earnings use full fare separately.
+              const rideInfo = activeRides.get(update.rideId);
+              const walletDeduction = Math.max(0, Number(rideInfo?.rideData?.walletDeduction || 0));
+              // Rider pays discounted fare (+ waiting), minus any wallet balance applied at booking.
               const completedFare = Number(
                 (
                   clientTotalFare > 0
-                    ? Math.max(0, clientTotalFare - discount)
-                    : Math.max(0, (completedRide?.final_price || fullFare) - discount) + waitingChargeAmt
+                    ? Math.max(0, clientTotalFare - discount - walletDeduction)
+                    : Math.max(0, (completedRide?.final_price || fullFare) - discount - walletDeduction) + waitingChargeAmt
                 ).toFixed(2)
               );
               const paymentStatus = String(completedRide?.payment_status || "").toLowerCase();
-              // Only skip if already captured/charged — "authorized" must still be captured.
               const alreadyCaptured = new Set([
                 "prepaid",
                 "prepaid_retained",
@@ -4083,23 +4084,51 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 "paid",
                 "succeeded",
               ]).has(paymentStatus);
-              if (completedRide && completedFare > 0 && completedRide.rider_id && !alreadyCaptured) {
+              const isCardRide = (completedRide?.payment_method || "card") === "card";
+
+              if (completedRide && completedFare > 0 && completedRide.rider_id && !alreadyCaptured && isCardRide) {
                 const { data: riderUser } = await supabase
                   .from("users")
-                  .select("stripe_customer_id")
+                  .select("stripe_customer_id, wallet_balance")
                   .eq("id", completedRide.rider_id)
                   .single();
 
-                let chargeResult = completedRide.payment_intent_id
-                  ? await capturePaymentIntent(completedRide.payment_intent_id, completedFare)
-                  : { success: false, error: "No authorized PaymentIntent on ride" };
+                // Apply wallet deduction at completion (not at booking).
+                if (walletDeduction > 0 && riderUser) {
+                  const currentBalance = Number(riderUser.wallet_balance || 0);
+                  const newBalance = Number((currentBalance - walletDeduction).toFixed(2));
+                  await supabase
+                    .from("users")
+                    .update({ wallet_balance: newBalance })
+                    .eq("id", completedRide.rider_id);
+                  try {
+                    await supabase.from("wallet_transactions").insert({
+                      user_id: completedRide.rider_id,
+                      ride_id: update.rideId,
+                      amount: walletDeduction,
+                      type: "debit",
+                      description: "Wallet applied to ride fare",
+                    });
+                  } catch (_) { /* non-critical */ }
+                }
 
-                if (!chargeResult.success && riderUser?.stripe_customer_id) {
-                  console.warn(`⚠️ Capture failed for ride ${update.rideId}: ${chargeResult.error}. Falling back to saved-card charge.`);
-                  // Release any leftover auth hold before creating a new charge
-                  if (completedRide.payment_intent_id) {
+                let chargeResult: { success: boolean; paymentIntentId?: string; error?: string };
+                if (completedRide.payment_intent_id) {
+                  // Legacy rides that still have a booking-time authorization hold.
+                  chargeResult = await capturePaymentIntent(completedRide.payment_intent_id, completedFare);
+                  if (!chargeResult.success && riderUser?.stripe_customer_id) {
+                    console.warn(`⚠️ Capture failed for ride ${update.rideId}: ${chargeResult.error}. Falling back to saved-card charge.`);
                     await releaseAuthorization(completedRide.payment_intent_id).catch(() => {});
+                    chargeResult = await chargeSavedCard(
+                      riderUser.stripe_customer_id,
+                      completedFare,
+                      update.rideId,
+                      "gbp",
+                      "ride_fare"
+                    );
                   }
+                } else if (riderUser?.stripe_customer_id) {
+                  console.log(`💳 Charging saved card on trip completion for ride ${update.rideId}: £${completedFare}${discount > 0 ? ` (incl. £${discount.toFixed(2)} coupon discount)` : ""}`);
                   chargeResult = await chargeSavedCard(
                     riderUser.stripe_customer_id,
                     completedFare,
@@ -4107,12 +4136,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
                     "gbp",
                     "ride_fare"
                   );
+                } else {
+                  chargeResult = { success: false, error: "No saved card on file for rider" };
                 }
 
                 if (chargeResult.success) {
                   updateData.payment_status = completedRide.payment_intent_id ? "card_captured" : "card_charged";
                   updateData.payment_intent_id = chargeResult.paymentIntentId;
-                  console.log(`✅ Card captured/charged £${completedFare} for ride ${update.rideId} (PI: ${chargeResult.paymentIntentId})`);
+                  console.log(`✅ Card charged £${completedFare} for ride ${update.rideId} (PI: ${chargeResult.paymentIntentId})`);
 
                   await supabase.from("payments").insert({
                     ride_id: update.rideId,
@@ -4125,12 +4156,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
                     completed_at: new Date().toISOString(),
                   });
                 } else {
-                  console.warn(`⚠️ Card capture/charge failed for ride ${update.rideId}: ${chargeResult.error}`);
+                  console.warn(`⚠️ Card charge failed for ride ${update.rideId}: ${chargeResult.error}`);
                   updateData.payment_status = "card_charge_failed";
                 }
               } else if (alreadyCaptured) {
                 updateData.payment_status = completedRide?.payment_status || "prepaid";
-                console.log(`💳 Ride ${update.rideId} was already charged — skipping completion-time card capture`);
+                console.log(`💳 Ride ${update.rideId} was already charged — skipping completion-time card charge`);
+              } else if (completedRide && walletDeduction > 0 && completedFare <= 0 && !alreadyCaptured) {
+                updateData.payment_status = "paid";
+                console.log(`💳 Ride ${update.rideId} fully covered by wallet — no card charge needed`);
               }
             } catch (cardChargeErr) {
               console.error(`❌ Card charge error on ride completion:`, cardChargeErr);
@@ -4211,6 +4245,31 @@ export function setupSocketIO(httpServer: HTTPServer) {
                       (update as any).chargedAmount = cancellationFeeAmount;
                     } else {
                       console.warn(`⚠️ Cancellation fee card capture failed for ride ${update.rideId}: ${captureResult.error}`);
+                    }
+                  } else if (cancelledRide.payment_method === "card" && walletDebitAmount > 0) {
+                    const { data: riderUser } = await supabase
+                      .from("users")
+                      .select("stripe_customer_id")
+                      .eq("id", riderId)
+                      .single();
+                    if (riderUser?.stripe_customer_id) {
+                      const chargeResult = await chargeSavedCard(
+                        riderUser.stripe_customer_id,
+                        walletDebitAmount,
+                        update.rideId,
+                        "gbp",
+                        "cancellation_fee"
+                      );
+                      cardCaptureSuccess = chargeResult.success;
+                      capturedPaymentIntentId = chargeResult.paymentIntentId;
+                      if (cardCaptureSuccess) {
+                        updateData.payment_status = "cancellation_fee_card_charged";
+                        updateData.payment_intent_id = capturedPaymentIntentId;
+                        (update as any).chargedVia = "card";
+                        (update as any).chargedAmount = walletDebitAmount;
+                      } else {
+                        console.warn(`⚠️ Cancellation fee card charge failed for ride ${update.rideId}: ${chargeResult.error}`);
+                      }
                     }
                   }
 
