@@ -2637,13 +2637,20 @@ export function setupSocketIO(httpServer: HTTPServer) {
       io.to(state.riderSocketId).emit("ride:update", {
         rideId,
         status: "cancelled_no_drivers",
+        cancellationFee: 0,
+        chargedVia: "none",
       });
 
-      // Also update the ride in DB to cancelled
+      // Also update the ride in DB to cancelled — no rider fee for dispatch failure
       try {
         await supabase
           .from("rides")
-          .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+          .update({
+            status: "cancelled",
+            cancelled_at: new Date().toISOString(),
+            cancellation_fee: 0,
+            cancelled_by: "system",
+          })
           .eq("id", rideId);
         console.log(`✅ Ride ${rideId} marked cancelled in DB (no drivers available)`);
       } catch (dbErr) {
@@ -4507,9 +4514,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 (update as any).chargedAmount = 0;
                 (update as any).chargedVia = "none";
                 updateData.cancellation_fee = 0;
-                if (driverInitiatedCancellation || !riderInitiatedCancellation) {
+                if (driverInitiatedCancellation) {
                   (update as any).cancellationPolicy = "driver_cancelled_no_fee";
                   console.log(`🆓 Driver cancel for ride ${update.rideId}: no rider charge applied`);
+                } else if (!riderInitiatedCancellation) {
+                  (update as any).cancellationPolicy = "unspecified_actor_no_fee";
                 } else if (!isDriverAlreadyAtPickup) {
                   (update as any).cancellationPolicy = "free_before_arrival";
                 } else if (!isAfterFreeMinute) {
