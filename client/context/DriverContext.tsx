@@ -780,12 +780,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       if (activeRides.length > 0) {
         const activeRideData = activeRides[0]; // Get the first active ride
+        const payableFare = getDiscountedFare(
+          activeRideData.finalPrice || activeRideData.estimatedPrice || 0,
+          activeRideData.finalPrice ? 0 : (activeRideData.discountAmount || 0),
+        );
         const rideTrip: Trip = {
           id: activeRideData.id,
           riderName: activeRideData.riderName || "Rider",
           pickupAddress: activeRideData.pickupAddress || "Pickup",
           dropoffAddress: activeRideData.dropoffAddress || "Dropoff",
-          farePrice: activeRideData.finalPrice || activeRideData.estimatedPrice || 0,
+          farePrice: payableFare,
           distanceMiles: activeRideData.distance || 0,
           durationMinutes: activeRideData.estimatedDuration || 0,
           completedAt: "", // Active rides don't have completion time
@@ -807,14 +811,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             pickupLongitude: activeRideData.pickupLongitude || 0,
             dropoffLatitude: activeRideData.dropoffLatitude || 0,
             dropoffLongitude: activeRideData.dropoffLongitude || 0,
-            estimatedFare: activeRideData.finalPrice || activeRideData.estimatedPrice || 0,
+            estimatedFare: payableFare,
             distanceMiles: activeRideData.distance || 0,
             durationMinutes: activeRideData.estimatedDuration || 0,
             pickupDistance: 0,
             otp: activeRideData.otp,
             paymentMethod: "card",
             walletDeduction: activeRideData.walletDeduction || 0,
-            expectedCollectAmount: activeRideData.expectedCollectAmount !== undefined ? activeRideData.expectedCollectAmount : (activeRideData.estimatedPrice || 0),
+            expectedCollectAmount:
+              activeRideData.expectedCollectAmount !== undefined
+                ? activeRideData.expectedCollectAmount
+                : payableFare,
+            discountAmount: Number(activeRideData.discountAmount || 0),
           };
           setActiveRideRequest(rideRequest);
           // Infer rideState from the server's ride status
@@ -854,6 +862,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           }
           const data = await res.json();
           const ride = data.ride;
+          const payableFare = getDiscountedFare(
+            ride.finalPrice || ride.estimatedPrice || activeRide.farePrice || 0,
+            ride.finalPrice ? 0 : (ride.discountAmount || 0),
+          );
 
           const rideRequest: RideRequest = {
             id: ride.id,
@@ -865,14 +877,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             pickupLongitude: ride.pickupLongitude || ride.pickup_longitude || 0,
             dropoffLatitude: ride.dropoffLatitude || ride.dropoff_latitude || 0,
             dropoffLongitude: ride.dropoffLongitude || ride.dropoff_longitude || 0,
-            estimatedFare: ride.finalPrice || ride.estimatedPrice || activeRide.farePrice || 0,
+            estimatedFare: payableFare,
             distanceMiles: ride.distance || activeRide.distanceMiles || 0,
             durationMinutes: ride.estimatedDuration || activeRide.durationMinutes || 0,
             pickupDistance: 0,
             otp: ride.otp,
             paymentMethod: "card",
             walletDeduction: ride.walletDeduction || 0,
-            expectedCollectAmount: ride.expectedCollectAmount !== undefined ? ride.expectedCollectAmount : (ride.estimatedPrice || activeRide.farePrice || 0),
+            expectedCollectAmount:
+              ride.expectedCollectAmount !== undefined
+                ? ride.expectedCollectAmount
+                : payableFare,
+            discountAmount: Number(ride.discountAmount || 0),
           };
 
           setActiveRideRequest(rideRequest);

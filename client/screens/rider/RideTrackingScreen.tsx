@@ -337,7 +337,9 @@ export default function RideTrackingScreen({ navigation }: any) {
     }
     // Handle no-show cancellation — show alert with charge info, then navigate home
     if (rideStatus === "cancelled_no_show" && !hasNavigatedAway.current) {
-      const fareAmount = (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0;
+      const fullFare = (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0;
+      const discount = Math.max(0, Number(activeRide?.discountAmount || 0));
+      const fareAmount = Math.max(0, Number(fullFare) - discount);
       Alert.alert(
         "No-Show – Ride Cancelled",
         fareAmount > 0

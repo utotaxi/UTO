@@ -4288,9 +4288,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 isAfterFreeMinute;
 
               if (cancelledRide && shouldChargeCancellationFee) {
-                const fullFareAmount = Number(cancelledRide.final_price || cancelledRide.estimated_price || 0);
+                // Always base rider cancel fee on the coupon-adjusted fare.
+                // Prefer estimated_price (pre-discount) + discount_amount so we
+                // never double-subtract if final_price was already discounted.
                 const discount = Math.max(0, Number((cancelledRide as any).discount_amount || 0));
-                const cancellationFeeAmount = Number(Math.max(0, fullFareAmount - discount).toFixed(2));
+                const cancellationFeeAmount = getDiscountedFare(
+                  cancelledRide.estimated_price || cancelledRide.final_price || 0,
+                  discount,
+                );
                 const riderId = cancelledRide.rider_id;
                 const rideInfo = activeRides.get(update.rideId);
                 const walletDeductionAlreadyTaken = Math.max(0, Number(rideInfo?.rideData?.walletDeduction || 0));
@@ -4723,7 +4728,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
         const fareAmount = Number(rideRow.estimated_price || 0);
         const discount = Math.max(0, Number(rideRow.discount_amount || 0));
-        // Rider charge and driver earnings both use the discounted amount.
+        // Rider charge and driver earnings both use the discounted amount only.
         const riderChargeAmount = getDiscountedFare(fareAmount, discount);
         const ridePaymentMethod = rideRow.payment_method || "card";
 
