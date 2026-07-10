@@ -1221,7 +1221,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               console.log(`✅ [RideContext] Refunded £${ride.walletDeduction} for cancelled ride ${ride.id}`);
             }
 
-            if (update.status === "cancelled" && cancellationFee > 0) {
+            if (update.status === "cancelled" && cancellationFee > 0 && (update as any).cancelledBy !== "driver") {
               const serverWalletBalance = (update as any).walletBalance;
               if (chargedVia === "wallet" && typeof serverWalletBalance === "number") {
                 updateProfile({ walletBalance: serverWalletBalance });

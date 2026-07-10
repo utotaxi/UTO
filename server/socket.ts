@@ -3751,6 +3751,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           const actualDriverId =
             await resolveDriverTableId(data.driverId || getDriverIdForSocket(socket.id) || ride.driver_id);
           // Penalty is 50% of the discounted (payable) fare when a coupon was applied.
+          // This is deducted from the DRIVER only — the rider is never charged on driver cancel.
           const penaltyAmount = getDriverCancelPenalty(
             ride.estimated_price || 0,
             (ride as any).discount_amount || 0,
@@ -3795,10 +3796,18 @@ export function setupSocketIO(httpServer: HTTPServer) {
             declinedBy.add(actualDriverId);
           }
 
-          // Remove the current driver assignment and reset the ride to pending
+          // Remove the current driver assignment and reset the ride to pending.
+          // Do NOT charge the rider — driver cancel never imposes rider fees.
           await supabase
             .from("rides")
-            .update({ status: "pending", driver_id: null, accepted_at: null, arrived_at: null })
+            .update({
+              status: "pending",
+              driver_id: null,
+              accepted_at: null,
+              arrived_at: null,
+              cancelled_by: null,
+              cancellation_fee: 0,
+            })
             .eq("id", data.rideId);
 
           if (ride.rider_id) {
@@ -3807,6 +3816,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
               status: "pending",
               driverCancelled: true,
               driverId: null,
+              cancellationFee: 0,
+              chargedVia: "none",
+              cancelledBy: "driver",
             };
             io.to(`rider:${ride.rider_id}`).emit("ride:update", riderDriverCancelledPayload);
             if (rideInfo?.riderSocketId) {
@@ -3844,6 +3856,29 @@ export function setupSocketIO(httpServer: HTTPServer) {
           }
 
           console.log(`🚫 No remaining available drivers to reassign ride ${data.rideId}`);
+
+          // Fully cancel with zero rider charge; release any leftover card hold.
+          const paymentStatus = String(ride.payment_status || "").toLowerCase();
+          const alreadyCaptured = new Set([
+            "prepaid",
+            "prepaid_retained",
+            "card_charged",
+            "card_captured",
+            "paid",
+            "succeeded",
+          ]).has(paymentStatus);
+          let paymentStatusUpdate = "cancelled_driver_no_rider_charge";
+          if (
+            ride.payment_method === "card" &&
+            ride.payment_intent_id &&
+            !alreadyCaptured
+          ) {
+            const releaseResult = await releaseAuthorization(ride.payment_intent_id);
+            if (releaseResult.success) {
+              paymentStatusUpdate = "authorization_released";
+            }
+          }
+
           const { data: rideForNotify } = await supabase
             .from("rides")
             .select("rider_id")
@@ -3853,14 +3888,29 @@ export function setupSocketIO(httpServer: HTTPServer) {
             io.to(`rider:${rideForNotify.rider_id}`).emit("ride:update", {
               rideId: data.rideId,
               status: "cancelled_no_drivers",
+              cancellationFee: 0,
+              chargedVia: "none",
+              cancelledBy: "driver",
             });
           }
 
           await supabase
             .from("rides")
-            .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+            .update({
+              status: "cancelled",
+              cancelled_at: new Date().toISOString(),
+              cancelled_by: "driver",
+              cancellation_fee: 0,
+              payment_status: paymentStatusUpdate,
+            })
             .eq("id", data.rideId);
-          io.emit("ride:update", { rideId: data.rideId, status: "cancelled_no_drivers" });
+          io.emit("ride:update", {
+            rideId: data.rideId,
+            status: "cancelled_no_drivers",
+            cancellationFee: 0,
+            chargedVia: "none",
+            cancelledBy: "driver",
+          });
 
           // If this was a scheduled booking, release it back to the pool so
           // other drivers can pick it up on the next activation cycle.
@@ -3983,9 +4033,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     socket.on("ride:status", async (update: RideUpdate) => {
       console.log('📊 Ride status update:', update.rideId, '→', update.status, 'driverInfo:', (update as any).driverInfo ? 'present' : 'absent');
-      // #region agent log
-      fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'pre-fix',hypothesisId:'A',location:'server/socket.ts:ride-status',message:'Ride status event',data:{rideId:update?.rideId,status:update?.status,cancelledBy:(update as any)?.cancelledBy,driverId:(update as any)?.driverId,socketId:socket.id},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
 
       try {
         // ─── Resolve driver ID from multiple sources ─────────────────────────────────────
@@ -4253,8 +4300,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
             updateData.cancelled_at = new Date().toISOString();
 
             // ── Server-side cancellation fee processing ──────────────────────
-            // Rider gets one free minute after the driver arrives at pickup.
-            // After that free window, a 100% cancellation fee (discounted fare) is owed.
+            // Rider fee ONLY when the rider cancels after driver arrival + 1 free minute.
+            // Driver-initiated cancels must NEVER charge the rider (ASAP or otherwise).
             try {
               const { data: cancelledRide, error: cancelledRideErr } = await supabase
                 .from("rides")
@@ -4268,8 +4315,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const arrivedElapsedMs = arrivedAt ? Date.now() - arrivedAt : 0;
               const isAfterFreeMinute = arrivedAt > 0 && arrivedElapsedMs >= 60_000;
               const isDriverAlreadyAtPickup = cancelledRide && ["arrived", "at_pickup", "in_progress"].includes(cancelledRide.status);
-              const cancelledBy = String((update as any).cancelledBy || "").toLowerCase();
-              const riderInitiatedCancellation = cancelledBy === "rider";
+              const cancelledByRaw = String((update as any).cancelledBy || "").toLowerCase();
+              const emitterIsDriverSocket = Array.from(connectedDrivers.values()).includes(socket.id);
+              // Never trust a "rider" cancel flag that arrives from a driver socket.
+              const driverInitiatedCancellation =
+                cancelledByRaw === "driver" ||
+                (emitterIsDriverSocket && cancelledByRaw !== "rider");
+              const riderInitiatedCancellation =
+                cancelledByRaw === "rider" && !driverInitiatedCancellation;
+              const resolvedCancelledBy = riderInitiatedCancellation
+                ? "rider"
+                : driverInitiatedCancellation
+                  ? "driver"
+                  : (cancelledByRaw || "unknown");
+              (update as any).cancelledBy = resolvedCancelledBy;
+              updateData.cancelled_by = resolvedCancelledBy;
               const cancellationPaymentStatus = String(cancelledRide?.payment_status || "").toLowerCase();
               const cancellationAlreadyCaptured = new Set([
                 "prepaid",
@@ -4280,10 +4340,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 "succeeded",
               ]).has(cancellationPaymentStatus);
               // Product rule: free cancel until driver arrives, then 1 free minute
-              // after arrival. Charge only after that window.
+              // after arrival. Charge only after that window — and only for rider cancels.
               const shouldChargeCancellationFee =
                 !!cancelledRide &&
                 riderInitiatedCancellation &&
+                !driverInitiatedCancellation &&
                 isDriverAlreadyAtPickup &&
                 isAfterFreeMinute;
 
@@ -4438,21 +4499,25 @@ export function setupSocketIO(httpServer: HTTPServer) {
                       console.error("❌ Failed to update driver earnings on cancellation:", earningsErr);
                     }
                   }
+
+                  updateData.cancellation_fee = cancellationFeeAmount;
                 }
               } else {
                 (update as any).cancellationFee = 0;
                 (update as any).chargedAmount = 0;
                 (update as any).chargedVia = "none";
-                if (!riderInitiatedCancellation) {
+                updateData.cancellation_fee = 0;
+                if (driverInitiatedCancellation || !riderInitiatedCancellation) {
                   (update as any).cancellationPolicy = "driver_cancelled_no_fee";
+                  console.log(`🆓 Driver cancel for ride ${update.rideId}: no rider charge applied`);
                 } else if (!isDriverAlreadyAtPickup) {
                   (update as any).cancellationPolicy = "free_before_arrival";
                 } else if (!isAfterFreeMinute) {
                   (update as any).cancellationPolicy = "free_minute_after_arrival";
                 }
 
-                // Free cancellation → release the card authorization hold so the
-                // rider is never charged (before arrival, or within 1 min after).
+                // Free / driver cancellation → release any card authorization hold so the
+                // rider is never charged.
                 let authReleased = false;
                 if (
                   cancelledRide &&

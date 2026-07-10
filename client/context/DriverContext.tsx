@@ -1069,6 +1069,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             driverId: driverProfile?.id || user?.id || undefined,
             applyPenalty: isAtPickup,
             cancelledFrom: rideState,
+            cancelledBy: "driver",
           });
         } catch (e) {
           console.warn("Failed to emit cancel:", e);
