@@ -39,7 +39,11 @@
         "ACCESS_COARSE_LOCATION",
         "FOREGROUND_SERVICE",
         "ACCESS_BACKGROUND_LOCATION",
-        "FOREGROUND_SERVICE_LOCATION"
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED",
+        "WAKE_LOCK"
       ],
       "config": {
         "googleMaps": {
@@ -77,6 +81,15 @@
         }
       ],
       "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#F7C948",
+          "defaultChannel": "ride-requests",
+          "sounds": []
+        }
+      ],
       [
         "expo-location",
         {

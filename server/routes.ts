@@ -628,7 +628,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Update driver's current location + heartbeat so backgrounded online
       // drivers remain eligible for dispatch.
-      const { data: driver, error: driverUpdateErr } = await sb
+      const { data: driver, error: driverUpdateErr } = await supabase
         .from("drivers")
         .update({
           current_latitude: latitude,
@@ -653,7 +653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // 2. Insert into location history (best-effort — table may not exist yet)
       try {
-        await sb
+        await supabase
           .from("driver_locations")
           .insert({
             driver_id: driverId,
@@ -684,7 +684,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.warn("⚠️ Could not broadcast driver location to riders:", broadcastErr);
       }
 
-      res.json({ success: true });
+      // 4. Return pending assigned later-booking so background location task
+      // can surface a local notification when Expo push was missed.
+      let pendingAssignedBooking: any = null;
+      try {
+        const matchOr = `assigned_driver_id.eq.${driverId},driver_id.eq.${driverId}`;
+        const pendingStatuses = ["scheduled", "marketplace", "assigned"];
+        const [laterRes, webRes] = await Promise.all([
+          supabase
+            .from("later_bookings")
+            .select("id, pickup_address, dropoff_address, estimated_fare, driver_fare, status, assigned_driver_id, driver_id, source_table")
+            .or(matchOr)
+            .in("status", pendingStatuses)
+            .limit(5),
+          supabase
+            .from("web_booker")
+            .select("id, pickup_address, dropoff_address, estimated_fare, driver_fare, status, assigned_driver_id, driver_id")
+            .or(matchOr)
+            .in("status", pendingStatuses)
+            .limit(5),
+        ]);
+        const rows = [
+          ...(laterRes.data || []).map((r: any) => ({ ...r, source_table: "later_bookings" })),
+          ...(webRes.data || []).map((r: any) => ({ ...r, source_table: "web_booker" })),
+        ].filter((r: any) => {
+          const assigned = r.assigned_driver_id || r.driver_id;
+          return assigned && String(assigned) === String(driverId);
+        });
+        if (rows.length > 0) {
+          const row = rows[0];
+          const fare = Number(row.driver_fare ?? row.estimated_fare ?? 0);
+          pendingAssignedBooking = {
+            id: row.id,
+            pickup_address: row.pickup_address,
+            dropoff_address: row.dropoff_address,
+            estimated_fare: fare,
+            driver_fare: fare,
+            status: row.status,
+            source_table: row.source_table,
+          };
+        }
+      } catch (pendingErr) {
+        console.warn("⚠️ Could not load pending assigned booking for location heartbeat:", pendingErr);
+      }
+
+      res.json({ success: true, pendingAssignedBooking });
     } catch (error) {
       console.error("Error updating driver location:", error);
       res.status(500).json({ error: "Failed to update location" });
@@ -1694,7 +1738,10 @@ const sendExpoPushNotification = async (
 ): Promise<boolean> => {
   if (!token) return false;
   try {
+    // Default to the high-importance ride channel so Android delivers while
+    // the app is backgrounded / killed (matches ASAP dispatch pushes).
     const ttlSeconds = options.ttlSeconds ?? 600;
+    const channelId = options.channelId || "ride-requests";
     const pushRes = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: {
@@ -1709,11 +1756,12 @@ const sendExpoPushNotification = async (
         body,
         data,
         priority: "high",
-        channelId: options.channelId || "default",
+        channelId,
         ttl: ttlSeconds,
         expiration: Math.floor(Date.now() / 1000) + ttlSeconds,
         _contentAvailable: true,
         interruptionLevel: "timeSensitive",
+        mutableContent: true,
       }),
     });
     const pushBody = await pushRes.json().catch(() => null);
@@ -1721,6 +1769,8 @@ const sendExpoPushNotification = async (
     const ok = pushRes.ok && (!ticket || ticket.status !== "error");
     if (!ok) {
       console.warn(`⚠️ Expo push failed (${pushRes.status}):`, JSON.stringify(pushBody).slice(0, 400));
+    } else {
+      console.log(`📲 Expo push ok → ${String(token).slice(0, 22)}… channel=${channelId} type=${data?.type || "n/a"}`);
     }
     return ok;
   } catch (err) {
@@ -3468,6 +3518,7 @@ const triggerScheduledDriverReminders = async () => {
         screen: "ScheduledJobDetails",
         reminderBucket: reminderBucket.key,
       },
+      { channelId: "ride-requests", ttlSeconds: 900 },
     );
 
     scheduledReminderBucketByBooking.set(reminderKey, reminderBucket.key);
@@ -3541,6 +3592,7 @@ const triggerMarketplaceCheckReminders = async () => {
             target: "Marketplace",
             screen: "Marketplace",
           },
+          { channelId: "ride-requests", ttlSeconds: 3600 },
         ),
       ),
   );

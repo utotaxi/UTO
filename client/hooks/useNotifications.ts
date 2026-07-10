@@ -53,6 +53,58 @@ export interface NotificationData {
   message?: string;
 }
 
+const ANDROID_CHANNELS = {
+  default: "default",
+  rideRequests: "ride-requests",
+  scheduled: "scheduled-bookings",
+} as const;
+
+async function ensureAndroidChannels() {
+  if (Platform.OS !== "android" || !Notifications) return;
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.default, {
+    name: "General",
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: "#F7C948",
+    sound: "default",
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.rideRequests, {
+    name: "Ride Requests",
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 500, 250, 500],
+    lightColor: "#F7C948",
+    sound: "default",
+    bypassDnd: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.scheduled, {
+    name: "Scheduled Bookings",
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 500, 250, 500],
+    lightColor: "#F7C948",
+    sound: "default",
+    bypassDnd: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+}
+
+function channelForNotificationType(type?: string) {
+  if (
+    type === "scheduled_booking_assigned" ||
+    type === "scheduled_marketplace_created" ||
+    type === "marketplace_reminder" ||
+    type === "scheduled_booking_reminder" ||
+    type === "scheduled_booking_drive_to_pickup" ||
+    type === "scheduled_ride_live"
+  ) {
+    return ANDROID_CHANNELS.scheduled;
+  }
+  if (type === "ride_request" || type === "ride_requested") {
+    return ANDROID_CHANNELS.rideRequests;
+  }
+  return ANDROID_CHANNELS.default;
+}
+
 export function useNotifications(userId?: string) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<Notifications.Notification | null>(null);
@@ -62,16 +114,14 @@ export function useNotifications(userId?: string) {
   useEffect(() => {
     let mounted = true;
 
-    registerForPushNotifications().then((token) => {
-      if (!mounted || !token) return;
-
+    ensurePushTokenRegistered(userId)
+      .then((token) => {
+        if (!mounted || !token) return;
         setExpoPushToken(token);
-        if (userId) {
-          savePushToken(userId, token);
-        }
-    }).catch((err) => {
-      console.error("Error during push notification setup:", err);
-    });
+      })
+      .catch((err) => {
+        console.error("Error during push notification setup:", err);
+      });
 
     notificationListener.current =
       Notifications?.addNotificationReceivedListener((notif) => {
@@ -116,19 +166,39 @@ export function useNotifications(userId?: string) {
   };
 }
 
+/** Register/refresh Expo push token and persist it for background delivery. */
+export async function ensurePushTokenRegistered(userId?: string): Promise<string | null> {
+  const token = await registerForPushNotifications();
+  if (token && userId) {
+    await savePushToken(userId, token);
+  }
+  return token;
+}
+
 async function registerForPushNotifications(): Promise<string | null> {
   if (Platform.OS === "web" || !Notifications) {
     return null;
   }
 
-  let token: string | null = null;
+  // Android channels must exist before token registration / delivery.
+  await ensureAndroidChannels();
 
   const { status: existingStatus } =
     await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
 
   if (existingStatus !== "granted") {
-    const { status } = await Notifications.requestPermissionsAsync();
+    const { status } = await Notifications.requestPermissionsAsync({
+      ios: {
+        allowAlert: true,
+        allowBadge: true,
+        allowSound: true,
+        allowDisplayInCarPlay: true,
+        allowCriticalAlerts: false,
+        provideAppNotificationSettings: true,
+        allowProvisional: false,
+      },
+    });
     finalStatus = status;
   }
 
@@ -137,41 +207,19 @@ async function registerForPushNotifications(): Promise<string | null> {
     return null;
   }
 
+  let token: string | null = null;
   try {
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ??
       (Constants as any).easConfig?.projectId;
 
-    if (projectId) {
-      const pushToken = await Notifications.getExpoPushTokenAsync({
-        projectId,
-      });
-      token = pushToken.data;
-    } else {
-      const pushToken = await Notifications.getExpoPushTokenAsync({
-        projectId: undefined as any,
-      });
-      token = pushToken.data;
-    }
+    const pushToken = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined,
+    );
+    token = pushToken.data;
+    console.log("✅ Expo push token ready:", token?.substring(0, 24) + "...");
   } catch (error) {
     console.error("Error getting push token:", error);
-  }
-
-  if (Platform.OS === "android") {
-    Notifications.setNotificationChannelAsync("default", {
-      name: "default",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#F7C948",
-    });
-    Notifications.setNotificationChannelAsync("ride-requests", {
-      name: "Ride Requests",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 500, 250, 500],
-      lightColor: "#F7C948",
-      sound: "default",
-      bypassDnd: true,
-    });
   }
 
   return token;
@@ -210,7 +258,7 @@ function handleNotificationResponse(data: NotificationData) {
 
 /**
  * Schedule a local notification immediately.
- * Used to notify rider/driver about ride status changes.
+ * Used when the app is awake; background delivery still relies on Expo push.
  */
 export async function sendLocalNotification(
   title: string,
@@ -223,12 +271,18 @@ export async function sendLocalNotification(
   }
 
   try {
+    await ensureAndroidChannels();
+    const type = data?.type ? String(data.type) : undefined;
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
         body,
-        data,
+        data: data || {},
         sound: "default",
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === "android"
+          ? { channelId: channelForNotificationType(type) }
+          : {}),
       },
       trigger: null, // Fire immediately
     });

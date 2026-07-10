@@ -1,13 +1,14 @@
 //client/lib/backgroundLocation.ts
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApiUrl } from './query-client';
 import { getSocket } from './socket';
 
 const LOCATION_TASK_NAME = 'driver-background-location-task';
 const BG_DRIVER_ID_KEY = '@uto_bg_driver_id';
+const BG_NOTIFIED_ASSIGNED_KEY = '@uto_bg_notified_assigned';
 
 export async function setBackgroundDriverId(driverId: string | null) {
   try {
@@ -26,6 +27,57 @@ export async function getBackgroundDriverId(): Promise<string | null> {
     return (await AsyncStorage.getItem(BG_DRIVER_ID_KEY)) || null;
   } catch {
     return null;
+  }
+}
+
+async function maybeNotifyPendingAssigned(pending: any) {
+  if (!pending?.id) return;
+  // Only fire local alerts when the app is not in the foreground —
+  // foreground already gets socket + local notifications from DriverContext.
+  if (AppState.currentState === 'active') return;
+
+  try {
+    const lastId = await AsyncStorage.getItem(BG_NOTIFIED_ASSIGNED_KEY);
+    if (lastId === String(pending.id)) return;
+
+    const Notifications = await import('expo-notifications');
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('ride-requests', {
+        name: 'Ride Requests',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 500, 250, 500],
+        lightColor: '#F7C948',
+        sound: 'default',
+      });
+    }
+
+    const pickup = pending.pickup_address || 'pickup';
+    const fare = Number(pending.driver_fare ?? pending.estimated_fare ?? 0);
+    const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : '';
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '📋 Ride Assigned To You',
+        body: `Ride ${pending.id} (${pickup})${fareLabel}. Open Upcoming to Accept or Decline.`,
+        data: {
+          type: 'scheduled_booking_assigned',
+          bookingId: String(pending.id),
+          rideId: String(pending.id),
+          sourceTable: pending.source_table || null,
+          target: 'UpcomingBookings',
+          screen: 'UpcomingBookings',
+        },
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === 'android' ? { channelId: 'ride-requests' } : {}),
+      },
+      trigger: null,
+    });
+
+    await AsyncStorage.setItem(BG_NOTIFIED_ASSIGNED_KEY, String(pending.id));
+    console.log('📢 Background local notification for assigned booking', pending.id);
+  } catch (err) {
+    console.warn('⚠️ Background assigned-booking notification failed:', err);
   }
 }
 
@@ -69,6 +121,19 @@ export async function defineBackgroundLocationTask() {
           console.warn('⚠️ Location update failed:', response.status);
         } else {
           console.log('📍 Background location sent for', driverId);
+          // Belt-and-suspenders: if Expo push was missed while backgrounded,
+          // surface the pending assignment from the location heartbeat response.
+          try {
+            const body = await response.json();
+            if (body?.pendingAssignedBooking) {
+              await maybeNotifyPendingAssigned(body.pendingAssignedBooking);
+            } else {
+              // Clear dedupe when nothing pending so a future assignment can notify again
+              await AsyncStorage.removeItem(BG_NOTIFIED_ASSIGNED_KEY);
+            }
+          } catch {
+            // Non-critical — location update already succeeded
+          }
         }
       } catch (sendErr) {
         console.error('🔴 Failed to send background location:', sendErr);
@@ -144,6 +209,7 @@ export async function stopBackgroundLocationTracking() {
       console.log('⏸️ Background location tracking stopped');
     }
     await setBackgroundDriverId(null);
+    await AsyncStorage.removeItem(BG_NOTIFIED_ASSIGNED_KEY);
   } catch (error) {
     console.error('Error stopping background location:', error);
   }

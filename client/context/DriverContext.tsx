@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { normalizeBackendTimestamp } from "@/lib/dateTime";
-import { sendLocalNotification, useNotifications } from "@/hooks/useNotifications";
+import { ensurePushTokenRegistered, sendLocalNotification, useNotifications } from "@/hooks/useNotifications";
 import { onRideRequestNotification } from "@/lib/rideNotificationBridge";
 import {
   startBackgroundLocationTracking,
@@ -1014,6 +1014,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       if (online) {
         connectAsDriver(driverId);
+        // Refresh Expo push token every time the driver goes online so
+        // background/killed delivery keeps working even if the token rotated.
+        if (user?.id) {
+          ensurePushTokenRegistered(user.id).catch((err) =>
+            console.warn("⚠️ Failed to refresh push token on go-online:", err)
+          );
+        }
         // Keep location + push delivery alive when the driver leaves the app.
         startBackgroundLocationTracking(driverId).catch((err) =>
           console.warn("⚠️ Failed to start background location:", err)
