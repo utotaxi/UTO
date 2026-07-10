@@ -1665,6 +1665,7 @@ const missingLaterBookingAcceptColumns = new Set<string>();
 const missingLaterBookingAssignColumns = new Set<string>();
 const missingLaterBookingDeclineColumns = new Set<string>();
 const announcedAssignedBookingKeys = new Set<string>();
+const assignmentSocketAnnouncedKeys = new Set<string>();
 const missingLaterBookingCancelColumns = new Set<string>();
 const missingLaterBookingActivationColumns = new Set<string>();
 const scheduledReminderBucketByBooking = new Map<string, string>();
@@ -1676,13 +1677,16 @@ const sendExpoPushNotification = async (
   title: string,
   body: string,
   data: Record<string, any> = {},
-) => {
-  if (!token) return;
+  options: { channelId?: string; ttlSeconds?: number } = {},
+): Promise<boolean> => {
+  if (!token) return false;
   try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
+    const ttlSeconds = options.ttlSeconds ?? 600;
+    const pushRes = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: {
         Accept: "application/json",
+        "Accept-Encoding": "gzip, deflate",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -1692,47 +1696,23 @@ const sendExpoPushNotification = async (
         body,
         data,
         priority: "high",
+        channelId: options.channelId || "default",
+        ttl: ttlSeconds,
+        expiration: Math.floor(Date.now() / 1000) + ttlSeconds,
+        _contentAvailable: true,
+        interruptionLevel: "timeSensitive",
       }),
     });
+    const pushBody = await pushRes.json().catch(() => null);
+    const ticket = Array.isArray(pushBody?.data) ? pushBody.data[0] : pushBody?.data;
+    const ok = pushRes.ok && (!ticket || ticket.status !== "error");
+    if (!ok) {
+      console.warn(`⚠️ Expo push failed (${pushRes.status}):`, JSON.stringify(pushBody).slice(0, 400));
+    }
+    return ok;
   } catch (err) {
     console.warn("⚠️ Failed to send Expo push notification:", err);
-  }
-};
-
-const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
-  try {
-    // Only broadcast marketplace offers for unassigned bookings.
-    if (booking?.assigned_driver_id || booking?.driver_id) return;
-
-    const { data: driverRows } = await sb
-      .from("drivers")
-      .select("user_id")
-      .not("user_id", "is", null);
-    const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
-    if (driverUserIds.length > 0) {
-      const { data: driverUsers } = await sb
-        .from("users")
-        .select("id, push_token")
-        .in("id", driverUserIds);
-      const title = "🗓 New Scheduled Ride";
-      const riderLabel = booking?.rider_name || booking?.customer_name || booking?.passenger_name || "rider";
-      const body = `ride has been scheduled by ${riderLabel} please go to the market place and pick the ride`;
-      await Promise.all(
-        (driverUsers || [])
-          .filter((row: any) => row.push_token)
-          .map((row: any) =>
-            sendExpoPushNotification(row.push_token, title, body, {
-              type: "scheduled_marketplace_created",
-              bookingId: booking.id,
-              sourceTable: booking.source_table || booking.sourceTable || null,
-              target: "Marketplace",
-              screen: "Marketplace",
-            }),
-          ),
-      );
-    }
-  } catch (notifyErr) {
-    console.warn("⚠️ Failed to notify drivers about scheduled booking:", notifyErr);
+    return false;
   }
 };
 
@@ -1757,6 +1737,109 @@ const resolveDriverIdentity = async (driverIdOrUserId: string) => {
   return { tableId: driverIdOrUserId, userId: driverIdOrUserId, fullName: null };
 };
 
+const resolveDriverPushToken = async (driverIdOrUserId: string): Promise<{
+  identity: { tableId: string; userId: string | null; fullName: string | null };
+  pushToken: string | null;
+}> => {
+  const identity = (await resolveDriverIdentity(driverIdOrUserId)) || {
+    tableId: driverIdOrUserId,
+    userId: driverIdOrUserId,
+    fullName: null,
+  };
+
+  const candidateUserIds = Array.from(
+    new Set([identity.userId, identity.tableId, driverIdOrUserId].filter(Boolean).map(String)),
+  );
+
+  for (const userId of candidateUserIds) {
+    const { data: userRow } = await sb
+      .from("users")
+      .select("push_token")
+      .eq("id", userId)
+      .maybeSingle();
+    if (userRow?.push_token) {
+      return { identity, pushToken: userRow.push_token };
+    }
+  }
+
+  // Last resort: drivers.user_id → users.push_token
+  const { data: driverById } = await sb
+    .from("drivers")
+    .select("id, user_id")
+    .eq("id", driverIdOrUserId)
+    .maybeSingle();
+  const { data: driverByUser } = driverById
+    ? { data: null as any }
+    : await sb
+        .from("drivers")
+        .select("id, user_id")
+        .eq("user_id", driverIdOrUserId)
+        .maybeSingle();
+  const driverRow = driverById || driverByUser;
+  if (driverRow?.user_id) {
+    const { data: userRow } = await sb
+      .from("users")
+      .select("push_token")
+      .eq("id", driverRow.user_id)
+      .maybeSingle();
+    return {
+      identity: {
+        tableId: driverRow.id || identity.tableId,
+        userId: driverRow.user_id,
+        fullName: identity.fullName,
+      },
+      pushToken: userRow?.push_token || null,
+    };
+  }
+
+  return { identity, pushToken: null };
+};
+
+const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
+  try {
+    // Only broadcast marketplace offers for unassigned bookings.
+    if (booking?.assigned_driver_id || booking?.driver_id) {
+      console.warn(`⚠️ Skipping marketplace notify for ${booking?.id} — still assigned`);
+      return false;
+    }
+
+    const { data: driverRows } = await sb
+      .from("drivers")
+      .select("user_id")
+      .not("user_id", "is", null);
+    const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
+    if (driverUserIds.length === 0) return false;
+
+    const { data: driverUsers } = await sb
+      .from("users")
+      .select("id, push_token")
+      .in("id", driverUserIds);
+    const title = "🗓 New Scheduled Ride";
+    const riderLabel = booking?.rider_name || booking?.customer_name || booking?.passenger_name || "rider";
+    const body = `A booking has been scheduled by ${riderLabel}. Open Marketplace to pick up ride ${booking.id}.`;
+    const results = await Promise.all(
+      (driverUsers || [])
+        .filter((row: any) => row.push_token)
+        .map((row: any) =>
+          sendExpoPushNotification(row.push_token, title, body, {
+            type: "scheduled_marketplace_created",
+            bookingId: booking.id,
+            rideId: booking.id,
+            sourceTable: booking.source_table || booking.sourceTable || null,
+            target: "Marketplace",
+            screen: "Marketplace",
+          }, { channelId: "ride-requests", ttlSeconds: 600 }),
+        ),
+    );
+    const sent = results.filter(Boolean).length;
+    console.log(`📲 Marketplace push for booking ${booking.id}: ${sent} driver(s) notified`);
+    return sent > 0;
+  } catch (notifyErr) {
+    console.warn("⚠️ Failed to notify drivers about scheduled booking:", notifyErr);
+    return false;
+  }
+};
+
 const bookingMatchesDriverIdentity = (booking: any, identity: { tableId: string; userId: string | null }) => {
   const ids = [booking?.driver_id, booking?.assigned_driver_id]
     .filter(Boolean)
@@ -1767,37 +1850,42 @@ const bookingMatchesDriverIdentity = (booking: any, identity: { tableId: string;
   return false;
 };
 
-const notifyDriverOfAssignedBooking = async (booking: any, driverIdOrUserId: string) => {
+const emitAssignedBookingToDriver = (booking: any, identity: { tableId: string; userId: string | null }) => {
+  const payload = {
+    type: "assigned",
+    booking,
+    bookingId: booking.id,
+    rideId: booking.id,
+  };
   try {
-    const identity = await resolveDriverIdentity(driverIdOrUserId);
-    if (!identity) return;
+    io.emit("later-booking:update", payload);
+    if (identity.tableId) io.to(`driver:${identity.tableId}`).emit("later-booking:assigned", payload);
+    if (identity.userId) io.to(`driver:${identity.userId}`).emit("later-booking:assigned", payload);
+  } catch (err) {
+    console.warn(`⚠️ Failed to emit assignment socket for booking ${booking?.id}:`, err);
+  }
+};
 
-    let pushToken: string | null = null;
-    if (identity.userId) {
-      const { data: userRow } = await sb
-        .from("users")
-        .select("push_token, full_name")
-        .eq("id", identity.userId)
-        .maybeSingle();
-      pushToken = userRow?.push_token || null;
+const notifyDriverOfAssignedBooking = async (
+  booking: any,
+  driverIdOrUserId: string,
+  options: { emitSocket?: boolean } = {},
+): Promise<boolean> => {
+  try {
+    const { identity, pushToken } = await resolveDriverPushToken(driverIdOrUserId);
+    if (options.emitSocket !== false) {
+      emitAssignedBookingToDriver(booking, identity);
     }
+
     if (!pushToken) {
-      const { data: userRow } = await sb
-        .from("users")
-        .select("push_token")
-        .eq("id", identity.tableId)
-        .maybeSingle();
-      pushToken = userRow?.push_token || null;
-    }
-    if (!pushToken) {
-      console.warn(`⚠️ No push token for assigned driver ${driverIdOrUserId} (booking ${booking.id})`);
-      return;
+      console.warn(`⚠️ No push token for assigned driver ${driverIdOrUserId} (booking ${booking.id}) — will retry`);
+      return false;
     }
 
     const pickupLabel = booking.pickup_address || "pickup";
     const fare = Number(booking.driver_fare ?? booking.estimated_fare ?? 0);
     const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : "";
-    await sendExpoPushNotification(
+    const ok = await sendExpoPushNotification(
       pushToken,
       "📋 Ride Assigned To You",
       `Ride ${booking.id} has been assigned to you (${pickupLabel})${fareLabel}. Open Upcoming to Accept or Decline.`,
@@ -1809,10 +1897,15 @@ const notifyDriverOfAssignedBooking = async (booking: any, driverIdOrUserId: str
         target: "UpcomingBookings",
         screen: "UpcomingBookings",
       },
+      { channelId: "ride-requests", ttlSeconds: 600 },
     );
-    console.log(`📲 Assignment push sent for booking ${booking.id} → driver ${driverIdOrUserId}`);
+    if (ok) {
+      console.log(`📲 Assignment push sent for booking ${booking.id} → driver ${driverIdOrUserId}`);
+    }
+    return ok;
   } catch (err) {
     console.warn(`⚠️ Failed to notify assigned driver for booking ${booking?.id}:`, err);
+    return false;
   }
 };
 
@@ -1840,14 +1933,28 @@ const announceAssignedBookings = async () => {
     if (announcedAssignedBookingKeys.has(bookingKey)) continue;
 
     const enrichedBooking = stripPinForDrivers((await attachRiderDetails([booking]))[0] || booking);
-    await notifyDriverOfAssignedBooking(enrichedBooking, assignedId);
-    io.emit("later-booking:update", { type: "assigned", booking: enrichedBooking });
-    announcedAssignedBookingKeys.add(bookingKey);
+    const shouldEmitSocket = !assignmentSocketAnnouncedKeys.has(bookingKey);
+    const pushSent = await notifyDriverOfAssignedBooking(enrichedBooking, assignedId, {
+      emitSocket: shouldEmitSocket,
+    });
+    if (shouldEmitSocket) {
+      assignmentSocketAnnouncedKeys.add(bookingKey);
+    }
+    // Only mark announced after a successful push so we keep retrying if the
+    // driver had no token / Expo rejected the ticket on the first attempt.
+    if (pushSent) {
+      announcedAssignedBookingKeys.add(bookingKey);
+    }
   }
 
   for (const key of Array.from(announcedAssignedBookingKeys)) {
     if (!activeKeys.has(key)) {
       announcedAssignedBookingKeys.delete(key);
+    }
+  }
+  for (const key of Array.from(assignmentSocketAnnouncedKeys)) {
+    if (!activeKeys.has(key)) {
+      assignmentSocketAnnouncedKeys.delete(key);
     }
   }
 };
@@ -2572,10 +2679,12 @@ app.put("/api/later-bookings/:id/assign", async (req: Request, res: Response) =>
     const normalizedBooking = normalizeLaterBooking(updateResult.data, sourceTable);
     const [enrichedBooking] = (await attachRiderDetails([normalizedBooking])).map(stripPinForDrivers);
 
-    await notifyDriverOfAssignedBooking(enrichedBooking, identity.tableId);
+    const pushSent = await notifyDriverOfAssignedBooking(enrichedBooking, identity.tableId);
     const assignKey = `${sourceTable}:${bookingId}:${identity.tableId}`;
-    announcedAssignedBookingKeys.add(assignKey);
-    io.emit("later-booking:update", { type: "assigned", booking: enrichedBooking });
+    assignmentSocketAnnouncedKeys.add(assignKey);
+    if (pushSent) {
+      announcedAssignedBookingKeys.add(assignKey);
+    }
 
     res.json({ booking: enrichedBooking });
   } catch (error: any) {
@@ -2650,7 +2759,16 @@ app.put("/api/later-bookings/:id/decline", async (req: Request, res: Response) =
     }
 
     const normalizedBooking = normalizeLaterBooking(updateResult.data, sourceTable);
-    const [enrichedBooking] = (await attachRiderDetails([normalizedBooking])).map(stripPinForDrivers);
+    // Force-clear assignment fields for marketplace notify even if a column
+    // was skipped by the fallback updater.
+    const releasedBooking = stripPinForDrivers({
+      ...((await attachRiderDetails([normalizedBooking]))[0] || normalizedBooking),
+      driver_id: null,
+      assigned_driver_id: null,
+      assigned_driver_name: null,
+      assignment_pending: false,
+      status: statusForReleasedBooking,
+    });
 
     // Clear assignment announcement keys so a future re-assign can notify again
     for (const key of Array.from(announcedAssignedBookingKeys)) {
@@ -2658,13 +2776,29 @@ app.put("/api/later-bookings/:id/decline", async (req: Request, res: Response) =
         announcedAssignedBookingKeys.delete(key);
       }
     }
+    for (const key of Array.from(assignmentSocketAnnouncedKeys)) {
+      if (key.startsWith(`${sourceTable}:${bookingId}:`)) {
+        assignmentSocketAnnouncedKeys.delete(key);
+      }
+    }
+    // Clear marketplace announce key so this decline re-notifies all drivers
+    const marketplaceKey = `${sourceTable}:${bookingId}`;
+    announcedMarketplaceBookingKeys.delete(marketplaceKey);
 
-    io.emit("later-booking:update", { type: "declined", booking: enrichedBooking });
-    // Re-announce to marketplace so other drivers see it
-    await notifyDriversAboutMarketplaceBooking(enrichedBooking);
-    io.emit("later-booking:update", { type: "created", booking: enrichedBooking });
+    // Respond first so the declining driver UI feels instant, then notify others.
+    res.json({ booking: releasedBooking });
 
-    res.json({ booking: enrichedBooking });
+    io.emit("later-booking:update", { type: "declined", booking: releasedBooking });
+    io.emit("later-booking:update", { type: "created", booking: releasedBooking });
+    notifyDriversAboutMarketplaceBooking(releasedBooking)
+      .then((sent) => {
+        if (sent) announcedMarketplaceBookingKeys.add(marketplaceKey);
+        else announcedMarketplaceBookingKeys.delete(marketplaceKey);
+      })
+      .catch((err) => {
+        console.warn(`⚠️ Marketplace re-notify after decline failed for ${bookingId}:`, err);
+      });
+    return;
   } catch (error: any) {
     console.error("Decline later booking error:", error);
     res.status(500).json({ error: error?.message || "Failed to decline booking" });
@@ -3210,7 +3344,7 @@ setInterval(() => {
   announceAssignedBookings().catch((err) => {
     console.error("Assigned booking announcement engine error:", err);
   });
-}, 30 * 1000);
+}, 15 * 1000);
 
 announceAssignedBookings().catch((err) => {
   console.error("Initial assigned booking announcement failed:", err);

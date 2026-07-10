@@ -333,6 +333,47 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline]);
 
+  // Assigned later-booking offers → local notification + sound
+  useEffect(() => {
+    const driverIds = [driverProfile?.id, user?.id].filter(Boolean).map(String);
+    if (driverIds.length === 0) return;
+
+    let socket: ReturnType<typeof getSocket>;
+    try {
+      socket = getSocket();
+    } catch {
+      return;
+    }
+
+    const onAssigned = (payload: any) => {
+      const booking = payload?.booking || payload;
+      if (!booking?.id) return;
+      const assignedIds = [booking.assigned_driver_id, booking.driver_id]
+        .filter(Boolean)
+        .map(String);
+      // Only notify the assigned driver
+      if (assignedIds.length > 0 && !assignedIds.some((id) => driverIds.includes(id))) return;
+
+      playRideAlert();
+      sendLocalNotification(
+        "📋 Ride Assigned To You",
+        `Ride ${booking.id} has been assigned to you. Open Upcoming to Accept or Decline.`,
+        {
+          type: "scheduled_booking_assigned",
+          bookingId: String(booking.id),
+          rideId: String(booking.id),
+          target: "UpcomingBookings",
+          screen: "UpcomingBookings",
+        },
+      );
+    };
+
+    socket.on("later-booking:assigned", onAssigned);
+    return () => {
+      socket.off("later-booking:assigned", onAssigned);
+    };
+  }, [driverProfile?.id, user?.id]);
+
   const handleRidePayload = useCallback((ride: any) => {
     const mappedRequest = mapRidePayload(ride);
 

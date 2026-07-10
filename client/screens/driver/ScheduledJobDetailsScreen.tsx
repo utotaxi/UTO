@@ -271,7 +271,7 @@ export default function ScheduledJobDetailsScreen() {
                 const body = await res.json().catch(() => ({}));
                 throw new Error(body.error || 'Failed to decline');
               }
-              Alert.alert('Declined', 'The ride has been returned to the marketplace.');
+              // Return immediately — marketplace notify runs in background on server
               navigation.goBack();
             } catch (err: any) {
               Alert.alert('Error', err?.message || 'Could not decline the booking.');

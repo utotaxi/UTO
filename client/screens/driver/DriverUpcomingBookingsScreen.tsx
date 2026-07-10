@@ -307,8 +307,10 @@ export default function DriverUpcomingBookingsScreen() {
           text: 'Decline',
           style: 'destructive',
           onPress: async () => {
+            // Optimistic remove so the UI feels instant
+            setBookings((prev) => prev.filter((b) => b.id !== item.id));
+            setBusyId(item.id);
             try {
-              setBusyId(item.id);
               const res = await fetch(`${getApiUrl()}/api/later-bookings/${item.id}/decline`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -318,9 +320,10 @@ export default function DriverUpcomingBookingsScreen() {
                 const body = await res.json().catch(() => ({}));
                 throw new Error(body.error || 'Failed to decline');
               }
-              await loadBookings();
-              Alert.alert('Declined', 'The ride has been returned to the marketplace.');
+              // Soft refresh in background — booking already removed
+              loadBookings().catch(() => {});
             } catch (err: any) {
+              await loadBookings();
               Alert.alert('Error', err?.message || 'Could not decline the booking.');
             } finally {
               setBusyId(null);

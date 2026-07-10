@@ -235,9 +235,21 @@ export default function DriverMarketplaceScreen() {
 
   useEffect(() => {
     const socket = getSocket();
-    socket.on('later-booking:update', loadBookings);
+    const onUpdate = (payload?: any) => {
+      // Instant refresh when a declined/assigned booking returns to marketplace
+      if (
+        !payload?.type ||
+        payload.type === 'created' ||
+        payload.type === 'declined' ||
+        payload.type === 'released' ||
+        payload.type === 'assigned'
+      ) {
+        loadBookings();
+      }
+    };
+    socket.on('later-booking:update', onUpdate);
     return () => {
-      socket.off('later-booking:update', loadBookings);
+      socket.off('later-booking:update', onUpdate);
     };
   }, [loadBookings]);
 
