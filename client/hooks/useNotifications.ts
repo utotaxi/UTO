@@ -195,8 +195,9 @@ function handleIncomingNotificationData(rawData: unknown) {
   const data = rawData as Record<string, any>;
   const type = String(data.type || data.target || "");
   if (type === "ride_request" || type === "ride_requested") {
-    const rideId = data.rideId ? String(data.rideId) : "";
-    if (rideId) emitRideRequestNotification(rideId);
+    const rideId = data.rideId ? String(data.rideId) : String(data.ride?.id || "");
+    const ridePayload = data.ride && typeof data.ride === "object" ? data.ride : undefined;
+    if (rideId || ridePayload) emitRideRequestNotification(rideId, ridePayload);
   }
 }
 

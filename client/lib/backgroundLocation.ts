@@ -1,12 +1,33 @@
-
 //client/lib/backgroundLocation.ts
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import { AppState, AppStateStatus } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApiUrl } from './query-client';
 import { getSocket } from './socket';
 
 const LOCATION_TASK_NAME = 'driver-background-location-task';
+const BG_DRIVER_ID_KEY = '@uto_bg_driver_id';
+
+export async function setBackgroundDriverId(driverId: string | null) {
+  try {
+    if (driverId) {
+      await AsyncStorage.setItem(BG_DRIVER_ID_KEY, driverId);
+    } else {
+      await AsyncStorage.removeItem(BG_DRIVER_ID_KEY);
+    }
+  } catch (err) {
+    console.warn('⚠️ Failed to persist background driver id:', err);
+  }
+}
+
+export async function getBackgroundDriverId(): Promise<string | null> {
+  try {
+    return (await AsyncStorage.getItem(BG_DRIVER_ID_KEY)) || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function defineBackgroundLocationTask() {
   TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
@@ -20,7 +41,14 @@ export async function defineBackgroundLocationTask() {
       if (!locations || locations.length === 0) return;
 
       const location = locations[0];
+      const driverId = await getBackgroundDriverId();
+      if (!driverId) {
+        console.warn('⚠️ Background location update skipped — no driverId stored');
+        return;
+      }
+
       const payload = {
+        driverId,
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         heading: location.coords.heading,
@@ -29,7 +57,7 @@ export async function defineBackgroundLocationTask() {
       };
 
       try {
-        // Send location via API (background-safe)
+        // Send location via API (background-safe) so dispatch still has a fresh position
         const apiUrl = getApiUrl();
         const response = await fetch(`${apiUrl}/api/driver/location`, {
           method: 'POST',
@@ -40,39 +68,43 @@ export async function defineBackgroundLocationTask() {
         if (!response.ok) {
           console.warn('⚠️ Location update failed:', response.status);
         } else {
-          console.log('📍 Background location sent:', payload);
+          console.log('📍 Background location sent for', driverId);
         }
-      } catch (error) {
-        console.error('🔴 Failed to send background location:', error);
+      } catch (sendErr) {
+        console.error('🔴 Failed to send background location:', sendErr);
       }
     }
   });
 }
 
-export async function startBackgroundLocationTracking() {
+export async function startBackgroundLocationTracking(driverId?: string) {
   try {
+    if (driverId) {
+      await setBackgroundDriverId(driverId);
+    }
+
     // Request foreground permission
-    const { status: fgStatus } = 
+    const { status: fgStatus } =
       await Location.requestForegroundPermissionsAsync();
-    
+
     if (fgStatus !== 'granted') {
       console.warn('⚠️ Foreground location permission denied');
       return false;
     }
 
     // Request background permission
-    const { status: bgStatus } = 
+    const { status: bgStatus } =
       await Location.requestBackgroundPermissionsAsync();
-    
+
     if (bgStatus !== 'granted') {
       console.warn('⚠️ Background location permission denied');
       return false;
     }
 
     // Check if already running
-    const isStarted = 
+    const isStarted =
       await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
-    
+
     if (isStarted) {
       console.log('✅ Background location already tracking');
       return true;
@@ -84,14 +116,14 @@ export async function startBackgroundLocationTracking() {
       timeInterval: 5000,        // Every 5 seconds
       distanceInterval: 5,       // Or when moved 5 meters
       foregroundService: {
-        notificationTitle: 'UTO - Tracking in Progress',
-        notificationBody: 'Location updates in background',
+        notificationTitle: 'UTO Driver — Online',
+        notificationBody: 'Receiving ride requests while online',
         notificationColor: '#FFD000',
       },
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
-      deferredUpdatesDistance: 100,
-      deferredUpdatesInterval: 1000,
+      deferredUpdatesDistance: 50,
+      deferredUpdatesInterval: 5000,
     });
 
     console.log('✅ Background location tracking started');
@@ -104,13 +136,14 @@ export async function startBackgroundLocationTracking() {
 
 export async function stopBackgroundLocationTracking() {
   try {
-    const isStarted = 
+    const isStarted =
       await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
-    
+
     if (isStarted) {
       await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
       console.log('⏸️ Background location tracking stopped');
     }
+    await setBackgroundDriverId(null);
   } catch (error) {
     console.error('Error stopping background location:', error);
   }
@@ -118,30 +151,28 @@ export async function stopBackgroundLocationTracking() {
 
 export function setupAppStateListener() {
   let appStateSubscription: any = null;
-  
+
   const handleAppStateChange = async (nextAppState: AppStateStatus) => {
     const socket = getSocket();
-    
+
     console.log(`📱 App state changed to: ${nextAppState}`);
-    
+
     if (nextAppState === 'active') {
-      // App came to foreground
       console.log('✅ App active - reconnecting socket and resuming foreground tracking');
-      
+
       if (!socket.connected) {
         socket.connect();
       }
     } else if (nextAppState === 'background') {
       console.log('⏻️ App backgrounded - keeping socket alive, background task running');
       // Don't disconnect - let background task handle location
-      // Socket should remain connected
     }
   };
-  
+
   appStateSubscription = AppState.addEventListener(
     'change',
     handleAppStateChange
   );
-  
+
   return () => appStateSubscription?.remove();
 }

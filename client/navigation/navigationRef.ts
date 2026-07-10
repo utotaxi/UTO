@@ -32,7 +32,7 @@ export const navigateFromNotification = (rawData: unknown) => {
     });
   }
 
-  if (type === "scheduled_ride_live" || type === "ride_request") {
+  if (type === "scheduled_ride_live" || type === "ride_request" || type === "ride_requested") {
     navigationRef.navigate("Main", { screen: "DriveTab" });
     return true;
   }

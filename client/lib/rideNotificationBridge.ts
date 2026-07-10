@@ -1,4 +1,4 @@
-type RideRequestListener = (rideId: string) => void;
+type RideRequestListener = (rideId: string, ride?: any) => void;
 
 const listeners = new Set<RideRequestListener>();
 
@@ -7,11 +7,11 @@ export function onRideRequestNotification(listener: RideRequestListener): () => 
   return () => listeners.delete(listener);
 }
 
-export function emitRideRequestNotification(rideId: string) {
-  if (!rideId) return;
+export function emitRideRequestNotification(rideId: string, ride?: any) {
+  if (!rideId && !ride) return;
   listeners.forEach((listener) => {
     try {
-      listener(rideId);
+      listener(rideId || String(ride?.id || ""), ride);
     } catch (err) {
       console.warn("rideNotificationBridge listener error:", err);
     }

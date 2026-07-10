@@ -613,14 +613,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "latitude and longitude are required" });
       }
 
-      // 1. Update driver's current location in the drivers table
-      const driver = await storage.updateDriver(driverId, {
-        currentLatitude: latitude,
-        currentLongitude: longitude,
-      });
+      // Update driver's current location + heartbeat so backgrounded online
+      // drivers remain eligible for dispatch.
+      const { data: driver, error: driverUpdateErr } = await sb
+        .from("drivers")
+        .update({
+          current_latitude: latitude,
+          current_longitude: longitude,
+          last_seen_at: new Date().toISOString(),
+          is_available: true,
+        })
+        .eq("id", driverId)
+        .select("id")
+        .maybeSingle();
 
-      if (!driver) {
-        return res.status(404).json({ error: "Driver not found" });
+      if (driverUpdateErr || !driver) {
+        // Fallback to storage helper if direct update failed (e.g. missing column)
+        const fallback = await storage.updateDriver(driverId, {
+          currentLatitude: latitude,
+          currentLongitude: longitude,
+        });
+        if (!fallback) {
+          return res.status(404).json({ error: "Driver not found" });
+        }
       }
 
       // 2. Insert into location history (best-effort — table may not exist yet)

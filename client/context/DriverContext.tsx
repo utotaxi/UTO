@@ -7,8 +7,12 @@ import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { normalizeBackendTimestamp } from "@/lib/dateTime";
-import { sendLocalNotification } from "@/hooks/useNotifications";
+import { sendLocalNotification, useNotifications } from "@/hooks/useNotifications";
 import { onRideRequestNotification } from "@/lib/rideNotificationBridge";
+import {
+  startBackgroundLocationTracking,
+  stopBackgroundLocationTracking,
+} from "@/lib/backgroundLocation";
 import {
   DRIVER_DEDUCTION_TYPE,
   formatLiveRideCancellationPenalty,
@@ -394,6 +398,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [driverProfile?.id, user?.id, handleRidePayload]);
 
+  // Register push token + notification listeners for the whole driver session
+  // (not only while DriverHomeScreen is focused).
+  useNotifications(user?.id);
+
   useEffect(() => {
     let cleanup: (() => void) | undefined;
 
@@ -412,11 +420,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   }, [handleRidePayload]);
 
   useEffect(() => {
-    const unsubscribe = onRideRequestNotification(() => {
+    const unsubscribe = onRideRequestNotification((rideId, ride) => {
+      console.log("📲 Ride request push received:", rideId);
+      if (ride && (ride.id || rideId)) {
+        handleRidePayload({ ...ride, id: ride.id || rideId });
+      }
       fetchPendingDispatch().catch((err) => console.warn("⚠️ Pending dispatch refresh failed:", err));
     });
     return unsubscribe;
-  }, [fetchPendingDispatch]);
+  }, [fetchPendingDispatch, handleRidePayload]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
@@ -433,7 +445,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline, fetchPendingDispatch]);
 
-  // Listen for expired ride requests (driver missed the 15-second dispatch window)
+  // When online status is restored (or toggled), keep background tracking alive.
+  useEffect(() => {
+    const driverId = driverProfile?.id || user?.id;
+    if (!isOnline || !driverId) return;
+    startBackgroundLocationTracking(driverId).catch((err) =>
+      console.warn("⚠️ Failed to ensure background location while online:", err)
+    );
+  }, [isOnline, driverProfile?.id, user?.id]);
+
+  // Listen for expired ride requests (driver missed the dispatch window)
   useEffect(() => {
     let cleanupExpired: (() => void) | undefined;
     try {
@@ -888,8 +909,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     try {
       if (online) {
         connectAsDriver(driverId);
+        // Keep location + push delivery alive when the driver leaves the app.
+        startBackgroundLocationTracking(driverId).catch((err) =>
+          console.warn("⚠️ Failed to start background location:", err)
+        );
       } else {
         goOffline(driverId);
+        stopBackgroundLocationTracking().catch((err) =>
+          console.warn("⚠️ Failed to stop background location:", err)
+        );
       }
     } catch (err) {
       console.warn("⚠️ Failed to sync online status to server:", err);

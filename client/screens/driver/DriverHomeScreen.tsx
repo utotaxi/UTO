@@ -34,11 +34,11 @@ import { ModeBadge } from "@/components/ModeBadge";
 import { useTheme } from "@/hooks/useTheme";
 import { useDriver } from "@/context/DriverContext";
 import { useAuth } from "@/context/AuthContext";
-import { useNotifications } from "@/hooks/useNotifications";
 import { RatingModal } from "@/components/RatingModal";
 import { UTOColors, Spacing, BorderRadius, formatPrice } from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { sendDriverLocation, getSocket, connectAsDriver } from "@/lib/socket";
+import { startBackgroundLocationTracking } from "@/lib/backgroundLocation";
 
 const darkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
@@ -87,7 +87,6 @@ export default function DriverHomeScreen({ navigation }: any) {
   } = useDriver();
   
   const { user } = useAuth();
-  useNotifications(user?.id);
 
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
@@ -312,6 +311,16 @@ export default function DriverHomeScreen({ navigation }: any) {
       }
     };
   }, []);
+
+  // Keep background location running whenever the driver is online so they
+  // still receive dispatches after leaving the app / opening Maps.
+  useEffect(() => {
+    const driverId = driverProfile?.id || user?.id;
+    if (!isOnline || !driverId) return;
+    startBackgroundLocationTracking(driverId).catch((err) =>
+      console.warn("⚠️ Failed to start background location from DriverHome:", err)
+    );
+  }, [isOnline, driverProfile?.id, user?.id]);
 
   // Update backend with location when location or online status changes
   useEffect(() => {

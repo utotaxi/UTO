@@ -2693,52 +2693,105 @@ export function setupSocketIO(httpServer: HTTPServer) {
     console.log(`📡 Dispatching ride ${rideId} to nearest driver ${entry.driverId} (${entry.distance.toFixed(2)} mi away)`);
     io.to(`driver:${entry.driverId}`).emit("ride:new", enrichedRide);
 
-    // Issue 9: Send push notification for background ride delivery
+    // Always push as well — socket may be dead while the driver is still online
+    // in another app / with the screen locked. Push wakes the device and the
+    // client restores the pending offer via pending-dispatch / ride payload.
     try {
       const { data: driverUser } = await supabase
         .from("drivers")
         .select("user_id")
         .eq("id", entry.driverId)
         .single();
-      
+
       if (driverUser?.user_id) {
         const { data: userRow } = await supabase
           .from("users")
           .select("push_token")
           .eq("id", driverUser.user_id)
           .single();
-        
+
         if (userRow?.push_token) {
+          const fareLabel = Number(enrichedRide.farePrice || 0).toFixed(2);
+          const pickupLabel =
+            enrichedRide.pickupLocation?.address ||
+            enrichedRide.pickupAddress ||
+            "nearby";
           const pushMessage = {
             to: userRow.push_token,
             sound: "default",
             title: "🚕 New Ride Request",
-            body: `New ride from ${enrichedRide.pickupLocation?.address || enrichedRide.pickupAddress || "nearby"} — £${(enrichedRide.farePrice || enrichedRide.estimatedPrice || 0).toFixed(2)}`,
-            data: { type: "ride_request", rideId, target: "DriveTab", screen: "DriveTab" },
+            body: `New ride from ${pickupLabel} — £${fareLabel}`,
+            data: {
+              type: "ride_request",
+              rideId,
+              target: "DriveTab",
+              screen: "DriveTab",
+              // Embed enough ride data so a cold/background open can show the offer
+              // even before the socket reconnects.
+              ride: {
+                id: enrichedRide.id || rideId,
+                riderId: enrichedRide.riderId,
+                riderName: enrichedRide.riderName,
+                riderPhone: enrichedRide.riderPhone,
+                pickupLocation: enrichedRide.pickupLocation,
+                dropoffLocation: enrichedRide.dropoffLocation,
+                pickupAddress: enrichedRide.pickupLocation?.address || enrichedRide.pickupAddress,
+                dropoffAddress: enrichedRide.dropoffLocation?.address || enrichedRide.dropoffAddress,
+                pickupLatitude: enrichedRide.pickupLocation?.latitude,
+                pickupLongitude: enrichedRide.pickupLocation?.longitude,
+                dropoffLatitude: enrichedRide.dropoffLocation?.latitude,
+                dropoffLongitude: enrichedRide.dropoffLocation?.longitude,
+                farePrice: enrichedRide.farePrice,
+                estimatedPrice: enrichedRide.estimatedPrice,
+                discountAmount: enrichedRide.discountAmount,
+                distanceMiles: enrichedRide.distanceMiles || enrichedRide.distanceKm,
+                durationMinutes: enrichedRide.durationMinutes,
+                pickupDistance: enrichedRide.pickupDistance,
+                otp: enrichedRide.otp,
+                paymentMethod: enrichedRide.paymentMethod || "card",
+                rideType: enrichedRide.rideType || enrichedRide.vehicleType,
+              },
+            },
             priority: "high",
             channelId: "ride-requests",
+            ttl: 120,
+            expiration: Math.floor(Date.now() / 1000) + 120,
+            _contentAvailable: true,
+            interruptionLevel: "timeSensitive",
           };
-          
-          fetch("https://exp.host/--/api/v2/push/send", {
+
+          const pushRes = await fetch("https://exp.host/--/api/v2/push/send", {
             method: "POST",
             headers: {
-              "Accept": "application/json",
+              Accept: "application/json",
+              "Accept-Encoding": "gzip, deflate",
               "Content-Type": "application/json",
             },
             body: JSON.stringify(pushMessage),
-          }).catch((pushErr) => {
-            console.warn(`⚠️ Push notification failed for driver ${entry!.driverId}:`, pushErr);
           });
-          console.log(`📲 Push notification sent to driver ${entry.driverId} (token: ${userRow.push_token.substring(0, 20)}...)`);
+          const pushBody = await pushRes.json().catch(() => null);
+          console.log(
+            `📲 Push notification sent to driver ${entry.driverId} (token: ${userRow.push_token.substring(0, 20)}...) status=${pushRes.status}`,
+            pushBody ? JSON.stringify(pushBody).slice(0, 300) : ""
+          );
+        } else {
+          console.warn(`⚠️ Driver ${entry.driverId} has no push_token — background delivery may fail`);
         }
       }
     } catch (pushErr) {
       console.warn(`⚠️ Could not send push notification to driver ${entry.driverId}:`, pushErr);
     }
 
-    // Start countdown — longer when driver has no active socket (app backgrounded)
-    const driverSocketConnected = !!connectedDrivers.get(entry.driverId);
+    // Prefer the longer background window unless we can prove the driver's
+    // socket is currently connected and alive. A stale map entry after the OS
+    // suspends the app must NOT use the short foreground timeout.
+    const mappedSocketId = connectedDrivers.get(entry.driverId);
+    const liveSocket = mappedSocketId ? io.sockets.sockets.get(mappedSocketId) : undefined;
+    const driverSocketConnected = !!(liveSocket && (liveSocket as any).connected !== false);
     const dispatchTimeoutMs = driverSocketConnected ? DISPATCH_TIMEOUT_MS : DISPATCH_TIMEOUT_BACKGROUND_MS;
+    console.log(
+      `⏱️ Dispatch window for driver ${entry.driverId}: ${dispatchTimeoutMs / 1000}s (${driverSocketConnected ? "live socket" : "background/push"})`
+    );
     state.timer = setTimeout(() => {
       console.log(`⏱️ Driver ${entry!.driverId} did not respond within ${dispatchTimeoutMs / 1000}s — moving to next`);
       // Notify the timed-out driver to clear their screen

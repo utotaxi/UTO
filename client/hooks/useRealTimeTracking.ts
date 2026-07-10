@@ -205,8 +205,8 @@ export function useDriverTracking({ driverId, isOnline, updateInterval = 5000 }:
 
         connectAsDriver(driverId);
 
-        // Start background task
-        await startBackgroundLocationTracking();
+        // Start background task (persist driverId for background API posts)
+        await startBackgroundLocationTracking(driverId);
 
         const location = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.High,
