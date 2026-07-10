@@ -527,7 +527,9 @@ export default function ScheduledJobDetailsScreen() {
             <Text style={s.sectionTitle}>Rider Details</Text>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Name:</Text>
-              <Text style={s.detailValue}>{booking.rider_name || 'Rider'}</Text>
+              <Text style={s.detailValue}>
+                {booking.rider_name || booking.customer_name || booking.passenger_name || 'Rider'}
+              </Text>
             </View>
             {!!booking.rider_phone && (
               <View style={s.detailRow}>
@@ -559,11 +561,19 @@ export default function ScheduledJobDetailsScreen() {
             </View>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Distance:</Text>
-              <Text style={s.detailValue}>{booking.distance_miles ? `${booking.distance_miles.toFixed(1)} miles` : 'N/A'}</Text>
+              <Text style={s.detailValue}>
+                {booking.distance_miles != null && Number(booking.distance_miles) > 0
+                  ? `${Number(booking.distance_miles).toFixed(1)} miles`
+                  : 'N/A'}
+              </Text>
             </View>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Duration:</Text>
-              <Text style={s.detailValue}>{booking.duration_minutes ? `${booking.duration_minutes} minutes` : 'N/A'}</Text>
+              <Text style={s.detailValue}>
+                {booking.duration_minutes != null && Number(booking.duration_minutes) > 0
+                  ? `${Math.round(Number(booking.duration_minutes))} minutes`
+                  : 'N/A'}
+              </Text>
             </View>
           </View>
 

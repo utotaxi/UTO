@@ -212,6 +212,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS payment_intent_id TEXT DEFAULT NULL;`
     });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS rider_name TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS rider_phone TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS rider_email TEXT DEFAULT NULL;`
+    });
+    await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS customer_name TEXT DEFAULT NULL;`
+    });
     // Same fields for web_booker so admin/web bookings can also go live
     await supabase.rpc('exec_sql', {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS otp TEXT DEFAULT NULL;`
@@ -2031,13 +2043,36 @@ const normalizeVehicleType = (value: any): string => {
   return normalized;
 };
 
+const firstNonEmpty = (...values: any[]): string | null => {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text.length > 0 && text.toLowerCase() !== "null" && text.toLowerCase() !== "undefined") {
+      return text;
+    }
+  }
+  return null;
+};
+
+const toFiniteNumber = (value: any): number | null => {
+  if (value == null || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
 const normalizeLaterBooking = (
   booking: any,
   sourceTable: "later_bookings" | "web_booker",
 ) => {
   const rawStatus = String(booking?.status || "").toLowerCase();
   const status = rawStatus === "marketplace" ? "scheduled" : (rawStatus || "scheduled");
-  const assignedDriverId = booking?.assigned_driver_id ?? booking?.driver_id ?? null;
+  // Keep accepted driver_id separate from pending assigned_driver_id when both exist.
+  const acceptedDriverId = booking?.driver_id ?? null;
+  const pendingAssignedId = booking?.assigned_driver_id ?? null;
+  const assignedDriverId =
+    String(status) === "driver_accepted"
+      ? (acceptedDriverId || pendingAssignedId)
+      : (pendingAssignedId || acceptedDriverId);
   const storedFare = Number(booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? 0);
   const discountAmount = Math.max(0, Number(booking?.discount_amount ?? 0));
   // estimated_fare is the rider-facing (discounted) amount stored at booking.
@@ -2045,23 +2080,95 @@ const normalizeLaterBooking = (
   const riderFare = Number.isFinite(storedFare) ? storedFare : 0;
   const driverFare = riderFare;
 
+  // Prefer passenger/customer fields stored on the booking row (later_bookings /
+  // web_booker) — these are the source of truth for marketplace & upcoming.
+  const riderName = firstNonEmpty(
+    booking?.rider_name,
+    booking?.customer_name,
+    booking?.passenger_name,
+    booking?.passenger,
+    booking?.full_name,
+    booking?.name,
+    booking?.client_name,
+    booking?.booker_name,
+  );
+  const riderPhone = firstNonEmpty(
+    booking?.rider_phone,
+    booking?.customer_phone,
+    booking?.passenger_phone,
+    booking?.phone,
+    booking?.mobile,
+    booking?.contact_phone,
+    booking?.telephone,
+  );
+  const riderEmail = firstNonEmpty(
+    booking?.rider_email,
+    booking?.customer_email,
+    booking?.passenger_email,
+    booking?.email,
+    booking?.contact_email,
+  );
+
+  const pickupAddress = firstNonEmpty(
+    booking?.pickup_address,
+    booking?.pickup_location,
+    booking?.pickupAddress,
+    booking?.pickup,
+    booking?.from_address,
+    booking?.from,
+  ) || "";
+  const dropoffAddress = firstNonEmpty(
+    booking?.dropoff_address,
+    booking?.dropoff_location,
+    booking?.dropoffAddress,
+    booking?.dropoff,
+    booking?.to_address,
+    booking?.to,
+    booking?.destination,
+  ) || "";
+
+  const passengers = toFiniteNumber(
+    booking?.passengers ?? booking?.passenger_count ?? booking?.num_passengers ?? booking?.pax,
+  );
+  const luggage = toFiniteNumber(
+    booking?.luggage ?? booking?.bags ?? booking?.suitcases ?? booking?.num_luggage,
+  );
+  const distanceMiles = toFiniteNumber(
+    booking?.distance_miles ?? booking?.distance ?? booking?.trip_distance ?? booking?.miles,
+  );
+  const durationMinutes = toFiniteNumber(
+    booking?.duration_minutes ?? booking?.estimated_duration ?? booking?.duration ?? booking?.trip_duration,
+  );
+
   return {
     ...booking,
     source_table: sourceTable,
     rider_id: booking?.rider_id ?? booking?.user_id ?? booking?.customer_id ?? null,
-    pickup_address: booking?.pickup_address ?? booking?.pickup_location ?? booking?.pickupAddress ?? "",
-    dropoff_address: booking?.dropoff_address ?? booking?.dropoff_location ?? booking?.dropoffAddress ?? "",
-    pickup_at: booking?.pickup_at ?? booking?.scheduled_time ?? booking?.scheduled_pickup_time ?? booking?.pickup_time ?? null,
-    dropoff_by: booking?.dropoff_by ?? booking?.dropoff_time ?? null,
+    rider_name: riderName,
+    rider_phone: riderPhone,
+    rider_email: riderEmail,
+    customer_name: firstNonEmpty(booking?.customer_name, riderName),
+    passenger_name: firstNonEmpty(booking?.passenger_name, riderName),
+    pickup_address: pickupAddress,
+    dropoff_address: dropoffAddress,
+    pickup_at: booking?.pickup_at ?? booking?.scheduled_time ?? booking?.scheduled_pickup_time ?? booking?.pickup_time ?? booking?.pickup_datetime ?? null,
+    dropoff_by: booking?.dropoff_by ?? booking?.dropoff_time ?? booking?.dropoff_datetime ?? null,
     estimated_fare: riderFare > 0 ? riderFare : (booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null),
     discount_amount: discountAmount,
     driver_fare: driverFare > 0 ? driverFare : (booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null),
-    vehicle_type: normalizeVehicleType(booking?.vehicle_type ?? booking?.ride_type ?? booking?.vehicleType),
-    driver_id: assignedDriverId,
+    vehicle_type: normalizeVehicleType(booking?.vehicle_type ?? booking?.ride_type ?? booking?.vehicleType ?? booking?.car_type),
+    booking_type: firstNonEmpty(booking?.booking_type, booking?.service_type, booking?.type) || "standard",
+    is_round_trip: !!(booking?.is_round_trip ?? booking?.round_trip ?? booking?.return_trip),
+    flight_number: firstNonEmpty(booking?.flight_number, booking?.flight_no, booking?.flight),
+    passengers: passengers != null ? Math.max(1, Math.round(passengers)) : 1,
+    luggage: luggage != null ? Math.max(0, Math.round(luggage)) : 0,
+    payment_method: firstNonEmpty(booking?.payment_method, booking?.payment_type) || "card",
+    // For pending offers expose assigned id; for accepted keep driver_id.
+    driver_id: String(status) === "driver_accepted" ? assignedDriverId : (acceptedDriverId || assignedDriverId),
     assigned_driver_id: assignedDriverId,
-    assigned_driver_name: booking?.assigned_driver_name ?? null,
-    distance_miles: booking?.distance_miles ?? booking?.distance ?? null,
-    duration_minutes: booking?.duration_minutes ?? booking?.estimated_duration ?? null,
+    assigned_driver_name: firstNonEmpty(booking?.assigned_driver_name, booking?.driver_name),
+    distance_miles: distanceMiles,
+    duration_minutes: durationMinutes,
     status,
     // Pending assignment = driver set but not yet accepted
     assignment_pending:
@@ -2082,7 +2189,8 @@ const generateRidePin = (): string =>
 // How long before the scheduled pickup a booking is converted into a live ride
 const SCHEDULED_ACTIVATION_WINDOW_MS = 60 * 60 * 1000;
 
-// Attach rider name / email / phone to normalized bookings (batched users lookup)
+// Attach rider name / email / phone to normalized bookings (batched users lookup).
+// Booking-row fields from later_bookings / web_booker always win; users table is fallback only.
 const attachRiderDetails = async (bookings: any[]): Promise<any[]> => {
   const riderIds = Array.from(
     new Set(
@@ -2091,34 +2199,66 @@ const attachRiderDetails = async (bookings: any[]): Promise<any[]> => {
         .filter((id: any) => typeof id === "string" && id.length > 0),
     ),
   );
-  if (riderIds.length === 0) return bookings;
 
-  try {
-    const { data: riders, error } = await sb
-      .from("users")
-      .select("id, full_name, email, phone")
-      .in("id", riderIds);
+  let riderMap = new Map<string, any>();
+  if (riderIds.length > 0) {
+    try {
+      const { data: riders, error } = await sb
+        .from("users")
+        .select("id, full_name, email, phone")
+        .in("id", riderIds);
 
-    if (error || !riders) {
-      console.warn("⚠️ Could not fetch rider details for bookings:", error?.message);
-      return bookings;
+      if (error || !riders) {
+        console.warn("⚠️ Could not fetch rider details for bookings:", error?.message);
+      } else {
+        riderMap = new Map(riders.map((r: any) => [r.id, r]));
+      }
+    } catch (err) {
+      console.warn("⚠️ attachRiderDetails failed:", err);
     }
-
-    const riderMap = new Map(riders.map((r: any) => [r.id, r]));
-    return bookings.map((booking: any) => {
-      const rider = riderMap.get(booking?.rider_id);
-      if (!rider) return booking;
-      return {
-        ...booking,
-        rider_name: booking.rider_name || rider.full_name || null,
-        rider_email: booking.rider_email || rider.email || null,
-        rider_phone: booking.rider_phone || rider.phone || null,
-      };
-    });
-  } catch (err) {
-    console.warn("⚠️ attachRiderDetails failed:", err);
-    return bookings;
   }
+
+  return bookings.map((booking: any) => {
+    const rider = booking?.rider_id ? riderMap.get(booking.rider_id) : null;
+    const riderName = firstNonEmpty(
+      booking.rider_name,
+      booking.customer_name,
+      booking.passenger_name,
+      booking.passenger,
+      booking.full_name,
+      booking.name,
+      booking.client_name,
+      booking.booker_name,
+      rider?.full_name,
+    );
+    const riderPhone = firstNonEmpty(
+      booking.rider_phone,
+      booking.customer_phone,
+      booking.passenger_phone,
+      booking.phone,
+      booking.mobile,
+      booking.contact_phone,
+      booking.telephone,
+      rider?.phone,
+    );
+    const riderEmail = firstNonEmpty(
+      booking.rider_email,
+      booking.customer_email,
+      booking.passenger_email,
+      booking.email,
+      booking.contact_email,
+      rider?.email,
+    );
+
+    return {
+      ...booking,
+      rider_name: riderName,
+      rider_phone: riderPhone,
+      rider_email: riderEmail,
+      customer_name: firstNonEmpty(booking.customer_name, riderName),
+      passenger_name: firstNonEmpty(booking.passenger_name, riderName),
+    };
+  });
 };
 
 // Drivers must not see the rider's PIN before pickup — strip it from driver-facing responses
@@ -2292,6 +2432,10 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
 
     const insertData: any = {
         rider_id: riderId,
+        rider_name: rider.fullName || null,
+        rider_phone: rider.phone || null,
+        rider_email: rider.email || null,
+        customer_name: rider.fullName || null,
         otp: bookingOtp,
         pickup_address: pickupAddress,
         pickup_latitude: pickupLatitude ?? null,

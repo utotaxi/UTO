@@ -26,6 +26,8 @@ interface LaterBooking {
   rider_name?: string | null;
   rider_email?: string | null;
   rider_phone?: string | null;
+  customer_name?: string | null;
+  passenger_name?: string | null;
   pickup_address: string;
   dropoff_address: string;
   pickup_at: string;
@@ -45,6 +47,11 @@ interface LaterBooking {
   flight_number?: string;
   distance_miles?: number;
   duration_minutes?: number;
+  payment_method?: string | null;
+}
+
+function displayRiderName(item: LaterBooking) {
+  return item.rider_name || item.customer_name || item.passenger_name || 'Rider';
 }
 
 function fmtDateTimeFull(iso: string | null | undefined) {
@@ -115,7 +122,7 @@ function BookingCard({
         </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Rider Name:</Text>
-          <Text style={s.detailValue}>{item.rider_name || 'Rider'}</Text>
+          <Text style={s.detailValue}>{displayRiderName(item)}</Text>
         </View>
         {!!item.rider_phone && (
           <View style={s.detailRow}>
@@ -169,7 +176,9 @@ function BookingCard({
         </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Payment Method:</Text>
-          <Text style={s.detailValue}>Card / App</Text>
+          <Text style={s.detailValue}>
+            {String(item.payment_method || 'card').toLowerCase() === 'cash' ? 'Cash' : 'Card / App'}
+          </Text>
         </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Distance to pickup:</Text>
@@ -177,11 +186,19 @@ function BookingCard({
         </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Trip distance:</Text>
-          <Text style={s.detailValue}>{item.distance_miles ? `${item.distance_miles.toFixed(1)} miles` : 'N/A'}</Text>
+          <Text style={s.detailValue}>
+            {item.distance_miles != null && Number(item.distance_miles) > 0
+              ? `${Number(item.distance_miles).toFixed(1)} miles`
+              : 'N/A'}
+          </Text>
         </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Estimated duration:</Text>
-          <Text style={s.detailValue}>{item.duration_minutes ? `${item.duration_minutes} minutes` : 'N/A'}</Text>
+          <Text style={s.detailValue}>
+            {item.duration_minutes != null && Number(item.duration_minutes) > 0
+              ? `${Math.round(Number(item.duration_minutes))} minutes`
+              : 'N/A'}
+          </Text>
         </View>
       </View>
 

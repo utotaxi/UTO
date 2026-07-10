@@ -26,6 +26,8 @@ interface LaterBooking {
   rider_name?: string | null;
   rider_email?: string | null;
   rider_phone?: string | null;
+  customer_name?: string | null;
+  passenger_name?: string | null;
   pickup_address: string;
   dropoff_address: string;
   pickup_at: string;
@@ -47,6 +49,10 @@ interface LaterBooking {
   flight_number?: string;
   distance_miles?: number;
   duration_minutes?: number;
+}
+
+function displayRiderName(item: LaterBooking) {
+  return item.rider_name || item.customer_name || item.passenger_name || 'Rider';
 }
 
 function fmtDateTimeFull(iso: string | null | undefined) {
@@ -156,7 +162,7 @@ function UpcomingBookingCard({
         </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Rider:</Text>
-          <Text style={s.detailValue}>{item.rider_name || 'Rider'}</Text>
+          <Text style={s.detailValue}>{displayRiderName(item)}</Text>
         </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Pickup:</Text>
