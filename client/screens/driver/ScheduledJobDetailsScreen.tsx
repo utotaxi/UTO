@@ -7,6 +7,7 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import * as Location from 'expo-location';
 import { getApiUrl } from '@/lib/query-client';
 import { useAuth } from '@/context/AuthContext';
+import { useDriver } from '@/context/DriverContext';
 import { UTOColors } from '@/constants/theme';
 import { getSocket } from '@/lib/socket';
 
@@ -53,6 +54,7 @@ export default function ScheduledJobDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { user } = useAuth();
+  const { driverProfile } = useDriver();
   const tabBarHeight = useBottomTabBarHeight();
   
   const initialParams = (route.params as any) || {};
@@ -186,9 +188,18 @@ export default function ScheduledJobDetailsScreen() {
   const msUntilPickup = new Date(booking.pickup_at).getTime() - now;
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
   const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
-  const driverOwnsThis =
-    booking.driver_id === user?.id ||
-    booking.assigned_driver_id === user?.id;
+  const driverOwnsThis = (() => {
+    const ids = [user?.id, driverProfile?.id].filter(Boolean).map(String);
+    const bookingIds = [booking.driver_id, booking.assigned_driver_id]
+      .filter(Boolean)
+      .map(String);
+    return bookingIds.some((id) => ids.includes(id));
+  })();
+  const assignmentPending =
+    !!booking.assignment_pending ||
+    (!!driverOwnsThis &&
+      ['scheduled', 'marketplace', 'assigned'].includes(String(booking.status || '').toLowerCase()) &&
+      String(booking.status || '').toLowerCase() !== 'driver_accepted');
   const isUpcomingRide = msUntilPickup > 0;
   const tripIsLive = !!liveRideId;
   const tripInProgress = liveRideStatus === "in_progress";
@@ -237,6 +248,37 @@ export default function ScheduledJobDetailsScreen() {
           },
         },
       ]
+    );
+  };
+
+  const handleDeclineAssignment = () => {
+    Alert.alert(
+      'Decline Assigned Ride',
+      `Decline ride ${booking.id}? It will return to the marketplace for other drivers.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Decline',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/decline`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ driverId: user?.id, reason: 'declined_assignment' }),
+              });
+              if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error || 'Failed to decline');
+              }
+              Alert.alert('Declined', 'The ride has been returned to the marketplace.');
+              navigation.goBack();
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not decline the booking.');
+            }
+          },
+        },
+      ],
     );
   };
 
@@ -559,10 +601,20 @@ export default function ScheduledJobDetailsScreen() {
 
       {/* Fixed Bottom Action Bar */}
       <View style={[s.bottomBar, { paddingBottom: tabBarHeight > 0 ? tabBarHeight + 16 : Math.max(insets.bottom, 16) }]}>
-        {booking.status === 'scheduled' && (
+        {(booking.status === 'scheduled' || booking.status === 'marketplace' || booking.status === 'assigned') && !assignmentPending && (
           <Pressable style={s.acceptBtn} onPress={handleAccept}>
             <Text style={s.acceptBtnText}>Accept Booking</Text>
           </Pressable>
+        )}
+        {assignmentPending && driverOwnsThis && (
+          <View style={{ gap: 10 }}>
+            <Pressable style={s.acceptBtn} onPress={handleAccept}>
+              <Text style={s.acceptBtnText}>Accept Assigned Ride</Text>
+            </Pressable>
+            <Pressable style={s.cancelBtn} onPress={handleDeclineAssignment}>
+              <Text style={s.cancelBtnText}>Decline — Return to Marketplace</Text>
+            </Pressable>
+          </View>
         )}
         {booking.status === 'driver_accepted' && driverOwnsThis && tripInProgress && (
           <>

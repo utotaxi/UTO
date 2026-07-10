@@ -36,6 +36,7 @@ interface LaterBooking {
   discount_amount?: number | null;
   driver_fare?: number | null;
   driver_id?: string | null;
+  assigned_driver_id?: string | null;
   passengers?: number;
   luggage?: number;
   booking_type?: string;
@@ -215,7 +216,13 @@ export default function DriverMarketplaceScreen() {
       const res = await fetch(`${getApiUrl()}/api/later-bookings${user?.id ? `?driverId=${user.id}` : ''}`);
       if (!res.ok) throw new Error('Failed to load');
       const data = await res.json();
-      setBookings(data.bookings || []);
+      // Marketplace = open unassigned jobs only. Assigned pending offers live in Upcoming.
+      const openJobs = (data.bookings || []).filter((b: LaterBooking) => {
+        const status = String(b.status || '').toLowerCase();
+        const assigned = !!(b.driver_id || b.assigned_driver_id);
+        return (status === 'scheduled' || status === 'marketplace') && !assigned;
+      });
+      setBookings(openJobs);
     } catch (err) {
       console.warn('Marketplace load error:', err);
     } finally {

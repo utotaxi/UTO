@@ -1662,6 +1662,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 const missingLaterBookingColumns = new Set<string>();
 const missingLaterBookingAcceptColumns = new Set<string>();
+const missingLaterBookingAssignColumns = new Set<string>();
+const missingLaterBookingDeclineColumns = new Set<string>();
+const announcedAssignedBookingKeys = new Set<string>();
 const missingLaterBookingCancelColumns = new Set<string>();
 const missingLaterBookingActivationColumns = new Set<string>();
 const scheduledReminderBucketByBooking = new Map<string, string>();
@@ -1698,6 +1701,9 @@ const sendExpoPushNotification = async (
 
 const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
   try {
+    // Only broadcast marketplace offers for unassigned bookings.
+    if (booking?.assigned_driver_id || booking?.driver_id) return;
+
     const { data: driverRows } = await sb
       .from("drivers")
       .select("user_id")
@@ -1730,6 +1736,122 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
   }
 };
 
+const resolveDriverIdentity = async (driverIdOrUserId: string) => {
+  if (!driverIdOrUserId) return null;
+  const byId = await storage.getDriver(driverIdOrUserId);
+  if (byId) {
+    return {
+      tableId: byId.id,
+      userId: byId.userId || byId.user_id || null,
+      fullName: byId.fullName || byId.full_name || null,
+    };
+  }
+  const byUser = await storage.getDriverByUserId(driverIdOrUserId);
+  if (byUser) {
+    return {
+      tableId: byUser.id,
+      userId: byUser.userId || byUser.user_id || driverIdOrUserId,
+      fullName: byUser.fullName || byUser.full_name || null,
+    };
+  }
+  return { tableId: driverIdOrUserId, userId: driverIdOrUserId, fullName: null };
+};
+
+const bookingMatchesDriverIdentity = (booking: any, identity: { tableId: string; userId: string | null }) => {
+  const ids = [booking?.driver_id, booking?.assigned_driver_id]
+    .filter(Boolean)
+    .map((id: any) => String(id));
+  if (ids.length === 0) return false;
+  if (ids.includes(String(identity.tableId))) return true;
+  if (identity.userId && ids.includes(String(identity.userId))) return true;
+  return false;
+};
+
+const notifyDriverOfAssignedBooking = async (booking: any, driverIdOrUserId: string) => {
+  try {
+    const identity = await resolveDriverIdentity(driverIdOrUserId);
+    if (!identity) return;
+
+    let pushToken: string | null = null;
+    if (identity.userId) {
+      const { data: userRow } = await sb
+        .from("users")
+        .select("push_token, full_name")
+        .eq("id", identity.userId)
+        .maybeSingle();
+      pushToken = userRow?.push_token || null;
+    }
+    if (!pushToken) {
+      const { data: userRow } = await sb
+        .from("users")
+        .select("push_token")
+        .eq("id", identity.tableId)
+        .maybeSingle();
+      pushToken = userRow?.push_token || null;
+    }
+    if (!pushToken) {
+      console.warn(`⚠️ No push token for assigned driver ${driverIdOrUserId} (booking ${booking.id})`);
+      return;
+    }
+
+    const pickupLabel = booking.pickup_address || "pickup";
+    const fare = Number(booking.driver_fare ?? booking.estimated_fare ?? 0);
+    const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : "";
+    await sendExpoPushNotification(
+      pushToken,
+      "📋 Ride Assigned To You",
+      `Ride ${booking.id} has been assigned to you (${pickupLabel})${fareLabel}. Open Upcoming to Accept or Decline.`,
+      {
+        type: "scheduled_booking_assigned",
+        bookingId: booking.id,
+        rideId: booking.id,
+        sourceTable: booking.source_table || null,
+        target: "UpcomingBookings",
+        screen: "UpcomingBookings",
+      },
+    );
+    console.log(`📲 Assignment push sent for booking ${booking.id} → driver ${driverIdOrUserId}`);
+  } catch (err) {
+    console.warn(`⚠️ Failed to notify assigned driver for booking ${booking?.id}:`, err);
+  }
+};
+
+const announceAssignedBookings = async () => {
+  const [laterBookingsRaw, webBookerRaw] = await Promise.all([
+    fetchLaterBookingsFromTable("later_bookings"),
+    fetchLaterBookingsFromTable("web_booker"),
+  ]);
+
+  const candidates = [
+    ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
+    ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
+  ].filter((booking: any) => {
+    const status = String(booking.status || "").toLowerCase();
+    const assignedId = booking.assigned_driver_id || booking.driver_id;
+    // Pending assignment: driver set, but not yet accepted.
+    return !!assignedId && (status === "scheduled" || status === "marketplace" || status === "assigned");
+  });
+
+  const activeKeys = new Set<string>();
+  for (const booking of candidates) {
+    const assignedId = String(booking.assigned_driver_id || booking.driver_id);
+    const bookingKey = `${booking.source_table}:${booking.id}:${assignedId}`;
+    activeKeys.add(bookingKey);
+    if (announcedAssignedBookingKeys.has(bookingKey)) continue;
+
+    const enrichedBooking = stripPinForDrivers((await attachRiderDetails([booking]))[0] || booking);
+    await notifyDriverOfAssignedBooking(enrichedBooking, assignedId);
+    io.emit("later-booking:update", { type: "assigned", booking: enrichedBooking });
+    announcedAssignedBookingKeys.add(bookingKey);
+  }
+
+  for (const key of Array.from(announcedAssignedBookingKeys)) {
+    if (!activeKeys.has(key)) {
+      announcedAssignedBookingKeys.delete(key);
+    }
+  }
+};
+
 const announceExternalMarketplaceBookings = async () => {
   const [laterBookingsRaw, webBookerRaw] = await Promise.all([
     fetchLaterBookingsFromTable("later_bookings"),
@@ -1739,7 +1861,11 @@ const announceExternalMarketplaceBookings = async () => {
   const marketplaceBookings = [
     ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
     ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
-  ].filter((booking: any) => String(booking.status || "").toLowerCase() === "scheduled");
+  ].filter((booking: any) => {
+    const status = String(booking.status || "").toLowerCase();
+    const assignedId = booking.assigned_driver_id || booking.driver_id;
+    return (status === "scheduled" || status === "marketplace") && !assignedId;
+  });
 
   const activeKeys = new Set<string>();
   for (const booking of marketplaceBookings) {
@@ -1826,9 +1952,14 @@ const normalizeLaterBooking = (
     vehicle_type: normalizeVehicleType(booking?.vehicle_type ?? booking?.ride_type ?? booking?.vehicleType),
     driver_id: assignedDriverId,
     assigned_driver_id: assignedDriverId,
+    assigned_driver_name: booking?.assigned_driver_name ?? null,
     distance_miles: booking?.distance_miles ?? booking?.distance ?? null,
     duration_minutes: booking?.duration_minutes ?? booking?.estimated_duration ?? null,
     status,
+    // Pending assignment = driver set but not yet accepted
+    assignment_pending:
+      !!assignedDriverId &&
+      (status === "scheduled" || status === "marketplace" || status === "assigned"),
   };
 };
 
@@ -2172,6 +2303,7 @@ app.get("/api/later-bookings", async (req: Request, res: Response) => {
   try {
     const driverId = typeof req.query.driverId === "string" ? req.query.driverId : undefined;
     const nowTs = Date.now();
+    const driverIdentity = driverId ? await resolveDriverIdentity(driverId) : null;
 
     const [laterBookingsRaw, webBookerRaw] = await Promise.all([
       fetchLaterBookingsFromTable("later_bookings"),
@@ -2187,16 +2319,29 @@ app.get("/api/later-bookings", async (req: Request, res: Response) => {
         const status = String(booking.status || "").toLowerCase();
         const bookingDriverId = booking.driver_id || booking.assigned_driver_id;
         const bookingPickupTs = pickupTimestamp(booking);
+        const isAssigned = !!bookingDriverId;
 
-        if (driverId) {
-          // Unassigned bookings inside the activation window are dispatched
-          // as live rides — keep them out of the marketplace to avoid double-accepts.
-          if (status === "scheduled") return bookingPickupTs >= nowTs + SCHEDULED_ACTIVATION_WINDOW_MS && !booking.activated_at;
-          if (status === "driver_accepted" || status === "cancelled") return bookingDriverId === driverId;
+        if (driverId && driverIdentity) {
+          // Accepted rides for this driver
+          if (status === "driver_accepted") {
+            return bookingMatchesDriverIdentity(booking, driverIdentity);
+          }
+          // Cancelled history for this driver
+          if (status === "cancelled") {
+            return bookingMatchesDriverIdentity(booking, driverIdentity);
+          }
+          // Pending assignment offer — only the assigned driver sees it (Upcoming)
+          if ((status === "scheduled" || status === "marketplace" || status === "assigned") && isAssigned) {
+            return bookingMatchesDriverIdentity(booking, driverIdentity);
+          }
+          // Open marketplace — unassigned only, outside activation window
+          if ((status === "scheduled" || status === "marketplace") && !isAssigned) {
+            return bookingPickupTs >= nowTs + SCHEDULED_ACTIVATION_WINDOW_MS && !booking.activated_at;
+          }
           return false;
         }
 
-        return status === "scheduled" || status === "driver_accepted";
+        return status === "scheduled" || status === "driver_accepted" || status === "marketplace" || status === "assigned";
       })
       .sort((a: any, b: any) => pickupTimestamp(a) - pickupTimestamp(b));
 
@@ -2275,8 +2420,13 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
     };
     
     if (driverId) {
-      updateData.driver_id = driverId;
-      updateData.assigned_driver_id = driverId;
+      const identity = await resolveDriverIdentity(String(driverId));
+      updateData.driver_id = identity?.tableId || driverId;
+      updateData.assigned_driver_id = identity?.tableId || driverId;
+      if (identity?.fullName) {
+        updateData.assigned_driver_name = identity.fullName;
+      }
+      updateData.accepted_by_driver_at = new Date().toISOString();
     }
 
     let sourceTable: "web_booker" | "later_bookings" | null = null;
@@ -2317,6 +2467,18 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
       return res.status(400).json({ error: "This booking is now being dispatched as a live ride" });
     }
 
+    // If already assigned to a specific driver, only that driver may accept.
+    const existingAssignedId = existingBooking.assigned_driver_id || existingBooking.driver_id;
+    if (existingAssignedId && driverId) {
+      const identity = await resolveDriverIdentity(String(driverId));
+      if (identity && !bookingMatchesDriverIdentity(
+        normalizeLaterBooking(existingBooking, sourceTable),
+        identity,
+      )) {
+        return res.status(403).json({ error: "This booking is assigned to another driver" });
+      }
+    }
+
     const updateResult = await updateLaterBookingWithFallbackColumns(
       sourceTable,
       bookingId,
@@ -2338,6 +2500,174 @@ app.put("/api/later-bookings/:id/accept", async (req: Request, res: Response) =>
     res.json({ booking: enrichedBooking });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to accept booking" });
+  }
+});
+
+app.put("/api/later-bookings/:id/assign", async (req: Request, res: Response) => {
+  try {
+    const bookingId = req.params.id as string;
+    const { driverId, driverName } = req.body || {};
+    if (!driverId) {
+      return res.status(400).json({ error: "driverId is required" });
+    }
+
+    const identity = await resolveDriverIdentity(String(driverId));
+    if (!identity) {
+      return res.status(404).json({ error: "Driver not found" });
+    }
+
+    let sourceTable: "web_booker" | "later_bookings" | null = null;
+    let existingBooking: any = null;
+    const webFetch = await sb.from("web_booker").select("*").eq("id", bookingId).maybeSingle();
+    if (webFetch.data) {
+      sourceTable = "web_booker";
+      existingBooking = webFetch.data;
+    } else {
+      const laterFetch = await sb.from("later_bookings").select("*").eq("id", bookingId).maybeSingle();
+      if (laterFetch.data) {
+        sourceTable = "later_bookings";
+        existingBooking = laterFetch.data;
+      }
+    }
+    if (!sourceTable || !existingBooking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const currentStatus = String(existingBooking.status || "").toLowerCase();
+    if (currentStatus === "cancelled" || currentStatus === "completed") {
+      return res.status(400).json({ error: `Cannot assign a ${currentStatus} booking` });
+    }
+    if (existingBooking.activated_at || existingBooking.live_ride_id) {
+      return res.status(400).json({ error: "This booking is already live and cannot be reassigned here" });
+    }
+
+    let resolvedName = driverName || identity.fullName || null;
+    if (!resolvedName && identity.userId) {
+      const { data: userRow } = await sb.from("users").select("full_name").eq("id", identity.userId).maybeSingle();
+      resolvedName = userRow?.full_name || null;
+    }
+
+    const updateData: any = {
+      assigned_driver_id: identity.tableId,
+      driver_id: null, // not accepted yet
+      assigned_driver_name: resolvedName,
+      // Keep as scheduled/marketplace so accept is still required; "assigned" if supported.
+      status: sourceTable === "web_booker" ? "marketplace" : "scheduled",
+      updated_at: new Date().toISOString(),
+    };
+
+    const updateResult = await updateLaterBookingWithFallbackColumns(
+      sourceTable,
+      bookingId,
+      updateData,
+      missingLaterBookingAssignColumns,
+    );
+    if (updateResult.error) {
+      return res.status(500).json({ error: updateResult.error.message });
+    }
+    if (!updateResult.data) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const normalizedBooking = normalizeLaterBooking(updateResult.data, sourceTable);
+    const [enrichedBooking] = (await attachRiderDetails([normalizedBooking])).map(stripPinForDrivers);
+
+    await notifyDriverOfAssignedBooking(enrichedBooking, identity.tableId);
+    const assignKey = `${sourceTable}:${bookingId}:${identity.tableId}`;
+    announcedAssignedBookingKeys.add(assignKey);
+    io.emit("later-booking:update", { type: "assigned", booking: enrichedBooking });
+
+    res.json({ booking: enrichedBooking });
+  } catch (error: any) {
+    console.error("Assign later booking error:", error);
+    res.status(500).json({ error: error?.message || "Failed to assign booking" });
+  }
+});
+
+app.put("/api/later-bookings/:id/decline", async (req: Request, res: Response) => {
+  try {
+    const bookingId = req.params.id as string;
+    const { driverId, reason } = req.body || {};
+
+    let sourceTable: "web_booker" | "later_bookings" | null = null;
+    let existingBooking: any = null;
+    const webFetch = await sb.from("web_booker").select("*").eq("id", bookingId).maybeSingle();
+    if (webFetch.data) {
+      sourceTable = "web_booker";
+      existingBooking = webFetch.data;
+    } else {
+      const laterFetch = await sb.from("later_bookings").select("*").eq("id", bookingId).maybeSingle();
+      if (laterFetch.data) {
+        sourceTable = "later_bookings";
+        existingBooking = laterFetch.data;
+      }
+    }
+    if (!sourceTable || !existingBooking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const status = String(existingBooking.status || "").toLowerCase();
+    if (status === "driver_accepted") {
+      return res.status(400).json({
+        error: "This booking was already accepted. Use Cancel to release it back to marketplace.",
+      });
+    }
+
+    if (driverId) {
+      const identity = await resolveDriverIdentity(String(driverId));
+      if (identity && !bookingMatchesDriverIdentity(
+        normalizeLaterBooking(existingBooking, sourceTable),
+        identity,
+      )) {
+        return res.status(403).json({ error: "This booking is not assigned to you" });
+      }
+    }
+
+    const statusForReleasedBooking = sourceTable === "web_booker" ? "marketplace" : "scheduled";
+    const updateData: any = {
+      status: statusForReleasedBooking,
+      driver_id: null,
+      assigned_driver_id: null,
+      assigned_driver_name: null,
+      accepted_by_driver_at: null,
+      updated_at: new Date().toISOString(),
+      driver_cancel_reason: reason || "declined_assignment",
+      driver_cancelled_at: new Date().toISOString(),
+      driver_cancel_type: "declined_assignment",
+    };
+
+    const updateResult = await updateLaterBookingWithFallbackColumns(
+      sourceTable,
+      bookingId,
+      updateData,
+      missingLaterBookingDeclineColumns,
+    );
+    if (updateResult.error) {
+      return res.status(500).json({ error: updateResult.error.message });
+    }
+    if (!updateResult.data) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const normalizedBooking = normalizeLaterBooking(updateResult.data, sourceTable);
+    const [enrichedBooking] = (await attachRiderDetails([normalizedBooking])).map(stripPinForDrivers);
+
+    // Clear assignment announcement keys so a future re-assign can notify again
+    for (const key of Array.from(announcedAssignedBookingKeys)) {
+      if (key.startsWith(`${sourceTable}:${bookingId}:`)) {
+        announcedAssignedBookingKeys.delete(key);
+      }
+    }
+
+    io.emit("later-booking:update", { type: "declined", booking: enrichedBooking });
+    // Re-announce to marketplace so other drivers see it
+    await notifyDriversAboutMarketplaceBooking(enrichedBooking);
+    io.emit("later-booking:update", { type: "created", booking: enrichedBooking });
+
+    res.json({ booking: enrichedBooking });
+  } catch (error: any) {
+    console.error("Decline later booking error:", error);
+    res.status(500).json({ error: error?.message || "Failed to decline booking" });
   }
 });
 
@@ -2582,6 +2912,7 @@ app.put("/api/later-bookings/:id/cancel", async (req: Request, res: Response) =>
       if (releaseDriverAssignment) {
         updatePayload.driver_id = null;
         updatePayload.assigned_driver_id = null;
+        updatePayload.assigned_driver_name = null;
         updatePayload.accepted_by_driver_at = null;
         // Clear the live-ride link so the activation engine can re-dispatch
         // the booking to other drivers if it's inside the activation window.
@@ -2873,6 +3204,16 @@ setInterval(() => {
 
 announceExternalMarketplaceBookings().catch((err) => {
   console.error("Initial marketplace booking announcement failed:", err);
+});
+
+setInterval(() => {
+  announceAssignedBookings().catch((err) => {
+    console.error("Assigned booking announcement engine error:", err);
+  });
+}, 30 * 1000);
+
+announceAssignedBookings().catch((err) => {
+  console.error("Initial assigned booking announcement failed:", err);
 });
 
 // ─── Scheduled Bookings Live Activation Engine ───

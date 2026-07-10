@@ -25,6 +25,14 @@ export const navigateFromNotification = (rawData: unknown) => {
     return navigateToDriverAccountScreen("Marketplace");
   }
 
+  if (
+    type === "scheduled_booking_assigned" ||
+    data.target === "UpcomingBookings" ||
+    data.screen === "UpcomingBookings"
+  ) {
+    return navigateToDriverAccountScreen("UpcomingBookings");
+  }
+
   if (type === "scheduled_booking_reminder" || type === "scheduled_booking_drive_to_pickup" || data.target === "ScheduledJobDetails") {
     return navigateToDriverAccountScreen("ScheduledJobDetails", {
       bookingId: data.bookingId ? String(data.bookingId) : undefined,

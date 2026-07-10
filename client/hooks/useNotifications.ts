@@ -43,6 +43,7 @@ export interface NotificationData {
     | "marketplace_reminder"
     | "scheduled_booking_reminder"
     | "scheduled_booking_drive_to_pickup"
+    | "scheduled_booking_assigned"
     | "scheduled_ride_live";
   rideId?: string;
   bookingId?: string;

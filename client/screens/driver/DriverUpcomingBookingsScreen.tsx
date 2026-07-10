@@ -37,6 +37,8 @@ interface LaterBooking {
   driver_fare?: number | null;
   driver_id?: string | null;
   assigned_driver_id?: string | null;
+  assigned_driver_name?: string | null;
+  assignment_pending?: boolean;
   passengers?: number;
   luggage?: number;
   booking_type?: string;
@@ -61,24 +63,31 @@ function fmtDateTimeFull(iso: string | null | undefined) {
   });
 }
 
-function fmtTime(iso: string | null | undefined) {
-  if (!iso) return 'N/A';
-  const d = new Date(iso);
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
-}
-
 function formatVehicle(v?: string) {
   if (!v) return 'Saloon';
   if (v === 'people_carrier') return 'People Carrier';
   return v.charAt(0).toUpperCase() + v.slice(1);
 }
 
+function isPendingAssignment(item: LaterBooking) {
+  if (item.assignment_pending) return true;
+  const status = String(item.status || '').toLowerCase();
+  const assigned = !!(item.assigned_driver_id || item.driver_id);
+  return assigned && (status === 'scheduled' || status === 'marketplace' || status === 'assigned');
+}
+
 function UpcomingBookingCard({
   item,
   onPress,
+  onAccept,
+  onDecline,
+  busyId,
 }: {
   item: LaterBooking;
   onPress: (item: LaterBooking) => void;
+  onAccept: (item: LaterBooking) => void;
+  onDecline: (item: LaterBooking) => void;
+  busyId: string | null;
 }) {
   const fareValue = item.driver_fare != null
     ? Number(item.driver_fare)
@@ -97,14 +106,33 @@ function UpcomingBookingCard({
   const isExpired = msUntilPickup <= 0;
   const hoursLeft = Math.floor(msUntilPickup / (1000 * 60 * 60));
   const minutesLeft = Math.floor((msUntilPickup % (1000 * 60 * 60)) / (1000 * 60));
+  const pending = isPendingAssignment(item);
+  const isBusy = busyId === item.id;
 
   return (
     <Pressable style={s.card} onPress={() => onPress(item)}>
-      {/* Status Badge */}
       <View style={s.cardHeader}>
-        <View style={[s.statusBadge, { backgroundColor: isExpired ? '#FEE2E220' : '#10B98120' }]}>
-          <Text style={[s.statusText, { color: isExpired ? '#DC2626' : '#059669' }]}>
-            {isExpired ? 'EXPIRED' : 'ACCEPTED'}
+        <View style={[
+          s.statusBadge,
+          {
+            backgroundColor: pending
+              ? '#FEF3C720'
+              : isExpired
+                ? '#FEE2E220'
+                : '#10B98120',
+          },
+        ]}>
+          <Text style={[
+            s.statusText,
+            {
+              color: pending
+                ? '#B45309'
+                : isExpired
+                  ? '#DC2626'
+                  : '#059669',
+            },
+          ]}>
+            {pending ? 'ASSIGNED — ACTION NEEDED' : isExpired ? 'EXPIRED' : 'ACCEPTED'}
           </Text>
         </View>
         {isUpcoming ? (
@@ -117,38 +145,29 @@ function UpcomingBookingCard({
         <Feather name="chevron-right" size={20} color="#9CA3AF" />
       </View>
 
-      {/* Details */}
       <View style={s.detailsContainer}>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>Ride ID:</Text>
+          <Text style={[s.detailValue, { fontSize: 12 }]} numberOfLines={1}>{item.id}</Text>
+        </View>
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Job Type:</Text>
           <Text style={s.detailValue}>{jobType}</Text>
         </View>
         <View style={s.detailRow}>
-          <Text style={s.detailLabel}>Rider Name:</Text>
+          <Text style={s.detailLabel}>Rider:</Text>
           <Text style={s.detailValue}>{item.rider_name || 'Rider'}</Text>
         </View>
-        {!!item.rider_phone && (
-          <View style={s.detailRow}>
-            <Text style={s.detailLabel}>Rider Phone:</Text>
-            <Text style={s.detailValue}>{item.rider_phone}</Text>
-          </View>
-        )}
-        {!!item.rider_email && (
-          <View style={s.detailRow}>
-            <Text style={s.detailLabel}>Rider Email:</Text>
-            <Text style={s.detailValue}>{item.rider_email}</Text>
-          </View>
-        )}
-        <View style={s.detailRowStack}>
+        <View style={s.detailRow}>
           <Text style={s.detailLabel}>Pickup:</Text>
-          <Text style={s.detailValue}>{item.pickup_address}</Text>
-        </View>
-        <View style={s.detailRowStack}>
-          <Text style={s.detailLabel}>Drop-off:</Text>
-          <Text style={s.detailValue}>{item.dropoff_address}</Text>
+          <Text style={s.detailValue} numberOfLines={2}>{item.pickup_address}</Text>
         </View>
         <View style={s.detailRow}>
-          <Text style={s.detailLabel}>Pickup Date & Time:</Text>
+          <Text style={s.detailLabel}>Dropoff:</Text>
+          <Text style={s.detailValue} numberOfLines={2}>{item.dropoff_address}</Text>
+        </View>
+        <View style={s.detailRow}>
+          <Text style={s.detailLabel}>When:</Text>
           <Text style={s.detailValue}>{fmtDateTimeFull(item.pickup_at)}</Text>
         </View>
         <View style={s.detailRow}>
@@ -156,20 +175,35 @@ function UpcomingBookingCard({
           <Text style={s.detailValue}>{formatVehicle(item.vehicle_type)}</Text>
         </View>
         <View style={s.detailRow}>
-          <Text style={s.detailLabel}>Passengers:</Text>
-          <Text style={s.detailValue}>{item.passengers || 1}</Text>
+          <Text style={s.detailLabel}>Fare:</Text>
+          <Text style={[s.detailValue, { fontWeight: '800', color: '#059669' }]}>{fareStr}</Text>
         </View>
-        <View style={s.detailRow}>
-          <Text style={s.detailLabel}>Estimated Fare:</Text>
-          <Text style={[s.detailValue, { color: '#059669', fontWeight: '800' }]}>{fareStr}</Text>
-        </View>
-        {item.distance_miles && (
-          <View style={s.detailRow}>
-            <Text style={s.detailLabel}>Trip distance:</Text>
-            <Text style={s.detailValue}>{item.distance_miles.toFixed(1)} miles</Text>
-          </View>
-        )}
       </View>
+
+      {pending ? (
+        <View style={s.actionRow}>
+          <Pressable
+            style={[s.declineBtn, isBusy && { opacity: 0.6 }]}
+            disabled={!!isBusy}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onDecline(item);
+            }}
+          >
+            <Text style={s.declineBtnText}>{isBusy ? '...' : 'Decline'}</Text>
+          </Pressable>
+          <Pressable
+            style={[s.acceptBtn, isBusy && { opacity: 0.6 }]}
+            disabled={!!isBusy}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onAccept(item);
+            }}
+          >
+            <Text style={s.acceptBtnText}>{isBusy ? '...' : 'Accept'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -179,10 +213,11 @@ export default function DriverUpcomingBookingsScreen() {
   const insets = useSafeAreaInsets();
   let tabBarHeight = 0;
   try { tabBarHeight = useBottomTabBarHeight(); } catch (_) {}
-  
+
   const [bookings, setBookings] = useState<LaterBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const { user } = useAuth();
 
   const loadBookings = useCallback(async () => {
@@ -190,13 +225,17 @@ export default function DriverUpcomingBookingsScreen() {
       const res = await fetch(`${getApiUrl()}/api/later-bookings${user?.id ? `?driverId=${user.id}` : ''}`);
       if (!res.ok) throw new Error('Failed to load');
       const data = await res.json();
-      // Filter to only show bookings accepted by this driver
-      const accepted = (data.bookings || []).filter(
-        (b: LaterBooking) =>
-          b.status === 'driver_accepted' &&
-          (b.driver_id === user?.id || b.assigned_driver_id === user?.id),
-      );
-      accepted.sort((a: LaterBooking, b: LaterBooking) => {
+      // Upcoming = accepted by this driver OR pending assignment offers for this driver
+      const mine = (data.bookings || []).filter((b: LaterBooking) => {
+        const status = String(b.status || '').toLowerCase();
+        if (status === 'cancelled' || status === 'completed') return false;
+        if (status === 'driver_accepted') return true;
+        return isPendingAssignment(b);
+      });
+      mine.sort((a: LaterBooking, b: LaterBooking) => {
+        const aPending = isPendingAssignment(a) ? 0 : 1;
+        const bPending = isPendingAssignment(b) ? 0 : 1;
+        if (aPending !== bPending) return aPending - bPending;
         const aTs = new Date(a.pickup_at).getTime();
         const bTs = new Date(b.pickup_at).getTime();
         const nowTs = Date.now();
@@ -205,7 +244,7 @@ export default function DriverUpcomingBookingsScreen() {
         if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
         return aUpcoming ? aTs - bTs : bTs - aTs;
       });
-      setBookings(accepted);
+      setBookings(mine);
     } catch (err) {
       console.warn('Upcoming bookings load error:', err);
     } finally {
@@ -218,15 +257,82 @@ export default function DriverUpcomingBookingsScreen() {
 
   useEffect(() => {
     const socket = getSocket();
-    socket.on('later-booking:update', loadBookings);
+    const onUpdate = () => loadBookings();
+    socket.on('later-booking:update', onUpdate);
     return () => {
-      socket.off('later-booking:update', loadBookings);
+      socket.off('later-booking:update', onUpdate);
     };
   }, [loadBookings]);
 
+  const handleAccept = (item: LaterBooking) => {
+    Alert.alert(
+      'Accept Assigned Ride',
+      `Accept ride ${item.id}? It will stay in your Upcoming bookings with full details.`,
+      [
+        { text: 'Back', style: 'cancel' },
+        {
+          text: 'Accept',
+          onPress: async () => {
+            try {
+              setBusyId(item.id);
+              const res = await fetch(`${getApiUrl()}/api/later-bookings/${item.id}/accept`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ driverId: user?.id }),
+              });
+              if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error || 'Failed to accept');
+              }
+              await loadBookings();
+              Alert.alert('Accepted', 'This ride is now in your Upcoming bookings.');
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not accept the booking.');
+            } finally {
+              setBusyId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleDecline = (item: LaterBooking) => {
+    Alert.alert(
+      'Decline Assigned Ride',
+      `Decline ride ${item.id}? It will return to the marketplace for other drivers.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Decline',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setBusyId(item.id);
+              const res = await fetch(`${getApiUrl()}/api/later-bookings/${item.id}/decline`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ driverId: user?.id, reason: 'declined_assignment' }),
+              });
+              if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error || 'Failed to decline');
+              }
+              await loadBookings();
+              Alert.alert('Declined', 'The ride has been returned to the marketplace.');
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Could not decline the booking.');
+            } finally {
+              setBusyId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={s.header}>
         <Pressable onPress={() => navigation.goBack()} style={{ marginRight: 12, padding: 4, marginLeft: -4 }}>
           <Feather name="arrow-left" size={24} color="#000000" />
@@ -234,7 +340,9 @@ export default function DriverUpcomingBookingsScreen() {
         <MaterialIcons name="event-available" size={22} color={UTO_YELLOW} style={{ marginRight: 8 }} />
         <Text style={s.headerTitle}>Upcoming Bookings</Text>
       </View>
-      <Text style={s.headerSub}>Rides you have accepted and are scheduled to complete</Text>
+      <Text style={s.headerSub}>
+        Assigned offers (Accept / Decline) and rides you have accepted
+      </Text>
 
       {loading ? (
         <View style={s.centered}>
@@ -245,7 +353,7 @@ export default function DriverUpcomingBookingsScreen() {
           <MaterialIcons name="event-busy" size={56} color="#D1D5DB" />
           <Text style={s.emptyTitle}>No upcoming bookings</Text>
           <Text style={s.emptyText}>
-            Accepted bookings will appear here. Head to the Marketplace to accept available rides.
+            When a ride is assigned to you, it appears here with Accept and Decline. Accepted rides stay here with full details.
           </Text>
         </View>
       ) : (
@@ -255,6 +363,9 @@ export default function DriverUpcomingBookingsScreen() {
           renderItem={({ item }) => (
             <UpcomingBookingCard
               item={item}
+              busyId={busyId}
+              onAccept={handleAccept}
+              onDecline={handleDecline}
               onPress={(selectedItem) => {
                 (navigation as any).navigate("ScheduledJobDetails", { booking: selectedItem });
               }}
@@ -298,364 +409,44 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
-    elevation: 3,
-    borderLeftWidth: 4,
-    borderLeftColor: '#10B981',
+    elevation: 2,
   },
   cardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
+    gap: 8,
   },
   statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 20,
   },
-  statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  countdownText: { fontSize: 12, fontWeight: '600', color: '#6B7280' },
-
-  detailsContainer: { marginTop: 4 },
-  detailRow: {
+  statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  countdownText: { flex: 1, fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  detailsContainer: { gap: 6 },
+  detailRow: { flexDirection: 'row', gap: 8 },
+  detailLabel: { width: 72, fontSize: 13, color: '#6B7280', fontWeight: '600' },
+  detailValue: { flex: 1, fontSize: 13, color: '#111827', fontWeight: '500' },
+  actionRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    gap: 10,
+    marginTop: 14,
   },
-  detailRowStack: {
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  detailLabel: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
-  detailValue: {
-    fontSize: 14,
-    color: '#111827',
-    fontWeight: '600',
-    marginTop: 2,
-    textAlign: 'right',
+  declineBtn: {
     flex: 1,
+    backgroundColor: '#FEE2E2',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
   },
+  declineBtnText: { color: '#DC2626', fontWeight: '700', fontSize: 15 },
+  acceptBtn: {
+    flex: 1,
+    backgroundColor: UTO_YELLOW,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  acceptBtnText: { color: '#000000', fontWeight: '800', fontSize: 15 },
 });
-
-// // client/screens/driver/DriverUpcomingBookingsScreen.tsx
-// import React, { useEffect, useState, useCallback } from 'react';
-// import {
-//   View,
-//   Text,
-//   StyleSheet,
-//   FlatList,
-//   Pressable,
-//   ActivityIndicator,
-//   RefreshControl,
-//   Alert,
-// } from 'react-native';
-// import { useSafeAreaInsets } from 'react-native-safe-area-context';
-// import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-// import { MaterialIcons, Feather } from '@expo/vector-icons';
-// import { useAuth } from '@/context/AuthContext';
-// import { getApiUrl } from '@/lib/query-client';
-// import { getSocket } from '@/lib/socket';
-// import { useNavigation } from '@react-navigation/native';
-
-// const UTO_YELLOW = '#FFD000';
-
-// interface LaterBooking {
-//   id: string;
-//   rider_id: string;
-//   pickup_address: string;
-//   dropoff_address: string;
-//   pickup_at: string;
-//   dropoff_by: string;
-//   status: string;
-//   created_at: string;
-//   estimated_fare?: number | null;
-//   driver_id?: string | null;
-//   passengers?: number;
-//   luggage?: number;
-//   booking_type?: string;
-//   is_round_trip?: boolean;
-//   vehicle_type?: string;
-//   flight_number?: string;
-//   distance_miles?: number;
-//   duration_minutes?: number;
-
-//   pickup_latitude?: number;
-//   pickup_longitude?: number;
-//   dropoff_latitude?: number;
-//   dropoff_longitude?: number;
-//   estimated_price?: number; //estimated_fare
-//   scheduled_time: string; //pickup_at
-//   pricing_type?: string;
-//   payment_method?: string;
-//   commission_calculation?: string;
-//   commission_amount?: number;
-//   driver_cut?: number;
-//   booking_note?: string;
-//   dispatch_mode?: string;
-//   dispatch_note?: string;
-//   reference?: string;
-//   assigned_driver_id?: string | null; //driver_id
-//   assigned_driver_name?: string | null;
-//   assigned_driver_distance_km?: number | null;
-// }
-
-// function fmtDateTimeFull(iso: string | null | undefined) {
-//   if (!iso) return 'N/A';
-//   const d = new Date(iso);
-//   return d.toLocaleString('en-GB', {
-//     weekday: 'short',
-//     day: 'numeric',
-//     month: 'short',
-//     year: 'numeric',
-//     hour: '2-digit',
-//     minute: '2-digit',
-//   });
-// }
-
-// function fmtTime(iso: string | null | undefined) {
-//   if (!iso) return 'N/A';
-//   const d = new Date(iso);
-//   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-// }
-
-// function formatVehicle(v?: string) {
-//   if (!v) return 'Saloon';
-//   if (v === 'people_carrier') return 'People Carrier';
-//   return v.charAt(0).toUpperCase() + v.slice(1);
-// }
-
-// function UpcomingBookingCard({
-//   item,
-//   onPress,
-// }: {
-//   item: LaterBooking;
-//   onPress: (item: LaterBooking) => void;
-// }) {
-//   const fareStr = item.estimated_fare || item.estimated_price
-//     ? `£${parseFloat(String(item.estimated_fare || item.estimated_price)).toFixed(2)}`
-//     : 'N/A';
-
-//   let jobType = 'Scheduled';
-//   if (item.booking_type === 'airport') jobType = 'Airport';
-//   if (item.is_round_trip) jobType = 'Return Journey';
-
-//   const now = Date.now();
-//   const msUntilPickup = new Date(item.pickup_at || item.scheduled_time).getTime() - now;
-//   const isUpcoming = msUntilPickup > 0;
-//   const hoursLeft = Math.floor(msUntilPickup / (1000 * 60 * 60));
-//   const minutesLeft = Math.floor((msUntilPickup % (1000 * 60 * 60)) / (1000 * 60));
-
-//   return (
-//     <Pressable style={s.card} onPress={() => onPress(item)}>
-//       {/* Status Badge */}
-//       <View style={s.cardHeader}>
-//         <View style={[s.statusBadge, { backgroundColor: '#10B98120' }]}>
-//           <Text style={[s.statusText, { color: '#059669' }]}>ACCEPTED</Text>
-//         </View>
-//         {isUpcoming && (
-//           <Text style={s.countdownText}>
-//             {hoursLeft > 0 ? `${hoursLeft}h ${minutesLeft}m` : `${minutesLeft}m`} until pickup
-//           </Text>
-//         )}
-//         <Feather name="chevron-right" size={20} color="#9CA3AF" />
-//       </View>
-
-//       {/* Details */}
-//       <View style={s.detailsContainer}>
-//         <View style={s.detailRow}>
-//           <Text style={s.detailLabel}>Job Type:</Text>
-//           <Text style={s.detailValue}>{jobType}</Text>
-//         </View>
-//         <View style={s.detailRowStack}>
-//           <Text style={s.detailLabel}>Pickup:</Text>
-//           <Text style={s.detailValue}>{item.pickup_address}</Text>
-//         </View>
-//         <View style={s.detailRowStack}>
-//           <Text style={s.detailLabel}>Drop-off:</Text>
-//           <Text style={s.detailValue}>{item.dropoff_address}</Text>
-//         </View>
-//         <View style={s.detailRow}>
-//           <Text style={s.detailLabel}>Pickup Date & Time:</Text>
-//           <Text style={s.detailValue}>{fmtDateTimeFull(item.pickup_at || item.scheduled_time)}</Text>
-//         </View>
-//         <View style={s.detailRow}>
-//           <Text style={s.detailLabel}>Vehicle:</Text>
-//           <Text style={s.detailValue}>{formatVehicle(item.vehicle_type)}</Text>
-//         </View>
-//         <View style={s.detailRow}>
-//           <Text style={s.detailLabel}>Passengers:</Text>
-//           <Text style={s.detailValue}>{item.passengers || 1}</Text>
-//         </View>
-//         <View style={s.detailRow}>
-//           <Text style={s.detailLabel}>Estimated Fare:</Text>
-//           <Text style={[s.detailValue, { color: '#059669', fontWeight: '800' }]}>{fareStr}</Text>
-//         </View>
-//         {item.distance_miles && (
-//           <View style={s.detailRow}>
-//             <Text style={s.detailLabel}>Trip distance:</Text>
-//             <Text style={s.detailValue}>{item.distance_miles.toFixed(1)} miles</Text>
-//           </View>
-//         )}
-//       </View>
-//     </Pressable>
-//   );
-// }
-
-// export default function DriverUpcomingBookingsScreen() {
-//   const navigation = useNavigation();
-//   const insets = useSafeAreaInsets();
-//   let tabBarHeight = 0;
-//   try { tabBarHeight = useBottomTabBarHeight(); } catch (_) {}
-  
-//   const [bookings, setBookings] = useState<LaterBooking[]>([]);
-//   const [loading, setLoading] = useState(true);
-//   const [refreshing, setRefreshing] = useState(false);
-//   const { user } = useAuth();
-
-//   const loadBookings = useCallback(async () => {
-//     try {
-//       const res = await fetch(`${getApiUrl()}/api/later-bookings${user?.id ? `?driverId=${user.id}` : ''}`);
-//       if (!res.ok) throw new Error('Failed to load');
-//       const data = await res.json();
-//       // Filter to only show bookings accepted by this driver
-//       const accepted = (data.bookings || []).filter(
-//         // (b: LaterBooking) => b.status === 'driver_accepted' && b.driver_id === user?.id
-//         (b: LaterBooking) => b.status === 'driver_accepted' && b.assigned_driver_id === user?.id
-//       );
-//       setBookings(accepted);
-//     } catch (err) {
-//       console.warn('Upcoming bookings load error:', err);
-//     } finally {
-//       setLoading(false);
-//       setRefreshing(false);
-//     }
-//   }, [user?.id]);
-
-//   useEffect(() => { loadBookings(); }, [loadBookings]);
-
-//   useEffect(() => {
-//     const socket = getSocket();
-//     socket.on('later-booking:update', loadBookings);
-//     return () => {
-//       socket.off('later-booking:update', loadBookings);
-//     };
-//   }, [loadBookings]);
-
-//   return (
-//     <View style={[s.root, { paddingTop: insets.top }]}>
-//       {/* Header */}
-//       <View style={s.header}>
-//         <Pressable onPress={() => navigation.goBack()} style={{ marginRight: 12, padding: 4, marginLeft: -4 }}>
-//           <Feather name="arrow-left" size={24} color="#000000" />
-//         </Pressable>
-//         <MaterialIcons name="event-available" size={22} color={UTO_YELLOW} style={{ marginRight: 8 }} />
-//         <Text style={s.headerTitle}>Upcoming Bookings</Text>
-//       </View>
-//       <Text style={s.headerSub}>Rides you have accepted and are scheduled to complete</Text>
-
-//       {loading ? (
-//         <View style={s.centered}>
-//           <ActivityIndicator size="large" color={UTO_YELLOW} />
-//         </View>
-//       ) : bookings.length === 0 ? (
-//         <View style={s.centered}>
-//           <MaterialIcons name="event-busy" size={56} color="#D1D5DB" />
-//           <Text style={s.emptyTitle}>No upcoming bookings</Text>
-//           <Text style={s.emptyText}>
-//             Accepted bookings will appear here. Head to the Marketplace to accept available rides.
-//           </Text>
-//         </View>
-//       ) : (
-//         <FlatList
-//           data={bookings}
-//           keyExtractor={item => item.id}
-//           renderItem={({ item }) => (
-//             <UpcomingBookingCard
-//               item={item}
-//               onPress={(selectedItem) => {
-//                 (navigation as any).navigate("ScheduledJobDetails", { booking: selectedItem });
-//               }}
-//             />
-//           )}
-//           contentContainerStyle={{ padding: 16, paddingBottom: tabBarHeight + 16 }}
-//           refreshControl={
-//             <RefreshControl
-//               refreshing={refreshing}
-//               onRefresh={() => { setRefreshing(true); loadBookings(); }}
-//               tintColor={UTO_YELLOW}
-//             />
-//           }
-//           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-//         />
-//       )}
-//     </View>
-//   );
-// }
-
-// const s = StyleSheet.create({
-//   root: { flex: 1, backgroundColor: '#F9FAFB' },
-//   header: {
-//     flexDirection: 'row',
-//     alignItems: 'center',
-//     paddingHorizontal: 20,
-//     paddingTop: 16,
-//     paddingBottom: 4,
-//   },
-//   headerTitle: { fontSize: 24, fontWeight: '800', color: '#000000' },
-//   headerSub: { fontSize: 13, color: '#6B7280', paddingHorizontal: 20, marginBottom: 8 },
-//   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-//   emptyTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
-//   emptyText: { fontSize: 14, color: '#6B7280', textAlign: 'center', paddingHorizontal: 40 },
-
-//   card: {
-//     backgroundColor: '#FFFFFF',
-//     borderRadius: 16,
-//     padding: 16,
-//     shadowColor: '#000',
-//     shadowOffset: { width: 0, height: 2 },
-//     shadowOpacity: 0.06,
-//     shadowRadius: 8,
-//     elevation: 3,
-//     borderLeftWidth: 4,
-//     borderLeftColor: '#10B981',
-//   },
-//   cardHeader: {
-//     flexDirection: 'row',
-//     justifyContent: 'space-between',
-//     alignItems: 'center',
-//     marginBottom: 14,
-//   },
-//   statusBadge: {
-//     paddingHorizontal: 10,
-//     paddingVertical: 4,
-//     borderRadius: 20,
-//   },
-//   statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-//   countdownText: { fontSize: 12, fontWeight: '600', color: '#6B7280' },
-
-//   detailsContainer: { marginTop: 4 },
-//   detailRow: {
-//     flexDirection: 'row',
-//     justifyContent: 'space-between',
-//     paddingVertical: 6,
-//     borderBottomWidth: 1,
-//     borderBottomColor: '#F3F4F6',
-//   },
-//   detailRowStack: {
-//     paddingVertical: 6,
-//     borderBottomWidth: 1,
-//     borderBottomColor: '#F3F4F6',
-//   },
-//   detailLabel: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
-//   detailValue: {
-//     fontSize: 14,
-//     color: '#111827',
-//     fontWeight: '600',
-//     marginTop: 2,
-//     textAlign: 'right',
-//     flex: 1,
-//   },
-// });
