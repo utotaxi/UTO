@@ -752,6 +752,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           dropoffLongitude: ride.dropoff_longitude,
           estimatedPrice: ride.estimated_price,
           finalPrice: ride.final_price,
+          discountAmount: ride.discount_amount || 0,
+          couponCode: ride.coupon_code || null,
           distance: ride.distance,
           estimatedDuration: ride.estimated_duration,
           paymentMethod: ride.payment_method || "card",
@@ -760,7 +762,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           expectedCollectAmount:
             ride.expected_collect_amount !== undefined && ride.expected_collect_amount !== null
               ? ride.expected_collect_amount
-              : ride.estimated_price || 0,
+              : Math.max(0, Number(ride.estimated_price || 0) - Number(ride.discount_amount || 0)),
         };
       });
 
@@ -1791,9 +1793,9 @@ const normalizeLaterBooking = (
   const storedFare = Number(booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? 0);
   const discountAmount = Math.max(0, Number(booking?.discount_amount ?? 0));
   // estimated_fare is the rider-facing (discounted) amount stored at booking.
-  // Drivers must see the pre-discount fare = discounted + discount_amount.
+  // Drivers see and earn the same coupon-adjusted fare.
   const riderFare = Number.isFinite(storedFare) ? storedFare : 0;
-  const driverFare = Number((riderFare + discountAmount).toFixed(2));
+  const driverFare = riderFare;
 
   return {
     ...booking,
@@ -2947,8 +2949,13 @@ setInterval(async () => {
             latitude: Number(booking.dropoff_latitude) || 0,
             longitude: Number(booking.dropoff_longitude) || 0,
           },
-          farePrice: Number(booking.driver_fare ?? (Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0))) || 0,
-          estimatedPrice: Number(booking.driver_fare ?? (Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0))) || 0,
+          // Store full pre-discount fare + discountAmount so live-ride math matches ASAP rides.
+          farePrice: Number(
+            (Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0)).toFixed(2)
+          ) || 0,
+          estimatedPrice: Number(
+            (Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0)).toFixed(2)
+          ) || 0,
           discountAmount: Number(booking.discount_amount || 0),
           couponCode: booking.coupon_code || null,
           distanceMiles: Number(booking.distance_miles) || 0,

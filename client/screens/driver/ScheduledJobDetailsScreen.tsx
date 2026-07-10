@@ -475,7 +475,7 @@ export default function ScheduledJobDetailsScreen() {
               (() => {
                 const driverFare = booking.driver_fare != null
                   ? Number(booking.driver_fare)
-                  : Number(booking.estimated_fare || 0) + Number(booking.discount_amount || 0);
+                  : Number(booking.estimated_fare || 0);
                 return driverFare > 0 ? `£${driverFare.toFixed(2)}` : 'N/A';
               })()
             }</Text>

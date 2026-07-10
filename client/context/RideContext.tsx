@@ -1185,12 +1185,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
             // Update farePrice if the server sent a totalFare (includes waiting charges)
             const serverTotalFare = Number((update as any).totalFare || 0);
             const waitingCharge = Number((update as any).waitingCharge || 0);
-            const finalFarePrice = serverTotalFare > 0 ? serverTotalFare : ride.farePrice;
+            const discountAmt = Math.max(0, Number(ride.discountAmount || 0));
+            const discountedBase = Math.max(0, Number(ride.farePrice || 0) - discountAmt);
+            const finalFarePrice = serverTotalFare > 0
+              ? serverTotalFare
+              : Number((discountedBase + waitingCharge).toFixed(2));
 
             // Persist final ride to history
             const finalRide: Ride = {
               ...ride,
               farePrice: finalFarePrice,
+              discountAmount: discountAmt,
+              discountedFare: finalFarePrice,
               status: (update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") ? "cancelled"
                 : update.status === "payment_collected" ? "completed"
                   : (update.status as RideStatus),
@@ -1236,7 +1242,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
             if (update.status === "completed" || update.status === "payment_collected") {
               // ✅ Use Number() to safely call toFixed — farePrice can be a string after AsyncStorage round-trip
-              const fareStr = `£${Number(ride.farePrice || 0).toFixed(2)}`;
+              const fareStr = `£${Number(finalFarePrice || 0).toFixed(2)}`;
               sendLocalNotification(
                 "✅ Trip Completed",
                 `Your ride has been completed. Fare: ${fareStr}`,
@@ -1441,7 +1447,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
           },
           rideType: (r.vehicleType || 'saloon') as RideType,
           status: r.status as RideStatus,
-          farePrice: r.finalPrice || r.estimatedPrice || 0,
+          farePrice: typeof r.finalPrice === 'number' && r.finalPrice > 0
+            ? r.finalPrice
+            : Math.max(0, Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0)),
+          discountAmount: Number(r.discountAmount || 0),
+          discountedFare: typeof r.finalPrice === 'number' && r.finalPrice > 0
+            ? r.finalPrice
+            : Math.max(0, Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0)),
           distanceKm: r.distance || 0,
           durationMinutes: r.estimatedDuration || 0,
           driverName: r.driverName || undefined,

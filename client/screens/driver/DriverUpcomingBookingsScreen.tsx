@@ -82,7 +82,7 @@ function UpcomingBookingCard({
 }) {
   const fareValue = item.driver_fare != null
     ? Number(item.driver_fare)
-    : Number(item.estimated_fare || 0) + Number(item.discount_amount || 0);
+    : Number(item.estimated_fare || 0);
   const fareStr = fareValue > 0
     ? `£${fareValue.toFixed(2)}`
     : 'N/A';

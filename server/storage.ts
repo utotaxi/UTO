@@ -227,6 +227,8 @@ function toCamelRide(row: Ride) {
     dropoffLongitude: row.dropoff_longitude,
     estimatedPrice: row.estimated_price,
     finalPrice: row.final_price,
+    discountAmount: (row as any).discount_amount || 0,
+    couponCode: (row as any).coupon_code || null,
     estimatedDuration: row.estimated_duration,
     distance: row.distance,
     paymentStatus: row.payment_status,

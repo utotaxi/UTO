@@ -14,6 +14,7 @@ import {
   formatLiveRideCancellationPenalty,
   isCancellationCreditDeduction,
 } from "@shared/driverDeductions";
+import { getDiscountedFare, getDriverCancelPenalty } from "@shared/fare";
 
 export interface DriverProfile {
   id?: string;
@@ -103,6 +104,7 @@ export interface RideRequest {
   paymentMethod?: string;
   walletDeduction?: number;
   expectedCollectAmount?: number;
+  discountAmount?: number;
   cancelled_by?: string | null;
 }
 
@@ -161,6 +163,12 @@ const ONLINE_STATUS_KEY = "@uto_online_status";
 const ACTIVE_RIDE_KEY = "@uto_active_ride";
 
 function mapRidePayload(ride: any): RideRequest {
+  const discountAmount = Math.max(0, Number(ride.discountAmount ?? ride.discount_amount ?? 0));
+  // Prefer full pre-discount amount from estimatedPrice when present; farePrice may already be payable.
+  const fullFare = Number(
+    ride.estimatedPrice ?? ride.estimated_price ?? ride.farePrice ?? ride.fare_price ?? 0
+  );
+  const payableFare = getDiscountedFare(fullFare, discountAmount);
   return {
     id: ride.id,
     riderName: ride.riderName || ride.rider_name || "Rider",
@@ -171,7 +179,7 @@ function mapRidePayload(ride: any): RideRequest {
     pickupLongitude: ride.pickupLongitude || ride.pickup_longitude || ride.pickupLocation?.longitude || 0,
     dropoffLatitude: ride.dropoffLatitude || ride.dropoff_latitude || ride.dropoffLocation?.latitude || 0,
     dropoffLongitude: ride.dropoffLongitude || ride.dropoff_longitude || ride.dropoffLocation?.longitude || 0,
-    estimatedFare: ride.estimatedPrice || ride.estimated_price || ride.farePrice || ride.fare_price || 0,
+    estimatedFare: payableFare,
     distanceMiles: ride.distance || ride.distanceMiles || ride.distance_miles || ride.distanceKm || ride.distance_km || 0,
     durationMinutes: ride.estimatedDuration || ride.estimated_duration || ride.durationMinutes || ride.duration_minutes || 0,
     pickupDistance: ride.pickupDistance || 0,
@@ -181,7 +189,8 @@ function mapRidePayload(ride: any): RideRequest {
     expectedCollectAmount:
       ride.expectedCollectAmount !== undefined
         ? ride.expectedCollectAmount
-        : (ride.estimatedPrice || ride.farePrice || 0),
+        : payableFare,
+    discountAmount,
   };
 }
 
@@ -618,17 +627,23 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             (r.status === 'cancelled' && (r.paymentStatus === 'no_show_card_charged' || r.paymentStatus === 'no_show_wallet_charged' || r.paymentStatus === 'no_show_fee')) ||
             r.status === 'payment_collected'
           );
-          const serverTrips: Trip[] = completedRides.map((r: any) => ({
+          const serverTrips: Trip[] = completedRides.map((r: any) => {
+            const discount = Math.max(0, Number(r.discountAmount || 0));
+            const payable = typeof r.finalPrice === "number" && r.finalPrice > 0
+              ? r.finalPrice
+              : getDiscountedFare(r.estimatedPrice || 0, discount);
+            return {
             id: r.id,
             riderName: r.riderName || "Rider",
             pickupAddress: r.pickupAddress,
             dropoffAddress: r.dropoffAddress,
-            farePrice: typeof r.finalPrice === 'number' && r.finalPrice > 0 ? r.finalPrice : (r.estimatedPrice || 0),
+            farePrice: payable,
             distanceMiles: r.distance || 0,
             durationMinutes: r.estimatedDuration || 0,
             completedAt: normalizeBackendTimestamp(r.completedAt || r.requestedAt || new Date().toISOString()),
             rating: r.driverRating || undefined,
-          }));
+          };
+          });
           setTripHistory(serverTrips);
           await AsyncStorage.setItem(TRIP_HISTORY_KEY, JSON.stringify(serverTrips));
           console.log("✅ Driver trips synced from Supabase count:", serverTrips.length);
@@ -661,9 +676,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                 // Use the fee stored in the database
                 feeAmount = Number(ride.cancellation_fee);
               } else if (ride.paymentStatus && ride.paymentStatus.includes('cancellation')) {
-                // If it's a cancellation payment status, calculate fee (50% of estimated price)
-                if (ride.paymentStatus === 'cancellation_fee_wallet_charged') feeAmount = Number(((ride.estimatedPrice || 0) * 1).toFixed(2))
-                else feeAmount = Number(((ride.estimatedPrice || 0) * 0.5).toFixed(2));
+                // If it's a cancellation payment status, calculate fee (50% of discounted fare)
+                if (ride.paymentStatus === 'cancellation_fee_wallet_charged') {
+                  feeAmount = getDiscountedFare(ride.estimatedPrice || 0, ride.discountAmount || 0);
+                } else {
+                  feeAmount = getDriverCancelPenalty(ride.estimatedPrice || 0, ride.discountAmount || 0);
+                }
               }
 
               if (feeAmount > 0) {
@@ -1013,7 +1031,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         }
 
         if (isAtPickup && activeRideRequest.estimatedFare > 0) {
-          const penaltyAmount = Number((activeRideRequest.estimatedFare * 0.5).toFixed(2));
+          const penaltyAmount = getDriverCancelPenalty(
+            activeRideRequest.estimatedFare,
+            0, // estimatedFare is already the discounted payable amount
+          );
           const penaltyLabel = formatLiveRideCancellationPenalty(activeRideRequest.id);
           const localDeduction: DriverDeduction = {
             id: `local_cancel_${activeRideRequest.id}`,

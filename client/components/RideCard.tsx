@@ -156,7 +156,7 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
             </Pressable>
           )}
           <ThemedText style={[styles.price, { color: isDark ? "#FFFFFF" : theme.text }]}>
-            {formatPrice(ride.farePrice)}
+            {formatPrice(Number(ride.discountedFare ?? ride.farePrice ?? 0))}
           </ThemedText>
         </View>
       </View>

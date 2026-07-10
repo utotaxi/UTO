@@ -2230,6 +2230,7 @@ import { EventEmitter } from "events";
 import { capturePaymentIntent, chargeSavedCard, releaseAuthorization } from "./stripe";
 import { DEFAULT_DRIVER_RADIUS_MILES, haversineDistanceMiles } from "../server/services/driverMatching";
 import { DRIVER_DEDUCTION_TYPE, formatLiveRideCancellationPenalty } from "../shared/driverDeductions";
+import { getDiscountedFare, getDriverCancelPenalty } from "../shared/fare";
 import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 
 export const serverRideEmitter = new EventEmitter();
@@ -2523,7 +2524,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
       latitude: ride.dropoff_latitude || 0,
       longitude: ride.dropoff_longitude || 0,
     },
-    farePrice: Number(ride.estimated_price || ride.final_price || 0),
+    farePrice: getDiscountedFare(
+      Number(ride.estimated_price || ride.final_price || 0),
+      Number(ride.discount_amount || 0),
+    ),
+    estimatedPrice: Number(ride.estimated_price || ride.final_price || 0),
     distanceMiles: Number(ride.distance || 0),
     durationMinutes: Number(ride.estimated_duration || 0),
     couponCode: ride.coupon_code || null,
@@ -2654,9 +2659,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     state.currentDriverId = entry.driverId;
 
-    // Annotate ride data with the actual distances so the driver sees it
+    // Annotate ride data with the actual distances so the driver sees it.
+    // farePrice = coupon-adjusted payable; estimatedPrice kept as full for math.
+    const fullFare = Number(state.rideData?.farePrice || state.rideData?.estimatedPrice || 0);
+    const discountAmt = Math.max(0, Number(state.rideData?.discountAmount || 0));
+    const payableFare = getDiscountedFare(fullFare, discountAmt);
     const enrichedRide = {
       ...state.rideData,
+      farePrice: payableFare,
+      estimatedPrice: fullFare,
+      discountAmount: discountAmt,
       pickupDistance: Math.round(entry.distance * 100) / 100,   // in miles, 2 decimals
       _dispatchedTo: entry.driverId, // private marker
     };
@@ -3215,7 +3227,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
       dropoff_address: rideData.dropoffLocation?.address || "Unknown",
       dropoff_latitude: rideData.dropoffLocation?.latitude || 0,
       dropoff_longitude: rideData.dropoffLocation?.longitude || 0,
-      estimated_price: rideData.farePrice || 0,
+      estimated_price: rideData.farePrice || rideData.estimatedPrice || 0,
+      discount_amount: rideData.discountAmount || 0,
       distance: Math.round(parseFloat(rideData.distanceMiles || 0)),
       estimated_duration: Math.round(parseFloat(rideData.durationMinutes || 0)),
       payment_method: rideData.paymentMethod || "card",
@@ -3275,8 +3288,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
       }
     } catch (_) { /* non-critical */ }
 
+    const schedFullFare = Number(rideData.farePrice || rideData.estimatedPrice || 0);
+    const schedDiscount = Math.max(0, Number(rideData.discountAmount || 0));
+    const schedPayable = getDiscountedFare(schedFullFare, schedDiscount);
     const enrichedRide = {
       ...rideData,
+      farePrice: schedPayable,
+      estimatedPrice: schedFullFare,
+      discountAmount: schedDiscount,
       pickupDistance,
       scheduledPreAccepted: true,
       acceptedAt,
@@ -3432,8 +3451,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
       for (const [rideId, state] of dispatchQueues.entries()) {
         if (state.cancelled || state.currentDriverId !== connectedDriverId) continue;
 
+        const reconnectFull = Number(state.rideData?.farePrice || state.rideData?.estimatedPrice || 0);
+        const reconnectDiscount = Math.max(0, Number(state.rideData?.discountAmount || 0));
+        const reconnectPayable = getDiscountedFare(reconnectFull, reconnectDiscount);
         const enrichedRide = {
           ...state.rideData,
+          farePrice: reconnectPayable,
+          estimatedPrice: reconnectFull,
+          discountAmount: reconnectDiscount,
           _dispatchedTo: connectedDriverId,
         };
 
@@ -3672,8 +3697,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
         if (ride) {
           const actualDriverId =
             await resolveDriverTableId(data.driverId || getDriverIdForSocket(socket.id) || ride.driver_id);
-          const fare = ride.estimated_price || 0;
-          const penaltyAmount = Number((fare * 0.5).toFixed(2));
+          // Penalty is 50% of the discounted (payable) fare when a coupon was applied.
+          const penaltyAmount = getDriverCancelPenalty(
+            ride.estimated_price || 0,
+            (ride as any).discount_amount || 0,
+          );
           const deductionAmount = -Math.abs(penaltyAmount);
 
           if (data.applyPenalty && penaltyAmount > 0 && actualDriverId) {
@@ -4045,12 +4073,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
               updateData.cancellation_reason = update.earlyCompletionReason.trim();
             }
 
-            // Store waiting charge and final price if sent by the driver client
+            // Waiting charge from driver client; final_price is set below from discounted fare + waiting.
             const waitingCharge = (update as any).waitingCharge || 0;
             const clientTotalFare = (update as any).totalFare || 0;
-            if (clientTotalFare > 0) {
-              updateData.final_price = clientTotalFare;
-              console.log(`💰 Completion includes waiting charge: £${waitingCharge}, totalFare: £${clientTotalFare}`);
+            if (waitingCharge > 0 || clientTotalFare > 0) {
+              console.log(`💰 Completion waiting charge: £${waitingCharge}, client totalFare: £${clientTotalFare}`);
             }
             // (arrived timer clear logic removed as it's now client-side)
 
@@ -4067,14 +4094,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const waitingChargeAmt = Number(waitingCharge || 0);
               const rideInfo = activeRides.get(update.rideId);
               const walletDeduction = Math.max(0, Number(rideInfo?.rideData?.walletDeduction || 0));
-              // Rider pays discounted fare (+ waiting), minus any wallet balance applied at booking.
-              const completedFare = Number(
-                (
-                  clientTotalFare > 0
-                    ? Math.max(0, clientTotalFare - discount - walletDeduction)
-                    : Math.max(0, (completedRide?.final_price || fullFare) - discount - walletDeduction) + waitingChargeAmt
-                ).toFixed(2)
-              );
+              // Payable fare is always the coupon-adjusted amount (+ waiting).
+              // Do not trust clientTotalFare for the base (it may already be discounted).
+              const payableBase = getDiscountedFare(fullFare, discount);
+              const finalPayable = Number((payableBase + waitingChargeAmt).toFixed(2));
+              const completedFare = Number(Math.max(0, finalPayable - walletDeduction).toFixed(2));
+              // Persist the coupon-adjusted final so history/earnings stay consistent.
+              updateData.final_price = finalPayable;
               const paymentStatus = String(completedRide?.payment_status || "").toLowerCase();
               const alreadyCaptured = new Set([
                 "prepaid",
@@ -4524,15 +4550,24 @@ export function setupSocketIO(httpServer: HTTPServer) {
             }
 
             if (rideData) {
-              const fareAmount = rideData.final_price || rideData.estimated_price || 0;
+              const discount = Math.max(0, Number((rideData as any).discount_amount || 0));
+              const waitingFromClient = Number((update as any).waitingCharge || 0);
+              // Driver earns the coupon-adjusted fare (+ waiting). Prefer persisted final_price.
+              const fareAmount = Number(
+                (
+                  rideData.final_price != null && Number(rideData.final_price) > 0
+                    ? Number(rideData.final_price)
+                    : getDiscountedFare(rideData.estimated_price || 0, discount) + waitingFromClient
+                ).toFixed(2)
+              );
 
-              // Set final_price if not already set
-              if (!rideData.final_price && rideData.estimated_price) {
+              // Set final_price to the discounted payable amount if not already set
+              if (!rideData.final_price || Number(rideData.final_price) <= 0) {
                 await supabase
                   .from("rides")
-                  .update({ final_price: rideData.estimated_price })
+                  .update({ final_price: fareAmount })
                   .eq("id", update.rideId);
-                console.log(`✅ Set final_price=${rideData.estimated_price} for ride ${update.rideId}`);
+                console.log(`✅ Set final_price=${fareAmount} for ride ${update.rideId}`);
               }
 
               // Update driver total_earnings AND total_rides
@@ -4555,7 +4590,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 if (earningsErr) {
                   console.error("❌ Failed to update driver earnings:", earningsErr);
                 } else {
-                  console.log(`✅ Driver ${rideData.driver_id} earnings updated: +£${fareAmount} (total: £${newEarnings})`);
+                  console.log(`✅ Driver ${rideData.driver_id} earnings updated: +£${fareAmount}${discount > 0 ? ` (after £${discount.toFixed(2)} coupon)` : ""} (total: £${newEarnings})`);
                 }
               } else {
                 console.warn(`⚠️ Ride ${update.rideId} completed but driver_id=${rideData.driver_id}, fareAmount=${fareAmount} — skipping earnings update`);
@@ -4570,7 +4605,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                       ride_id: update.rideId,
                       amount: fareAmount,
                       type: "debit",
-                      description: "Ride fare — paid by card",
+                      description: discount > 0
+                        ? `Ride fare — paid by card (£${discount.toFixed(2)} coupon applied)`
+                        : "Ride fare — paid by card",
                     });
                   if (walletTxnErr) {
                     console.warn("⚠️ Failed to insert ride fare wallet_transaction:", walletTxnErr.message);
@@ -4633,11 +4670,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
         const fareAmount = Number(rideRow.estimated_price || 0);
         const discount = Math.max(0, Number(rideRow.discount_amount || 0));
-        // Rider is charged the discounted amount; driver earnings use full fare below.
-        const riderChargeAmount = Number(Math.max(0, fareAmount - discount).toFixed(2));
+        // Rider charge and driver earnings both use the discounted amount.
+        const riderChargeAmount = getDiscountedFare(fareAmount, discount);
         const ridePaymentMethod = rideRow.payment_method || "card";
 
-        console.log(`💳 No-show: ride ${data.rideId} payment_method=${ridePaymentMethod}, riderCharge=£${riderChargeAmount}, driverFare=£${fareAmount}`);
+        console.log(`💳 No-show: ride ${data.rideId} payment_method=${ridePaymentMethod}, payable=£${riderChargeAmount}${discount > 0 ? ` (after £${discount.toFixed(2)} coupon)` : ""}`);
 
         // ─── 2. Charge the rider's saved card via Stripe ────────────────────
         let stripeChargeSuccess = false;
@@ -4777,7 +4814,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 .insert({
                   user_id: rideRow.rider_id,
                   ride_id: data.rideId,
-                  amount: fareAmount,
+                  amount: riderChargeAmount,
                   type: "debit",
                   description: `No-show cancellation fee — charged to saved card`,
                 });
@@ -4785,8 +4822,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
           }
         }
 
-        // ─── 5b. Credit driver's earnings with the no-show fee ────────────────
-        if (rideRow.driver_id && fareAmount > 0) {
+        // ─── 5b. Credit driver's earnings with the no-show fee (discounted fare) ────────────────
+        if (rideRow.driver_id && riderChargeAmount > 0) {
           try {
             const { data: driverData } = await supabase
               .from("drivers")
@@ -4795,14 +4832,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
               .single();
 
             const currentEarnings = driverData?.total_earnings || 0;
-            const newEarnings = Number((currentEarnings + fareAmount).toFixed(2));
+            const newEarnings = Number((currentEarnings + riderChargeAmount).toFixed(2));
 
             await supabase
               .from("drivers")
               .update({ total_earnings: newEarnings })
               .eq("id", rideRow.driver_id);
 
-            console.log(`✅ Driver ${rideRow.driver_id} earnings updated for no-show: +£${fareAmount} (total: £${newEarnings})`);
+            console.log(`✅ Driver ${rideRow.driver_id} earnings updated for no-show: +£${riderChargeAmount} (total: £${newEarnings})`);
           } catch (earningsErr) {
             console.error("❌ Error updating driver earnings on no-show:", earningsErr);
           }
@@ -4812,7 +4849,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         io.to(`rider:${rideRow.rider_id}`).emit("ride:update", {
           rideId: data.rideId,
           status: "cancelled_no_show",
-          noShowFare: fareAmount,
+          noShowFare: riderChargeAmount,
           chargedVia: stripeChargeSuccess ? "card" : "wallet",
         });
 
@@ -4822,16 +4859,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
           io.to(rInfo.driverSocketId).emit("ride:update", {
             rideId: data.rideId,
             status: "cancelled_no_show",
-            noShowFare: fareAmount,
-            earningsAdded: fareAmount,
+            noShowFare: riderChargeAmount,
+            earningsAdded: riderChargeAmount,
           });
         }
         if (rideRow.driver_id) {
           io.to(`driver:${rideRow.driver_id}`).emit("ride:update", {
             rideId: data.rideId,
             status: "cancelled_no_show",
-            noShowFare: fareAmount,
-            earningsAdded: fareAmount,
+            noShowFare: riderChargeAmount,
+            earningsAdded: riderChargeAmount,
           });
         }
 
