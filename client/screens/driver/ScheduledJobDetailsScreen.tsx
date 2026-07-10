@@ -515,10 +515,16 @@ export default function ScheduledJobDetailsScreen() {
             </View>
             <Text style={s.fareText}>{
               (() => {
-                const driverFare = booking.driver_fare != null
-                  ? Number(booking.driver_fare)
-                  : Number(booking.estimated_fare || 0);
-                return driverFare > 0 ? `£${driverFare.toFixed(2)}` : 'N/A';
+                const discount = Math.max(0, Number(booking.discount_amount || 0));
+                const driverFare = Number(booking.driver_fare);
+                const estimated = Number(booking.estimated_fare);
+                const fareValue =
+                  (Number.isFinite(driverFare) && driverFare > 0)
+                    ? driverFare
+                    : (Number.isFinite(estimated) && estimated > 0)
+                      ? estimated
+                      : Math.max(0, Number(booking.full_fare || booking.fare || 0) - discount);
+                return fareValue > 0 ? `£${fareValue.toFixed(2)}` : 'N/A';
               })()
             }</Text>
           </View>

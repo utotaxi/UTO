@@ -374,6 +374,54 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     };
   }, [driverProfile?.id, user?.id]);
 
+  // New marketplace bookings → local notification for all drivers
+  useEffect(() => {
+    let socket: ReturnType<typeof getSocket>;
+    try {
+      socket = getSocket();
+    } catch {
+      return;
+    }
+
+    const seen = new Set<string>();
+    const onMarketplace = (payload: any) => {
+      const booking = payload?.booking || payload;
+      if (!booking?.id) return;
+      if (payload?.type && payload.type !== "created") return;
+      const assigned = booking.assigned_driver_id || booking.driver_id;
+      if (assigned) return;
+      const key = String(booking.id);
+      if (seen.has(key)) return;
+      seen.add(key);
+      setTimeout(() => seen.delete(key), 60_000);
+
+      const fare = Number(booking.driver_fare || booking.estimated_fare || 0);
+      const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : "";
+      playRideAlert();
+      sendLocalNotification(
+        "🗓 New Scheduled Ride",
+        `A booking has been scheduled${fareLabel}. Open Marketplace to pick up ride ${booking.id}.`,
+        {
+          type: "scheduled_marketplace_created",
+          bookingId: String(booking.id),
+          rideId: String(booking.id),
+          target: "Marketplace",
+          screen: "Marketplace",
+        },
+      );
+    };
+
+    socket.on("later-booking:marketplace", onMarketplace);
+    const onUpdate = (payload: any) => {
+      if (payload?.type === "created") onMarketplace(payload);
+    };
+    socket.on("later-booking:update", onUpdate);
+    return () => {
+      socket.off("later-booking:marketplace", onMarketplace);
+      socket.off("later-booking:update", onUpdate);
+    };
+  }, []);
+
   const handleRidePayload = useCallback((ride: any) => {
     const mappedRequest = mapRidePayload(ride);
 

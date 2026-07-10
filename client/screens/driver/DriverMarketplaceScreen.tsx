@@ -99,9 +99,16 @@ function BookingCard({
     return v.charAt(0).toUpperCase() + v.slice(1);
   };
 
-  const fareValue = item.driver_fare != null
-    ? Number(item.driver_fare)
-    : Number(item.estimated_fare || 0);
+  const fareValue = (() => {
+    const discount = Math.max(0, Number(item.discount_amount || 0));
+    const driverFare = Number(item.driver_fare);
+    const estimated = Number(item.estimated_fare);
+    if (Number.isFinite(driverFare) && driverFare > 0) return driverFare;
+    if (Number.isFinite(estimated) && estimated > 0) return estimated;
+    const full = Number((item as any).full_fare || (item as any).fare || 0);
+    if (Number.isFinite(full) && full > 0) return Math.max(0, full - discount);
+    return 0;
+  })();
   const fareStr = fareValue > 0 ? `£${fareValue.toFixed(2)}` : 'N/A';
 
   return (

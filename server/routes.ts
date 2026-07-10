@@ -23,6 +23,7 @@ import {
 } from "../shared/driverDeductions";
 import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 import { supabase } from "./db";
+import { getDiscountedFare } from "../shared/fare";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
@@ -1810,8 +1811,9 @@ const resolveDriverPushToken = async (driverIdOrUserId: string): Promise<{
 const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
   try {
     // Only broadcast marketplace offers for unassigned bookings.
-    if (booking?.assigned_driver_id || booking?.driver_id) {
-      console.warn(`⚠️ Skipping marketplace notify for ${booking?.id} — still assigned`);
+    const assignedId = booking?.assigned_driver_id || booking?.driver_id;
+    if (assignedId) {
+      console.warn(`⚠️ Skipping marketplace notify for ${booking?.id} — still assigned to ${assignedId}`);
       return false;
     }
 
@@ -1820,31 +1822,49 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
       .select("user_id")
       .not("user_id", "is", null);
     const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
-    if (driverUserIds.length === 0) return false;
+    if (driverUserIds.length === 0) {
+      console.warn(`⚠️ Marketplace notify: no drivers with user_id for booking ${booking?.id}`);
+      return false;
+    }
 
     const { data: driverUsers } = await sb
       .from("users")
       .select("id, push_token")
       .in("id", driverUserIds);
+    const tokens = (driverUsers || []).filter((row: any) => row.push_token);
+    if (tokens.length === 0) {
+      console.warn(`⚠️ Marketplace notify: no push tokens for booking ${booking?.id}`);
+      return false;
+    }
+
     const title = "🗓 New Scheduled Ride";
     const riderLabel = booking?.rider_name || booking?.customer_name || booking?.passenger_name || "rider";
-    const body = `A booking has been scheduled by ${riderLabel}. Open Marketplace to pick up ride ${booking.id}.`;
+    const { payable } = resolveBookingPayableFare(booking);
+    const fareLabel = payable > 0 ? ` — £${payable.toFixed(2)}` : "";
+    const body = `A booking has been scheduled by ${riderLabel}${fareLabel}. Open Marketplace to pick up ride ${booking.id}.`;
+
+    // Socket first so online drivers refresh marketplace immediately
+    try {
+      io.emit("later-booking:update", { type: "created", booking });
+      io.emit("later-booking:marketplace", { type: "created", booking });
+    } catch (socketErr) {
+      console.warn(`⚠️ Marketplace socket emit failed for ${booking?.id}:`, socketErr);
+    }
+
     const results = await Promise.all(
-      (driverUsers || [])
-        .filter((row: any) => row.push_token)
-        .map((row: any) =>
-          sendExpoPushNotification(row.push_token, title, body, {
-            type: "scheduled_marketplace_created",
-            bookingId: booking.id,
-            rideId: booking.id,
-            sourceTable: booking.source_table || booking.sourceTable || null,
-            target: "Marketplace",
-            screen: "Marketplace",
-          }, { channelId: "ride-requests", ttlSeconds: 600 }),
-        ),
+      tokens.map((row: any) =>
+        sendExpoPushNotification(row.push_token, title, body, {
+          type: "scheduled_marketplace_created",
+          bookingId: booking.id,
+          rideId: booking.id,
+          sourceTable: booking.source_table || booking.sourceTable || null,
+          target: "Marketplace",
+          screen: "Marketplace",
+        }, { channelId: "ride-requests", ttlSeconds: 600 }),
+      ),
     );
     const sent = results.filter(Boolean).length;
-    console.log(`📲 Marketplace push for booking ${booking.id}: ${sent} driver(s) notified`);
+    console.log(`📲 Marketplace push for booking ${booking.id}: ${sent}/${tokens.length} driver(s) notified`);
     return sent > 0;
   } catch (notifyErr) {
     console.warn("⚠️ Failed to notify drivers about scheduled booking:", notifyErr);
@@ -1993,9 +2013,11 @@ const announceExternalMarketplaceBookings = async () => {
     if (announcedMarketplaceBookingKeys.has(bookingKey)) continue;
 
     const enrichedBooking = stripPinForDrivers((await attachRiderDetails([booking]))[0] || booking);
-    await notifyDriversAboutMarketplaceBooking(enrichedBooking);
-    io.emit("later-booking:update", { type: "created", booking: enrichedBooking });
-    announcedMarketplaceBookingKeys.add(bookingKey);
+    const pushSent = await notifyDriversAboutMarketplaceBooking(enrichedBooking);
+    // Only mark announced after a successful push so we keep retrying.
+    if (pushSent) {
+      announcedMarketplaceBookingKeys.add(bookingKey);
+    }
   }
 
   for (const key of Array.from(announcedMarketplaceBookingKeys)) {
@@ -2060,6 +2082,58 @@ const toFiniteNumber = (value: any): number | null => {
   return Number.isFinite(num) ? num : null;
 };
 
+/**
+ * Payable fare for marketplace / upcoming / driver earnings.
+ * App bookings store estimated_fare as already-discounted payable.
+ * Some web_booker / admin rows store full fare + discount_amount.
+ */
+const resolveBookingPayableFare = (booking: any): { payable: number; discount: number; full: number } => {
+  const discount = Math.max(0, Number(booking?.discount_amount ?? booking?.discountAmount ?? 0));
+  const estimated = toFiniteNumber(booking?.estimated_fare);
+  const altFull = toFiniteNumber(booking?.estimated_price ?? booking?.fare ?? booking?.full_fare ?? booking?.original_fare);
+  const driverFareCol = toFiniteNumber(booking?.driver_fare);
+
+  // Explicit driver_fare column when positive
+  if (driverFareCol != null && driverFareCol > 0 && discount <= 0) {
+    return { payable: driverFareCol, discount: 0, full: driverFareCol };
+  }
+
+  // App pattern: estimated_fare is payable, discount stored separately
+  // (activation engine reconstructs full as estimated_fare + discount_amount).
+  if (estimated != null && estimated > 0) {
+    if (altFull != null && altFull > estimated + 0.009 && discount > 0) {
+      // estimated is payable, alt is full
+      return { payable: estimated, discount, full: altFull };
+    }
+    if (discount > 0 && altFull != null && Math.abs(altFull - estimated) < 0.009) {
+      // estimated equals full fare field → subtract discount
+      const payable = getDiscountedFare(estimated, discount);
+      return { payable, discount, full: estimated };
+    }
+    // Default: estimated_fare is the payable amount (with or without coupon)
+    return {
+      payable: estimated,
+      discount,
+      full: discount > 0 ? Number((estimated + discount).toFixed(2)) : estimated,
+    };
+  }
+
+  if (altFull != null && altFull > 0) {
+    const payable = getDiscountedFare(altFull, discount);
+    return { payable, discount, full: altFull };
+  }
+
+  if (driverFareCol != null && driverFareCol > 0) {
+    return {
+      payable: getDiscountedFare(driverFareCol, discount),
+      discount,
+      full: driverFareCol,
+    };
+  }
+
+  return { payable: 0, discount, full: 0 };
+};
+
 const normalizeLaterBooking = (
   booking: any,
   sourceTable: "later_bookings" | "web_booker",
@@ -2075,9 +2149,9 @@ const normalizeLaterBooking = (
       : (pendingAssignedId || acceptedDriverId);
   const storedFare = Number(booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? 0);
   const discountAmount = Math.max(0, Number(booking?.discount_amount ?? 0));
-  // estimated_fare is the rider-facing (discounted) amount stored at booking.
-  // Drivers see and earn the same coupon-adjusted fare.
-  const riderFare = Number.isFinite(storedFare) ? storedFare : 0;
+  const { payable: payableFare, discount: resolvedDiscount, full: fullFare } = resolveBookingPayableFare(booking);
+  // estimated_fare / driver_fare exposed to drivers = coupon-adjusted payable only.
+  const riderFare = payableFare > 0 ? payableFare : (Number.isFinite(storedFare) ? storedFare : 0);
   const driverFare = riderFare;
 
   // Prefer passenger/customer fields stored on the booking row (later_bookings /
@@ -2153,9 +2227,10 @@ const normalizeLaterBooking = (
     dropoff_address: dropoffAddress,
     pickup_at: booking?.pickup_at ?? booking?.scheduled_time ?? booking?.scheduled_pickup_time ?? booking?.pickup_time ?? booking?.pickup_datetime ?? null,
     dropoff_by: booking?.dropoff_by ?? booking?.dropoff_time ?? booking?.dropoff_datetime ?? null,
-    estimated_fare: riderFare > 0 ? riderFare : (booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null),
-    discount_amount: discountAmount,
-    driver_fare: driverFare > 0 ? driverFare : (booking?.estimated_fare ?? booking?.estimated_price ?? booking?.fare ?? null),
+    estimated_fare: riderFare > 0 ? riderFare : null,
+    discount_amount: resolvedDiscount > 0 ? resolvedDiscount : discountAmount,
+    full_fare: fullFare > 0 ? fullFare : null,
+    driver_fare: driverFare > 0 ? driverFare : null,
     vehicle_type: normalizeVehicleType(booking?.vehicle_type ?? booking?.ride_type ?? booking?.vehicleType ?? booking?.car_type),
     booking_type: firstNonEmpty(booking?.booking_type, booking?.service_type, booking?.type) || "standard",
     is_round_trip: !!(booking?.is_round_trip ?? booking?.round_trip ?? booking?.return_trip),
@@ -2533,17 +2608,26 @@ app.post("/api/later-bookings", async (req: Request, res: Response) => {
     }
 
     // Notify all drivers that a new marketplace booking is available.
-    await notifyDriversAboutMarketplaceBooking({
-      ...data,
-      source_table: "later_bookings",
-      rider_name: rider.fullName || "rider",
-    });
-    announcedMarketplaceBookingKeys.add(`later_bookings:${data.id}`);
+    const createdBooking = stripPinForDrivers(
+      normalizeLaterBooking(
+        {
+          ...data,
+          rider_name: data.rider_name || rider.fullName || null,
+          rider_phone: data.rider_phone || rider.phone || null,
+          rider_email: data.rider_email || rider.email || null,
+        },
+        "later_bookings",
+      ),
+    );
+    const marketplaceKey = `later_bookings:${data.id}`;
+    const pushSent = await notifyDriversAboutMarketplaceBooking(createdBooking);
+    if (pushSent) {
+      announcedMarketplaceBookingKeys.add(marketplaceKey);
+    } else {
+      announcedMarketplaceBookingKeys.delete(marketplaceKey);
+    }
 
-    // Broadcast without the PIN (drivers also receive this event); the rider
-    // gets the PIN in the direct response below.
-    io.emit("later-booking:update", { type: "created", booking: stripPinForDrivers(data) });
-    res.status(201).json({ booking: data });
+    res.status(201).json({ booking: { ...data, ...createdBooking, otp: data.otp } });
   } catch (error: any) {
     console.error("Create later booking error:", error);
     res.status(500).json({ error: error?.message || "Failed to create booking" });
@@ -3478,7 +3562,7 @@ setInterval(() => {
   announceExternalMarketplaceBookings().catch((err) => {
     console.error("Marketplace booking announcement engine error:", err);
   });
-}, 60 * 1000);
+}, 15 * 1000);
 
 announceExternalMarketplaceBookings().catch((err) => {
   console.error("Initial marketplace booking announcement failed:", err);
