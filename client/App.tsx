@@ -25,10 +25,11 @@ import RootStackNavigator from "@/navigation/RootStackNavigator";
 import { navigationRef } from "@/navigation/navigationRef";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { ModeProvider } from "@/context/ModeContext";
+import { ModeProvider, useMode } from "@/context/ModeContext";
 import { RideProvider } from "@/context/RideContext";
 import { DriverProvider } from "@/context/DriverContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { useNotifications, setNotificationAppMode } from "@/hooks/useNotifications";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -117,7 +118,16 @@ export default function App() {
  * error from permanently blocking the UI.
  */
 function AppShell() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const { currentMode } = useMode();
+
+  // Single push registration + listeners for the whole app (not per screen).
+  useNotifications(user?.id);
+
+  useEffect(() => {
+    setNotificationAppMode(currentMode === "driver" ? "driver" : "rider");
+  }, [currentMode]);
+
   return (
     <ErrorBoundary resetKey={isAuthenticated}>
       <NavigationContainer ref={navigationRef}>

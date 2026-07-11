@@ -1069,7 +1069,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
         data.status === "accepted"
           ? `${data.driverInfo?.driverName || "Your driver"} is getting ready for your pickup at ${activatedRide.pickupLocation.address}.`
           : `We're finding a driver for your pickup at ${activatedRide.pickupLocation.address}.`,
-        { type: "scheduled_ride_live", rideId: activatedRide.id }
+        { type: "scheduled_ride_live", rideId: activatedRide.id, audience: "rider" }
       );
     };
 
@@ -1159,7 +1159,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
             sendLocalNotification(
               "❌ No Show — Fare Charged",
               `Your driver waited at the pickup but you did not arrive. The full fare amount of £${noShowFare > 0 ? noShowFare.toFixed(2) : '0.00'} will be deducted from your account as per our No Show Policy.`,
-              { type: "no_show", rideId: update.rideId }
+              { type: "no_show", rideId: update.rideId, audience: "rider" }
             );
           }
 
@@ -1246,7 +1246,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               sendLocalNotification(
                 "✅ Trip Completed",
                 `Your ride has been completed. Fare: ${fareStr}`,
-                { type: "ride_completed", rideId: ride.id }
+                { type: "ride_completed", rideId: ride.id, audience: "rider" }
               );
               // Trigger rating prompt — set immediately so it's ready when
               // RideTrackingScreen navigates to Home (1.5s delay gives us time)
@@ -1259,7 +1259,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 update.status === "cancelled_no_drivers"
                   ? "No drivers available right now. Please try again later."
                   : "Your ride has been cancelled.",
-                { type: "ride_cancelled", rideId: ride.id }
+                { type: "ride_cancelled", rideId: ride.id, audience: "rider" }
               );
             }
           } else {
@@ -1318,19 +1318,19 @@ export function RideProvider({ children }: { children: ReactNode }) {
               sendLocalNotification(
                 "🚗 Driver Accepted!",
                 `${driverName} is on the way to pick you up.`,
-                { type: "ride_accepted", rideId: current.id }
+                { type: "ride_accepted", rideId: current.id, audience: "rider" }
               );
             } else if (update.status === "arrived") {
               sendLocalNotification(
                 "📍 Driver Has Arrived",
                 "Your driver has arrived. Please provide your PIN to start the ride.",
-                { type: "driver_arriving", rideId: current.id }
+                { type: "driver_arriving", rideId: current.id, audience: "rider" }
               );
             } else if (update.status === "in_progress") {
               sendLocalNotification(
                 "🚀 Ride Started",
                 "Your ride is now in progress. Enjoy the trip!",
-                { type: "ride_started", rideId: current.id }
+                { type: "ride_started", rideId: current.id, audience: "rider" }
               );
             }
 

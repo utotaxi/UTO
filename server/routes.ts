@@ -1738,10 +1738,9 @@ const sendExpoPushNotification = async (
 ): Promise<boolean> => {
   if (!token) return false;
   try {
-    // Default to the high-importance ride channel so Android delivers while
-    // the app is backgrounded / killed (matches ASAP dispatch pushes).
+    // Default to the soft high-importance channel (matches client uto-*-v2 channels).
     const ttlSeconds = options.ttlSeconds ?? 600;
-    const channelId = options.channelId || "ride-requests";
+    const channelId = options.channelId || "uto-ride-requests-v2";
     const pushRes = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: {
@@ -1870,10 +1869,11 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
     const { data: driverRows } = await sb
       .from("drivers")
       .select("user_id")
+      .eq("is_online", true)
       .not("user_id", "is", null);
     const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
     if (driverUserIds.length === 0) {
-      console.warn(`⚠️ Marketplace notify: no drivers with user_id for booking ${booking?.id}`);
+      console.warn(`⚠️ Marketplace notify: no online drivers for booking ${booking?.id}`);
       return false;
     }
 
@@ -1907,10 +1907,11 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
           type: "scheduled_marketplace_created",
           bookingId: booking.id,
           rideId: booking.id,
+          audience: "driver",
           sourceTable: booking.source_table || booking.sourceTable || null,
           target: "Marketplace",
           screen: "Marketplace",
-        }, { channelId: "ride-requests", ttlSeconds: 600 }),
+        }, { channelId: "uto-scheduled-v2", ttlSeconds: 600 }),
       ),
     );
     const sent = results.filter(Boolean).length;
@@ -1975,11 +1976,12 @@ const notifyDriverOfAssignedBooking = async (
         type: "scheduled_booking_assigned",
         bookingId: booking.id,
         rideId: booking.id,
+        audience: "driver",
         sourceTable: booking.source_table || null,
         target: "UpcomingBookings",
         screen: "UpcomingBookings",
       },
-      { channelId: "ride-requests", ttlSeconds: 600 },
+      { channelId: "uto-scheduled-v2", ttlSeconds: 600 },
     );
     if (ok) {
       console.log(`📲 Assignment push sent for booking ${booking.id} → driver ${driverIdOrUserId}`);
@@ -3514,11 +3516,12 @@ const triggerScheduledDriverReminders = async () => {
         type: "scheduled_booking_reminder",
         bookingId: booking.id,
         sourceTable: booking.source_table,
+        audience: "driver",
         target: "ScheduledJobDetails",
         screen: "ScheduledJobDetails",
         reminderBucket: reminderBucket.key,
       },
-      { channelId: "ride-requests", ttlSeconds: 900 },
+      { channelId: "uto-scheduled-v2", ttlSeconds: 900 },
     );
 
     scheduledReminderBucketByBooking.set(reminderKey, reminderBucket.key);
@@ -3556,6 +3559,7 @@ const triggerMarketplaceCheckReminders = async () => {
   const { data: driverRows, error: driverErr } = await sb
     .from("drivers")
     .select("user_id")
+    .eq("is_online", true)
     .not("user_id", "is", null);
 
   if (driverErr) {
@@ -3589,10 +3593,11 @@ const triggerMarketplaceCheckReminders = async () => {
           "Have you checked the marketplace?",
           {
             type: "marketplace_reminder",
+            audience: "driver",
             target: "Marketplace",
             screen: "Marketplace",
           },
-          { channelId: "ride-requests", ttlSeconds: 3600 },
+          { channelId: "uto-scheduled-v2", ttlSeconds: 3600 },
         ),
       ),
   );

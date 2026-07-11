@@ -1,13 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from "react";
-import { Alert, AppState, Platform, Vibration } from "react-native";
+import { Alert, AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Audio } from "expo-av";
 import { getSocket, connectAsDriver, goOffline, onNewRide, onRideUpdate, onRideExpired } from "@/lib/socket";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { getApiUrl } from "@/lib/query-client";
 import { normalizeBackendTimestamp } from "@/lib/dateTime";
-import { ensurePushTokenRegistered, sendLocalNotification, useNotifications } from "@/hooks/useNotifications";
+import { ensurePushTokenRegistered, sendLocalNotification } from "@/hooks/useNotifications";
+import { claimNotification, playSoftBeep } from "@/lib/notificationDedupe";
+import { useMode } from "@/context/ModeContext";
 import { onRideRequestNotification } from "@/lib/rideNotificationBridge";
 import {
   startBackgroundLocationTracking,
@@ -200,57 +201,12 @@ function mapRidePayload(ride: any): RideRequest {
 
 // Trip history is always loaded from AsyncStorage cache + refreshed from Supabase
 
-// 🔊 Play a LOUD alert sound + strong vibration when a new ride request arrives
-// The sound loops 3 times so drivers never miss an incoming ride
-const playRideAlert = async () => {
-  try {
-    // Configure audio to play at MAXIMUM volume even in silent mode
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      shouldDuckAndroid: false,
-    });
-
-    // Play the ride alert sound — loop 3 times for a longer, more noticeable alert
-    let playCount = 0;
-    const MAX_PLAYS = 3;
-
-    const { sound } = await Audio.Sound.createAsync(
-      require('../../assets/ride_alert.wav'),
-      { shouldPlay: true, volume: 1.0, isLooping: false }
-    );
-
-    // Replay the sound multiple times so the alert is longer and louder
-    sound.setOnPlaybackStatusUpdate(async (status) => {
-      if ('didJustFinish' in status && status.didJustFinish) {
-        playCount++;
-        if (playCount < MAX_PLAYS) {
-          // Replay from the beginning for the next iteration
-          try {
-            await sound.replayAsync();
-          } catch (_) {
-            sound.unloadAsync().catch(() => { });
-          }
-        } else {
-          // All iterations done — unload to free resources
-          sound.unloadAsync().catch(() => { });
-        }
-      }
-    });
-
-    // Heavy vibration pattern: ~6 seconds of strong pulses
-    // Pattern: [wait, vibrate, pause, vibrate, pause, vibrate, pause, vibrate, pause, vibrate]
-    Vibration.vibrate([0, 800, 200, 800, 200, 800, 200, 800, 200, 800], false);
-  } catch (err) {
-    console.warn('🔇 Could not play ride alert sound:', err);
-    // Fallback: at least vibrate strongly even if sound fails
-    Vibration.vibrate([0, 800, 200, 800, 200, 800, 200, 800, 200, 800], false);
-  }
-};
+// Single pleasant beep for ride / booking alerts (no looping flood).
+const playRideAlert = () => playSoftBeep();
 
 export function DriverProvider({ children }: { children: ReactNode }) {
   const { user, isLoading: authLoading } = useAuth();
+  const { currentMode } = useMode();
   const [isOnline, setIsOnlineState] = useState(false);
   const [driverProfile, setDriverProfileState] = useState<DriverProfile | null>(null);
   const [tripHistory, setTripHistory] = useState<Trip[]>([]);
@@ -333,8 +289,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline]);
 
-  // Assigned later-booking offers → local notification + sound
+  // Assigned later-booking offers → local notification + sound (driver mode only, once)
   useEffect(() => {
+    if (currentMode !== "driver") return;
     const driverIds = [driverProfile?.id, user?.id].filter(Boolean).map(String);
     if (driverIds.length === 0) return;
 
@@ -354,6 +311,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       // Only notify the assigned driver
       if (assignedIds.length > 0 && !assignedIds.some((id) => driverIds.includes(id))) return;
 
+      const dedupeKey = `scheduled_booking_assigned:${booking.id}`;
+      if (!claimNotification(dedupeKey)) return;
+
       playRideAlert();
       sendLocalNotification(
         "📋 Ride Assigned To You",
@@ -362,9 +322,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           type: "scheduled_booking_assigned",
           bookingId: String(booking.id),
           rideId: String(booking.id),
+          audience: "driver",
           target: "UpcomingBookings",
           screen: "UpcomingBookings",
         },
+        { alreadyClaimed: true, skipWhenForeground: false },
       );
     };
 
@@ -372,10 +334,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return () => {
       socket.off("later-booking:assigned", onAssigned);
     };
-  }, [driverProfile?.id, user?.id]);
+  }, [currentMode, driverProfile?.id, user?.id]);
 
-  // New marketplace bookings → local notification for all drivers
+  // New marketplace bookings → local notification for drivers only (once)
   useEffect(() => {
+    if (currentMode !== "driver") return;
+
     let socket: ReturnType<typeof getSocket>;
     try {
       socket = getSocket();
@@ -383,17 +347,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const seen = new Set<string>();
     const onMarketplace = (payload: any) => {
       const booking = payload?.booking || payload;
       if (!booking?.id) return;
       if (payload?.type && payload.type !== "created") return;
       const assigned = booking.assigned_driver_id || booking.driver_id;
       if (assigned) return;
-      const key = String(booking.id);
-      if (seen.has(key)) return;
-      seen.add(key);
-      setTimeout(() => seen.delete(key), 60_000);
+
+      const dedupeKey = `scheduled_marketplace_created:${booking.id}`;
+      if (!claimNotification(dedupeKey)) return;
 
       const fare = Number(booking.driver_fare || booking.estimated_fare || 0);
       const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : "";
@@ -405,22 +367,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           type: "scheduled_marketplace_created",
           bookingId: String(booking.id),
           rideId: String(booking.id),
+          audience: "driver",
           target: "Marketplace",
           screen: "Marketplace",
         },
+        { alreadyClaimed: true },
       );
     };
 
+    // Prefer dedicated marketplace event — do NOT also listen to later-booking:update
+    // (that was double-firing the same "created" notice).
     socket.on("later-booking:marketplace", onMarketplace);
-    const onUpdate = (payload: any) => {
-      if (payload?.type === "created") onMarketplace(payload);
-    };
-    socket.on("later-booking:update", onUpdate);
     return () => {
       socket.off("later-booking:marketplace", onMarketplace);
-      socket.off("later-booking:update", onUpdate);
     };
-  }, []);
+  }, [currentMode]);
 
   const handleRidePayload = useCallback((ride: any) => {
     const mappedRequest = mapRidePayload(ride);
@@ -449,25 +410,36 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(scheduledTrip)).catch((err) =>
         console.warn("⚠️ Failed to persist scheduled active ride:", err)
       );
-      playRideAlert();
-      sendLocalNotification(
-        "🗓 Scheduled Ride Starting",
-        `Your scheduled pickup for ${mappedRequest.riderName} at ${mappedRequest.pickupAddress} starts soon. Head to the pickup now.`,
-        { type: "scheduled_ride_live", rideId: ride.id }
-      );
+      const liveKey = `scheduled_ride_live:${ride.id}`;
+      if (claimNotification(liveKey)) {
+        playRideAlert();
+        sendLocalNotification(
+          "🗓 Scheduled Ride Starting",
+          `Your scheduled pickup for ${mappedRequest.riderName} at ${mappedRequest.pickupAddress} starts soon. Head to the pickup now.`,
+          { type: "scheduled_ride_live", rideId: ride.id, audience: "driver" },
+          { alreadyClaimed: true },
+        );
+      }
       return;
     }
 
     if (!isOnlineRef.current || activeRideRequestRef.current) return;
 
+    const isNewOffer = !activeRideRequestRef.current || activeRideRequestRef.current.id !== mappedRequest.id;
     setActiveRideRequest(mappedRequest);
     setRideState("incoming");
-    playRideAlert();
-    sendLocalNotification(
-      "🚕 New Ride Request",
-      `${ride.riderName || "A rider"} needs a ride from ${ride.pickupAddress || ride.pickup_address || "nearby"}`,
-      { type: "ride_requested", rideId: ride.id }
-    );
+
+    // Alert at most once per ride — opening the app / pending-dispatch must not re-flood.
+    const requestKey = `ride_request:${mappedRequest.id}`;
+    if (isNewOffer && claimNotification(requestKey)) {
+      playRideAlert();
+      sendLocalNotification(
+        "🚕 New Ride Request",
+        `${ride.riderName || "A rider"} needs a ride from ${ride.pickupAddress || ride.pickup_address || "nearby"}`,
+        { type: "ride_request", rideId: ride.id, audience: "driver" },
+        { alreadyClaimed: true },
+      );
+    }
   }, []);
 
   const fetchPendingDispatch = useCallback(async () => {
@@ -487,11 +459,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     }
   }, [driverProfile?.id, user?.id, handleRidePayload]);
 
-  // Register push token + notification listeners for the whole driver session
-  // (not only while DriverHomeScreen is focused).
-  useNotifications(user?.id);
+  // Push token + listeners live in AppShell (once). Driver go-online refreshes token.
 
   useEffect(() => {
+    if (currentMode !== "driver") return;
     let cleanup: (() => void) | undefined;
 
     try {
@@ -506,9 +477,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     return () => {
       if (cleanup) cleanup();
     };
-  }, [handleRidePayload]);
+  }, [currentMode, handleRidePayload]);
 
   useEffect(() => {
+    if (currentMode !== "driver") return;
     const unsubscribe = onRideRequestNotification((rideId, ride) => {
       console.log("📲 Ride request push received:", rideId);
       if (ride && (ride.id || rideId)) {
@@ -517,31 +489,34 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       fetchPendingDispatch().catch((err) => console.warn("⚠️ Pending dispatch refresh failed:", err));
     });
     return unsubscribe;
-  }, [fetchPendingDispatch, handleRidePayload]);
+  }, [currentMode, fetchPendingDispatch, handleRidePayload]);
 
   useEffect(() => {
+    if (currentMode !== "driver") return;
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
         fetchPendingDispatch().catch((err) => console.warn("⚠️ Pending dispatch refresh failed:", err));
       }
     });
     return () => subscription.remove();
-  }, [fetchPendingDispatch]);
+  }, [currentMode, fetchPendingDispatch]);
 
   useEffect(() => {
+    if (currentMode !== "driver") return;
     if (isOnline) {
       fetchPendingDispatch().catch((err) => console.warn("⚠️ Pending dispatch refresh failed:", err));
     }
-  }, [isOnline, fetchPendingDispatch]);
+  }, [currentMode, isOnline, fetchPendingDispatch]);
 
   // When online status is restored (or toggled), keep background tracking alive.
   useEffect(() => {
+    if (currentMode !== "driver") return;
     const driverId = driverProfile?.id || user?.id;
     if (!isOnline || !driverId) return;
     startBackgroundLocationTracking(driverId).catch((err) =>
       console.warn("⚠️ Failed to ensure background location while online:", err)
     );
-  }, [isOnline, driverProfile?.id, user?.id]);
+  }, [currentMode, isOnline, driverProfile?.id, user?.id]);
 
   // Listen for expired ride requests (driver missed the dispatch window)
   useEffect(() => {
@@ -598,7 +573,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               sendLocalNotification(
                 "❌ Ride Cancelled",
                 `${currentRide?.riderName || "The rider"} has cancelled the ride.`,
-                { type: "ride_cancelled", rideId: update.rideId }
+                { type: "ride_cancelled", rideId: update.rideId, audience: "driver" }
               );
 
               setActiveRideRequest(null);
@@ -1403,7 +1378,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       sendLocalNotification(
         "✅ Trip Completed",
         `Trip with ${activeRideRequest.riderName} completed. Fare: £${totalFare.toFixed(2)}${waitingCharge > 0 ? ` (incl. £${waitingCharge.toFixed(2)} waiting)` : ''}`,
-        { type: "ride_completed", rideId: activeRideRequest.id }
+        { type: "ride_completed", rideId: activeRideRequest.id, audience: "driver" }
       );
     }
     setPaidWaitingStartedAt(null);

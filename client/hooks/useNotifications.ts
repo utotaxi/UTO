@@ -1,19 +1,64 @@
 import { useState, useEffect, useRef } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import Constants from "expo-constants";
 import { getApiUrl } from "@/lib/query-client";
 import * as Notifications from "expo-notifications";
 import { navigateFromNotification } from "@/navigation/navigationRef";
 import { emitRideRequestNotification } from "@/lib/rideNotificationBridge";
+import {
+  claimNotification,
+  notificationDedupeKey,
+  wasNotificationClaimed,
+} from "@/lib/notificationDedupe";
+
+/** Updated by ModeProvider consumers so push banners respect rider vs driver mode. */
+let activeAppMode: "rider" | "driver" = "rider";
+
+export function setNotificationAppMode(mode: "rider" | "driver") {
+  activeAppMode = mode;
+}
+
+function audienceAllowed(data: Record<string, any> | undefined): boolean {
+  const audience = String(data?.audience || "").toLowerCase();
+  if (!audience) return true;
+  if (audience === "driver") return activeAppMode === "driver";
+  if (audience === "rider") return activeAppMode === "rider";
+  return true;
+}
 
 try {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
+    handleNotification: async (notification) => {
+      const data = (notification?.request?.content?.data || {}) as Record<string, any>;
+
+      if (!audienceAllowed(data)) {
+        return {
+          shouldShowBanner: false,
+          shouldShowList: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      }
+
+      const key = notificationDedupeKey(data);
+      // If we already alerted for this event (socket/local/push), suppress repeats.
+      if (key && wasNotificationClaimed(key)) {
+        return {
+          shouldShowBanner: false,
+          shouldShowList: false,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      }
+      if (key) claimNotification(key);
+
+      return {
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      };
+    },
   });
 } catch (error) {
   console.log("expo-notifications not available");
@@ -51,39 +96,39 @@ export interface NotificationData {
   target?: string;
   screen?: string;
   message?: string;
+  audience?: "driver" | "rider";
 }
 
 const ANDROID_CHANNELS = {
-  default: "default",
-  rideRequests: "ride-requests",
-  scheduled: "scheduled-bookings",
+  default: "uto-general-v2",
+  rideRequests: "uto-ride-requests-v2",
+  scheduled: "uto-scheduled-v2",
 } as const;
 
 async function ensureAndroidChannels() {
   if (Platform.OS !== "android" || !Notifications) return;
+  // New channel ids so soft settings apply (Android freezes channel config after create).
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.default, {
     name: "General",
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
+    importance: Notifications.AndroidImportance.DEFAULT,
+    vibrationPattern: [0, 120],
     lightColor: "#F7C948",
     sound: "default",
   });
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.rideRequests, {
     name: "Ride Requests",
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 500, 250, 500],
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 180],
     lightColor: "#F7C948",
     sound: "default",
-    bypassDnd: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.scheduled, {
     name: "Scheduled Bookings",
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 500, 250, 500],
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 180],
     lightColor: "#F7C948",
     sound: "default",
-    bypassDnd: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
 }
@@ -124,22 +169,19 @@ export function useNotifications(userId?: string) {
       });
 
     notificationListener.current =
-      Notifications?.addNotificationReceivedListener((notif) => {
+      Notifications.addNotificationReceivedListener((notif) => {
         setNotification(notif);
         const rawData = notif?.request?.content?.data;
         handleIncomingNotificationData(rawData);
       });
 
     responseListener.current =
-      Notifications?.addNotificationResponseReceivedListener(
-        (response) => {
-          const rawData = response?.notification?.request?.content?.data;
-
-          if (isNotificationData(rawData)) {
-            handleNotificationResponse(rawData);
-          }
+      Notifications.addNotificationResponseReceivedListener((response) => {
+        const rawData = response?.notification?.request?.content?.data;
+        if (isNotificationData(rawData)) {
+          handleNotificationResponse(rawData);
         }
-      );
+      });
 
     Notifications.getLastNotificationResponseAsync()
       .then((response) => {
@@ -148,15 +190,12 @@ export function useNotifications(userId?: string) {
           handleNotificationResponse(rawData);
         }
       })
-      .catch(() => {
-        // Non-critical; foreground listeners still handle future taps.
-      });
+      .catch(() => {});
 
     return () => {
       mounted = false;
-
-      notificationListener?.current?.remove();
-      responseListener?.current?.remove();
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
     };
   }, [userId]);
 
@@ -180,11 +219,9 @@ async function registerForPushNotifications(): Promise<string | null> {
     return null;
   }
 
-  // Android channels must exist before token registration / delivery.
   await ensureAndroidChannels();
 
-  const { status: existingStatus } =
-    await Notifications.getPermissionsAsync();
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
 
   if (existingStatus !== "granted") {
@@ -242,8 +279,15 @@ async function savePushToken(userId: string, token: string) {
 function handleIncomingNotificationData(rawData: unknown) {
   if (!rawData || typeof rawData !== "object") return;
   const data = rawData as Record<string, any>;
+  if (!audienceAllowed(data)) return;
+
+  const key = notificationDedupeKey(data);
+  if (key) claimNotification(key);
+
   const type = String(data.type || data.target || "");
   if (type === "ride_request" || type === "ride_requested") {
+    // Only drivers restore the offer UI from push.
+    if (activeAppMode !== "driver") return;
     const rideId = data.rideId ? String(data.rideId) : String(data.ride?.id || "");
     const ridePayload = data.ride && typeof data.ride === "object" ? data.ride : undefined;
     if (rideId || ridePayload) emitRideRequestNotification(rideId, ridePayload);
@@ -252,42 +296,70 @@ function handleIncomingNotificationData(rawData: unknown) {
 
 function handleNotificationResponse(data: NotificationData) {
   console.log("Notification response:", data);
+  if (!audienceAllowed(data as any)) return;
   handleIncomingNotificationData(data);
   navigateFromNotification(data);
 }
 
+export type LocalNotificationOptions = {
+  /** Skip scheduling when app is already open (UI handles it). Default false. */
+  skipWhenForeground?: boolean;
+  /** If true, caller already claimed the dedupe key. */
+  alreadyClaimed?: boolean;
+};
+
 /**
- * Schedule a local notification immediately.
- * Used when the app is awake; background delivery still relies on Expo push.
+ * Schedule a local notification at most once per event.
+ * Returns false if suppressed (duplicate / wrong audience / foreground skip).
  */
 export async function sendLocalNotification(
   title: string,
   body: string,
-  data?: Record<string, any>
-) {
+  data?: Record<string, any>,
+  options: LocalNotificationOptions = {},
+): Promise<boolean> {
   if (!Notifications) {
     console.log(`📢 [Local Notification] ${title}: ${body}`);
-    return;
+    return true;
+  }
+
+  const payload = { ...(data || {}) };
+  if (!audienceAllowed(payload)) {
+    return false;
+  }
+
+  if (options.skipWhenForeground && AppState.currentState === "active") {
+    const key = notificationDedupeKey(payload);
+    if (key) claimNotification(key);
+    return false;
+  }
+
+  const key = notificationDedupeKey(payload);
+  if (!options.alreadyClaimed && key && !claimNotification(key)) {
+    console.log(`🔇 Skipping duplicate local notification: ${key}`);
+    return false;
   }
 
   try {
     await ensureAndroidChannels();
-    const type = data?.type ? String(data.type) : undefined;
+    const type = payload?.type ? String(payload.type) : undefined;
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
         body,
-        data: data || {},
+        data: payload,
         sound: "default",
-        priority: Notifications.AndroidNotificationPriority.MAX,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
         ...(Platform.OS === "android"
           ? { channelId: channelForNotificationType(type) }
           : {}),
       },
-      trigger: null, // Fire immediately
+      trigger: null,
     });
     console.log(`📢 Local notification sent: ${title}`);
+    return true;
   } catch (err) {
     console.warn("Failed to send local notification:", err);
+    return false;
   }
 }

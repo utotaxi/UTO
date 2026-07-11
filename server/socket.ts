@@ -2731,6 +2731,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             data: {
               type: "ride_request",
               rideId,
+              audience: "driver",
               target: "DriveTab",
               screen: "DriveTab",
               // Embed enough ride data so a cold/background open can show the offer
@@ -2760,7 +2761,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               },
             },
             priority: "high",
-            channelId: "ride-requests",
+            channelId: "uto-ride-requests-v2",
             ttl: 120,
             expiration: Math.floor(Date.now() / 1000) + 120,
             _contentAvailable: true,
@@ -3392,8 +3393,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
               sound: "default",
               title: "🗓 Scheduled Ride Starting",
               body: `Your scheduled pickup from ${rideData.pickupLocation?.address || "the rider"} is in 15 minutes — head to the pickup now.`,
-              data: { type: "scheduled_ride_live", rideId: rideData.id },
+              data: { type: "scheduled_ride_live", rideId: rideData.id, audience: "driver" },
               priority: "high",
+              channelId: "uto-scheduled-v2",
             }),
           }).catch((pushErr) => {
             console.warn(`⚠️ Push notification failed for driver ${actualDriverId}:`, pushErr);

@@ -27,7 +27,6 @@ import { MapViewWrapper, MarkerWrapper } from "@/components/MapView";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/context/AuthContext";
 import { useRide } from "@/context/RideContext";
-import { useNotifications } from "@/hooks/useNotifications";
 import { RatingModal } from "@/components/RatingModal";
 import { getApiUrl } from "@/lib/query-client";
 import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
@@ -119,8 +118,6 @@ export default function RiderHomeScreen({ navigation }: any) {
   const { isDark } = useTheme();
   const { user } = useAuth();
   const { pendingRating, submitRiderRating, dismissRiderRating } = useRide();
-
-  useNotifications(user?.id);
 
   const [currentAddress, setCurrentAddress] = useState<string>("Locating...");
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);

@@ -37,15 +37,16 @@ async function maybeNotifyPendingAssigned(pending: any) {
   if (AppState.currentState === 'active') return;
 
   try {
-    const lastId = await AsyncStorage.getItem(BG_NOTIFIED_ASSIGNED_KEY);
-    if (lastId === String(pending.id)) return;
+    const { claimNotification } = await import('./notificationDedupe');
+    const dedupeKey = `scheduled_booking_assigned:${pending.id}`;
+    if (!claimNotification(dedupeKey)) return;
 
     const Notifications = await import('expo-notifications');
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('ride-requests', {
-        name: 'Ride Requests',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 500, 250, 500],
+      await Notifications.setNotificationChannelAsync('uto-scheduled-v2', {
+        name: 'Scheduled Bookings',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 180],
         lightColor: '#F7C948',
         sound: 'default',
       });
@@ -64,12 +65,13 @@ async function maybeNotifyPendingAssigned(pending: any) {
           bookingId: String(pending.id),
           rideId: String(pending.id),
           sourceTable: pending.source_table || null,
+          audience: 'driver',
           target: 'UpcomingBookings',
           screen: 'UpcomingBookings',
         },
         sound: 'default',
-        priority: Notifications.AndroidNotificationPriority.MAX,
-        ...(Platform.OS === 'android' ? { channelId: 'ride-requests' } : {}),
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        ...(Platform.OS === 'android' ? { channelId: 'uto-scheduled-v2' } : {}),
       },
       trigger: null,
     });
@@ -127,10 +129,9 @@ export async function defineBackgroundLocationTask() {
             const body = await response.json();
             if (body?.pendingAssignedBooking) {
               await maybeNotifyPendingAssigned(body.pendingAssignedBooking);
-            } else {
-              // Clear dedupe when nothing pending so a future assignment can notify again
-              await AsyncStorage.removeItem(BG_NOTIFIED_ASSIGNED_KEY);
             }
+            // Do not clear dedupe when empty — prevents re-flood if the query
+            // briefly returns null between heartbeats.
           } catch {
             // Non-critical — location update already succeeded
           }
