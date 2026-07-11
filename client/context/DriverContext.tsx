@@ -298,6 +298,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const driverIds = [driverProfile?.id, user?.id].filter(Boolean).map(String);
     if (driverIds.length === 0) return;
 
+    // Keep push token fresh even when offline so assignment / marketplace
+    // alerts still reach the device.
+    if (user?.id) {
+      ensurePushTokenRegistered(user.id).catch((err) =>
+        console.warn("⚠️ Failed to refresh push token in driver mode:", err)
+      );
+    }
+
     let socket: ReturnType<typeof getSocket>;
     try {
       socket = getSocket();

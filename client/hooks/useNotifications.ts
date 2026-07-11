@@ -31,7 +31,10 @@ try {
     handleNotification: async (notification) => {
       const data = (notification?.request?.content?.data || {}) as Record<string, any>;
 
-      if (!audienceAllowed(data)) {
+      // Only suppress cross-role banners while the app is actively open in the
+      // other mode. Background / killed delivery must still show so offline
+      // drivers get marketplace + assignment pushes.
+      if (!audienceAllowed(data) && AppState.currentState === "active") {
         return {
           shouldShowBanner: false,
           shouldShowList: false,

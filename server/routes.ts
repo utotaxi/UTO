@@ -1935,6 +1935,42 @@ const resolveDriverPushToken = async (driverIdOrUserId: string): Promise<{
   return { identity, pushToken: null };
 };
 
+/** All registered driver Expo tokens (online + offline). Deduped by token string. */
+const collectAllDriverPushTokens = async (): Promise<string[]> => {
+  const { data: driverRows, error } = await sb
+    .from("drivers")
+    .select("user_id")
+    .not("user_id", "is", null);
+  if (error) {
+    console.warn("⚠️ Failed to load drivers for push fan-out:", error.message);
+    return [];
+  }
+
+  const driverUserIds = Array.from(
+    new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean).map(String)),
+  );
+  if (driverUserIds.length === 0) return [];
+
+  const tokens = new Set<string>();
+  const chunkSize = 100;
+  for (let i = 0; i < driverUserIds.length; i += chunkSize) {
+    const chunk = driverUserIds.slice(i, i + chunkSize);
+    const { data: users, error: usersErr } = await sb
+      .from("users")
+      .select("id, push_token")
+      .in("id", chunk);
+    if (usersErr) {
+      console.warn("⚠️ Failed to load driver push tokens:", usersErr.message);
+      continue;
+    }
+    for (const row of users || []) {
+      const token = String(row?.push_token || "").trim();
+      if (token) tokens.add(token);
+    }
+  }
+  return Array.from(tokens);
+};
+
 const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
   try {
     // Only broadcast marketplace offers for unassigned bookings.
@@ -1944,24 +1980,18 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
       return false;
     }
 
-    const { data: driverRows } = await sb
-      .from("drivers")
-      .select("user_id")
-      .eq("is_online", true)
-      .not("user_id", "is", null);
-    const driverUserIds = Array.from(new Set((driverRows || []).map((row: any) => row.user_id).filter(Boolean)));
-    if (driverUserIds.length === 0) {
-      console.warn(`⚠️ Marketplace notify: no online drivers for booking ${booking?.id}`);
-      return false;
+    // Always refresh marketplace UIs first — even if nobody has a push token yet.
+    try {
+      io.emit("later-booking:update", { type: "created", booking });
+      io.emit("later-booking:marketplace", { type: "created", booking });
+    } catch (socketErr) {
+      console.warn(`⚠️ Marketplace socket emit failed for ${booking?.id}:`, socketErr);
     }
 
-    const { data: driverUsers } = await sb
-      .from("users")
-      .select("id, push_token")
-      .in("id", driverUserIds);
-    const tokens = (driverUsers || []).filter((row: any) => row.push_token);
+    // Notify EVERY driver with a push token (online or offline) — once per booking.
+    const tokens = await collectAllDriverPushTokens();
     if (tokens.length === 0) {
-      console.warn(`⚠️ Marketplace notify: no push tokens for booking ${booking?.id}`);
+      console.warn(`⚠️ Marketplace notify: no driver push tokens for booking ${booking?.id}`);
       return false;
     }
 
@@ -1971,17 +2001,9 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
     const fareLabel = payable > 0 ? ` — £${payable.toFixed(2)}` : "";
     const body = `A booking has been scheduled by ${riderLabel}${fareLabel}. Open Marketplace to pick up ride ${booking.id}.`;
 
-    // Socket first so online drivers refresh marketplace immediately
-    try {
-      io.emit("later-booking:update", { type: "created", booking });
-      io.emit("later-booking:marketplace", { type: "created", booking });
-    } catch (socketErr) {
-      console.warn(`⚠️ Marketplace socket emit failed for ${booking?.id}:`, socketErr);
-    }
-
     const results = await Promise.all(
-      tokens.map((row: any) =>
-        sendExpoPushNotification(row.push_token, title, body, {
+      tokens.map((token) =>
+        sendExpoPushNotification(token, title, body, {
           type: "scheduled_marketplace_created",
           bookingId: booking.id,
           rideId: booking.id,
@@ -1993,7 +2015,7 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
       ),
     );
     const sent = results.filter(Boolean).length;
-    console.log(`📲 Marketplace push for booking ${booking.id}: ${sent}/${tokens.length} driver(s) notified`);
+    console.log(`📲 Marketplace push for booking ${booking.id}: ${sent}/${tokens.length} driver token(s) notified (online+offline)`);
     return sent > 0;
   } catch (notifyErr) {
     console.warn("⚠️ Failed to notify drivers about scheduled booking:", notifyErr);
@@ -2037,6 +2059,9 @@ const emitAssignedBookingToDriver = (booking: any, identity: { tableId: string; 
   };
   try {
     io.emit("later-booking:update", payload);
+    // Broadcast + room emit so the assigned driver still gets it if they connected
+    // with userId or tableId, or briefly missed the room join.
+    io.emit("later-booking:assigned", payload);
     if (identity.tableId) io.to(`driver:${identity.tableId}`).emit("later-booking:assigned", payload);
     if (identity.userId) io.to(`driver:${identity.userId}`).emit("later-booking:assigned", payload);
   } catch (err) {
@@ -2145,13 +2170,22 @@ const announceExternalMarketplaceBookings = async () => {
     fetchLaterBookingsFromTable("web_booker"),
   ]);
 
+  const nowTs = Date.now();
+  // After redeploy, only re-notify recent upcoming offers (avoid flooding old marketplace rows).
+  const MAX_ANNOUNCE_AGE_MS = 6 * 60 * 60 * 1000;
+
   const marketplaceBookings = [
     ...laterBookingsRaw.map((row: any) => normalizeLaterBooking(row, "later_bookings")),
     ...webBookerRaw.map((row: any) => normalizeLaterBooking(row, "web_booker")),
   ].filter((booking: any) => {
     const status = String(booking.status || "").toLowerCase();
     const assignedId = booking.assigned_driver_id || booking.driver_id;
-    return (status === "scheduled" || status === "marketplace") && !assignedId;
+    if (!((status === "scheduled" || status === "marketplace") && !assignedId)) return false;
+    const pickupTs = pickupTimestamp(booking);
+    if (!pickupTs || pickupTs <= nowTs) return false;
+    const createdTs = booking.created_at ? new Date(booking.created_at).getTime() : 0;
+    if (!createdTs || nowTs - createdTs > MAX_ANNOUNCE_AGE_MS) return false;
+    return true;
   });
 
   const activeKeys = new Set<string>();
@@ -3879,7 +3913,6 @@ const triggerMarketplaceCheckReminders = async () => {
   const { data: driverRows, error: driverErr } = await sb
     .from("drivers")
     .select("user_id")
-    .eq("is_online", true)
     .not("user_id", "is", null);
 
   if (driverErr) {
@@ -3904,23 +3937,27 @@ const triggerMarketplaceCheckReminders = async () => {
   }
 
   await Promise.all(
-    (driverUsers || [])
-      .filter((row: any) => row.push_token)
-      .map((row: any) =>
-        sendExpoPushNotification(
-          row.push_token,
-          "Marketplace Reminder",
-          "Have you checked the marketplace?",
-          {
-            type: "marketplace_reminder",
-            audience: "driver",
-            target: "Marketplace",
-            screen: "Marketplace",
-            slotKey,
-          },
-          { channelId: "uto-scheduled-v2", ttlSeconds: 3600 },
-        ),
+    Array.from(
+      new Set(
+        (driverUsers || [])
+          .map((row: any) => String(row.push_token || "").trim())
+          .filter(Boolean),
       ),
+    ).map((token) =>
+      sendExpoPushNotification(
+        token,
+        "🗓 Marketplace Check",
+        "New scheduled rides may be waiting. Open Marketplace to review available bookings.",
+        {
+          type: "marketplace_reminder",
+          audience: "driver",
+          target: "Marketplace",
+          screen: "Marketplace",
+          slotKey,
+        },
+        { channelId: "uto-scheduled-v2", ttlSeconds: 900 },
+      ),
+    ),
   );
 
   lastMarketplaceReminderKey = slotKey;
