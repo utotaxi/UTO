@@ -942,6 +942,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startedAt,
       });
 
+      // Keep scheduled booking row in sync when this live ride came from later_bookings / web_booker
+      try {
+        await supabase.from("later_bookings").update({ status: "in_progress" }).eq("live_ride_id", rideId);
+        await supabase.from("web_booker").update({ status: "in_progress" }).eq("live_ride_id", rideId);
+      } catch (syncErr) {
+        console.warn("⚠️ Could not sync scheduled booking status to in_progress:", syncErr);
+      }
+
       res.json({ success: true, ride: updatedRide });
     } catch (error: any) {
       console.error("Start trip error:", error);
@@ -2759,7 +2767,29 @@ app.get("/api/later-bookings/rider/:riderId", async (req: Request, res: Response
       .filter((booking: any) => String(booking.rider_id || "") === riderId)
       .sort((a: any, b: any) => pickupTimestamp(a) - pickupTimestamp(b));
 
-    res.json({ bookings });
+    // Ensure every active scheduled booking has a PIN the rider can share at pickup.
+    const withPins = [];
+    for (const booking of bookings) {
+      const status = String(booking.status || "").toLowerCase();
+      const needsPin =
+        !booking.otp &&
+        status !== "cancelled" &&
+        status !== "completed";
+      if (needsPin && booking.source_table && booking.id) {
+        const otp = generateRidePin();
+        await updateLaterBookingWithFallbackColumns(
+          booking.source_table,
+          booking.id,
+          { otp },
+          missingLaterBookingActivationColumns,
+        );
+        withPins.push({ ...booking, otp });
+      } else {
+        withPins.push(booking);
+      }
+    }
+
+    res.json({ bookings: withPins });
   } catch (error: any) {
     res.status(500).json({ error: error?.message || "Failed to fetch bookings" });
   }
@@ -2794,6 +2824,195 @@ app.get("/api/later-bookings/:id", async (req: Request, res: Response) => {
     return res.status(404).json({ error: "Booking not found" });
   } catch (error: any) {
     return res.status(500).json({ error: error?.message || "Failed to fetch booking" });
+  }
+});
+
+/**
+ * Driver taps Start Trip on an accepted upcoming booking.
+ * Creates the live ride on demand (with the rider's booking PIN) so the driver
+ * can enter PIN immediately — does not wait for the 60‑minute poller.
+ */
+app.post("/api/later-bookings/:id/prepare-start", async (req: Request, res: Response) => {
+  try {
+    const bookingId = req.params.id as string;
+    const { driverId } = req.body || {};
+    if (!bookingId || !driverId) {
+      return res.status(400).json({ error: "bookingId and driverId are required" });
+    }
+
+    const identity = await resolveDriverIdentity(String(driverId));
+    if (!identity?.tableId) {
+      return res.status(404).json({ error: "Driver not found" });
+    }
+
+    let sourceTable: "later_bookings" | "web_booker" | null = null;
+    let raw: any = null;
+    const laterFetch = await sb.from("later_bookings").select("*").eq("id", bookingId).maybeSingle();
+    if (laterFetch.data) {
+      sourceTable = "later_bookings";
+      raw = laterFetch.data;
+    } else {
+      const webFetch = await sb.from("web_booker").select("*").eq("id", bookingId).maybeSingle();
+      if (webFetch.data) {
+        sourceTable = "web_booker";
+        raw = webFetch.data;
+      }
+    }
+    if (!sourceTable || !raw) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const booking = normalizeLaterBooking(raw, sourceTable);
+    const status = String(booking.status || "").toLowerCase();
+    if (status !== "driver_accepted") {
+      return res.status(400).json({ error: "Only accepted upcoming bookings can be started" });
+    }
+    if (!bookingMatchesDriverIdentity(booking, identity)) {
+      return res.status(403).json({ error: "This booking is assigned to another driver" });
+    }
+
+    const nowTs = Date.now();
+    const pickupTs = pickupTimestamp(booking);
+    const msUntilPickup = pickupTs - nowTs;
+    const START_EARLY_MS = SCHEDULED_ACTIVATION_WINDOW_MS; // 60 min before
+    const START_LATE_MS = 30 * 60 * 1000; // 30 min after pickup
+    const hasExistingLive = !!booking.live_ride_id;
+
+    if (!hasExistingLive) {
+      if (!pickupTs) {
+        return res.status(400).json({ error: "Booking has no pickup time" });
+      }
+      if (msUntilPickup > START_EARLY_MS) {
+        const mins = Math.ceil(msUntilPickup / 60000);
+        return res.status(400).json({
+          error: `This ride can be started from 60 minutes before pickup (about ${mins} minutes remaining).`,
+          minutesUntilEligible: Math.max(0, mins - 60),
+        });
+      }
+      if (msUntilPickup < -START_LATE_MS) {
+        return res.status(400).json({ error: "The pickup window for this booking has expired." });
+      }
+    }
+
+    // Ensure PIN exists (older bookings may lack one)
+    let otp = typeof booking.otp === "string" && booking.otp.trim() ? String(booking.otp).trim() : null;
+    if (!otp) {
+      otp = generateRidePin();
+      await updateLaterBookingWithFallbackColumns(
+        sourceTable,
+        bookingId,
+        { otp },
+        missingLaterBookingActivationColumns,
+      );
+    }
+
+    // Reuse existing live ride when possible
+    if (booking.live_ride_id) {
+      const { data: existingRide } = await sb
+        .from("rides")
+        .select("id, status, driver_id, otp")
+        .eq("id", booking.live_ride_id)
+        .maybeSingle();
+
+      if (existingRide) {
+        const rideStatus = String(existingRide.status || "").toLowerCase();
+        if (rideStatus === "in_progress") {
+          return res.json({
+            success: true,
+            alreadyStarted: true,
+            liveRideId: existingRide.id,
+            booking: stripPinForDrivers({ ...booking, live_ride_id: existingRide.id, otp }),
+          });
+        }
+        if (["accepted", "arrived", "at_pickup", "arriving"].includes(rideStatus)) {
+          // Keep OTP on the live ride in sync with booking PIN
+          if (otp && String(existingRide.otp || "") !== otp) {
+            await sb.from("rides").update({ otp }).eq("id", existingRide.id);
+          }
+          return res.json({
+            success: true,
+            liveRideId: existingRide.id,
+            booking: stripPinForDrivers({ ...booking, live_ride_id: existingRide.id }),
+          });
+        }
+      }
+    }
+
+    const [enriched] = await attachRiderDetails([booking]);
+    const liveRideId = `sched_${bookingId}_${Date.now().toString(36)}`;
+    const rideData = {
+      id: liveRideId,
+      riderId: enriched.rider_id,
+      riderName: enriched.rider_name || "Rider",
+      riderPhone: enriched.rider_phone || "",
+      riderEmail: enriched.rider_email || "",
+      rideType: enriched.vehicle_type || "saloon",
+      vehicleType: enriched.vehicle_type || "saloon",
+      pickupLocation: {
+        address: enriched.pickup_address || "Unknown",
+        latitude: Number(enriched.pickup_latitude) || 0,
+        longitude: Number(enriched.pickup_longitude) || 0,
+      },
+      dropoffLocation: {
+        address: enriched.dropoff_address || "Unknown",
+        latitude: Number(enriched.dropoff_latitude) || 0,
+        longitude: Number(enriched.dropoff_longitude) || 0,
+      },
+      farePrice: Number(
+        (Number(enriched.estimated_fare || 0) + Number(enriched.discount_amount || 0)).toFixed(2),
+      ) || 0,
+      estimatedPrice: Number(
+        (Number(enriched.estimated_fare || 0) + Number(enriched.discount_amount || 0)).toFixed(2),
+      ) || 0,
+      discountAmount: Number(enriched.discount_amount || 0),
+      couponCode: enriched.coupon_code || null,
+      distanceMiles: Number(enriched.distance_miles) || 0,
+      durationMinutes: Number(enriched.duration_minutes) || 0,
+      paymentMethod: enriched.payment_method || "card",
+      paymentStatus: enriched.payment_status || null,
+      paymentIntentId: enriched.payment_intent_id || null,
+      otp,
+      isScheduledBooking: true,
+      scheduledBookingId: bookingId,
+      scheduledPickupAt: enriched.pickup_at,
+      sourceTable,
+    };
+
+    const markResult = await updateLaterBookingWithFallbackColumns(
+      sourceTable,
+      bookingId,
+      { activated_at: new Date().toISOString(), live_ride_id: liveRideId },
+      missingLaterBookingActivationColumns,
+    );
+    if (markResult.error || !markResult.data) {
+      return res.status(500).json({ error: "Could not prepare this booking for start. Please try again." });
+    }
+
+    const handedOver = await scheduledRideHooks.activateAcceptedScheduledRide?.(rideData, identity.tableId);
+    if (!handedOver) {
+      await updateLaterBookingWithFallbackColumns(
+        sourceTable,
+        bookingId,
+        { live_ride_id: null },
+        missingLaterBookingActivationColumns,
+      );
+      return res.status(500).json({ error: "Could not activate the live ride. Please try again." });
+    }
+
+    io.emit("later-booking:update", {
+      type: "activated",
+      booking: stripPinForDrivers({ ...enriched, live_ride_id: liveRideId }),
+    });
+
+    console.log(`🚀 prepare-start: booking ${bookingId} → live ride ${liveRideId} for driver ${identity.tableId}`);
+    return res.json({
+      success: true,
+      liveRideId,
+      booking: stripPinForDrivers({ ...enriched, live_ride_id: liveRideId, activated_at: new Date().toISOString() }),
+    });
+  } catch (error: any) {
+    console.error("prepare-start error:", error);
+    return res.status(500).json({ error: error?.message || "Failed to prepare ride start" });
   }
 });
 

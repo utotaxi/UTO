@@ -187,6 +187,7 @@ export default function ScheduledJobDetailsScreen() {
   const now = Date.now();
   const msUntilPickup = new Date(booking.pickup_at).getTime() - now;
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+  const START_GRACE_AFTER_MS = 30 * 60 * 1000;
   const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
   const driverOwnsThis = (() => {
     const ids = [user?.id, driverProfile?.id].filter(Boolean).map(String);
@@ -200,27 +201,23 @@ export default function ScheduledJobDetailsScreen() {
     (!!driverOwnsThis &&
       ['scheduled', 'marketplace', 'assigned'].includes(String(booking.status || '').toLowerCase()) &&
       String(booking.status || '').toLowerCase() !== 'driver_accepted');
-  const isUpcomingRide = msUntilPickup > 0;
-  const tripIsLive = !!liveRideId;
+  const withinStartWindow =
+    msUntilPickup <= ACTIVATION_WINDOW_MS && msUntilPickup >= -START_GRACE_AFTER_MS;
+  const tripIsLive = !!liveRideId || !!booking.live_ride_id;
   const tripInProgress = liveRideStatus === "in_progress";
   const isExpiredRide =
-    msUntilPickup <= 0 &&
+    msUntilPickup < -START_GRACE_AFTER_MS &&
     !tripInProgress &&
     liveRideStatus !== "in_progress" &&
-    booking.status !== "completed";
-  const withinActivationWindow =
-    isUpcomingRide && msUntilPickup <= ACTIVATION_WINDOW_MS;
-  const tripReadyToStart =
-    tripIsLive &&
-    !tripInProgress &&
-    liveRideStatus !== "completed" &&
-    liveRideStatus !== "cancelled";
+    booking.status !== "completed" &&
+    booking.status !== "in_progress";
   const canStartTrip =
     driverOwnsThis &&
     booking.status === "driver_accepted" &&
-    isUpcomingRide &&
-    !tripInProgress;
-  const canStartTripNow = canStartTrip && (tripReadyToStart || withinActivationWindow);
+    !tripInProgress &&
+    (withinStartWindow || tripIsLive) &&
+    !isExpiredRide;
+
 
   const handleAccept = async () => {
     Alert.alert(
@@ -340,19 +337,32 @@ export default function ScheduledJobDetailsScreen() {
     let rideId = liveRideId || booking?.live_ride_id;
     if (!rideId) {
       try {
-        const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}`);
-        if (res.ok) {
-          const data = await res.json();
-          rideId = data?.booking?.live_ride_id || null;
-          if (rideId) {
-            setLiveRideId(rideId);
-            setBooking(data.booking);
-          }
+        const prep = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/prepare-start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ driverId: user?.id }),
+        });
+        const prepData = await prep.json().catch(() => ({}));
+        if (!prep.ok) {
+          Alert.alert("Cannot Start Yet", prepData?.error || "This booking is not ready to start.");
+          return;
         }
-      } catch (_) {}
+        rideId = prepData?.liveRideId || prepData?.booking?.live_ride_id || null;
+        if (prepData?.booking) setBooking(prepData.booking);
+        if (rideId) setLiveRideId(rideId);
+        if (prepData?.alreadyStarted) {
+          setLiveRideStatus("in_progress");
+          setShowPinModal(false);
+          Alert.alert("Trip Already Started", "Navigate to the drop-off and tap Finish when you arrive.");
+          return;
+        }
+      } catch (_) {
+        Alert.alert("Error", "Could not prepare this ride to start. Please try again.");
+        return;
+      }
     }
     if (!rideId) {
-      Alert.alert("Not Yet Active", "This booking will become available to start closer to pickup time. Please try again shortly.");
+      Alert.alert("Not Yet Active", "Could not activate this booking. Please try again in a moment.");
       return;
     }
     if (pinValue.length < 4) return;
@@ -372,11 +382,56 @@ export default function ScheduledJobDetailsScreen() {
         return;
       }
       setLiveRideStatus("in_progress");
+      setBooking((prev: any) => (prev ? { ...prev, status: "in_progress", live_ride_id: rideId } : prev));
       setShowPinModal(false);
       setPinValue("");
       Alert.alert("Trip Started", "Navigate to the drop-off location. Tap Finish when you arrive.");
     } catch (err) {
       Alert.alert("Error", "Could not start the trip. Please try again.");
+    } finally {
+      setIsStartingTrip(false);
+    }
+  };
+
+  const openStartTripPinModal = async () => {
+    setPinError(false);
+    setPinValue("");
+    setIsStartingTrip(true);
+    try {
+      let rideId = liveRideId || booking?.live_ride_id;
+      if (!rideId) {
+        const prep = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/prepare-start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ driverId: user?.id }),
+        });
+        const prepData = await prep.json().catch(() => ({}));
+        if (!prep.ok) {
+          Alert.alert(
+            "Cannot Start Yet",
+            prepData?.error || "This booking will become available to start within 60 minutes of pickup time.",
+          );
+          return;
+        }
+        rideId = prepData?.liveRideId || prepData?.booking?.live_ride_id || null;
+        if (prepData?.booking) setBooking(prepData.booking);
+        if (rideId) {
+          setLiveRideId(rideId);
+          setLiveRideStatus("accepted");
+        }
+        if (prepData?.alreadyStarted) {
+          setLiveRideStatus("in_progress");
+          Alert.alert("Trip Already Started", "Navigate to the drop-off and tap Finish when you arrive.");
+          return;
+        }
+      }
+      if (!rideId) {
+        Alert.alert("Not Yet Active", "Could not activate this booking. Please try again shortly.");
+        return;
+      }
+      setShowPinModal(true);
+    } catch (err) {
+      Alert.alert("Error", "Could not prepare this ride. Please try again.");
     } finally {
       setIsStartingTrip(false);
     }
@@ -674,33 +729,16 @@ export default function ScheduledJobDetailsScreen() {
             <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
               <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
             </Pressable>
-            <Pressable style={s.acceptBtn} onPress={async () => {
-              setPinError(false);
-              setPinValue("");
-              let rideId = liveRideId || booking?.live_ride_id;
-              if (!rideId) {
-                try {
-                  const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}`);
-                  if (res.ok) {
-                    const data = await res.json();
-                    rideId = data?.booking?.live_ride_id || null;
-                    if (rideId) {
-                      setLiveRideId(rideId);
-                      setBooking(data.booking);
-                    }
-                  }
-                } catch (_) {}
-              }
-              if (!rideId || !canStartTripNow) {
-                Alert.alert(
-                  "Not Yet Active",
-                  "This booking will become available to start within 60 minutes of pickup time.",
-                );
-                return;
-              }
-              setShowPinModal(true);
-            }}>
-              <Text style={s.acceptBtnText}>Start Trip</Text>
+            <Pressable
+              style={s.acceptBtn}
+              onPress={openStartTripPinModal}
+              disabled={isStartingTrip}
+            >
+              {isStartingTrip ? (
+                <ActivityIndicator color="#000" />
+              ) : (
+                <Text style={s.acceptBtnText}>Start Trip (Enter Rider PIN)</Text>
+              )}
             </Pressable>
             <Pressable style={s.cancelBtn} onPress={() => setShowCancelModal(true)}>
               <Text style={s.cancelBtnText}>Cancel Booking</Text>

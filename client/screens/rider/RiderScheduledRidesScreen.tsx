@@ -125,7 +125,7 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
         </View>
       ) : null}
 
-      {/* Ride PIN — pre-provided at booking time; give it to the driver at pickup */}
+      {/* Ride PIN — generated at booking time; share with driver at pickup */}
       {ride.otp && ride.status !== 'completed' && ride.status !== 'cancelled' ? (
         <View style={cs.pinBox}>
           <View style={{ flex: 1 }}>
@@ -133,6 +133,13 @@ function RideCard({ ride, onCancel, calculateFare }: { ride: ScheduledRide; onCa
             <Text style={cs.pinHint}>Share this PIN with your driver at pickup to start the ride</Text>
           </View>
           <Text style={cs.pinValue}>{ride.otp}</Text>
+        </View>
+      ) : (ride.status === 'scheduled' || ride.status === 'driver_accepted' || ride.status === 'in_progress') ? (
+        <View style={[cs.pinBox, { backgroundColor: '#374151' }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={cs.pinLabel}>RIDE PIN</Text>
+            <Text style={cs.pinHint}>Pull to refresh — your 4-digit PIN will appear here</Text>
+          </View>
         </View>
       ) : null}
 
@@ -179,7 +186,13 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
       // Show future rides only (pickup in the future), sorted upcoming first
       const now = Date.now();
       const upcoming = (json.bookings as ScheduledRide[])
-        .filter(b => new Date(b.pickup_at).getTime() > now || b.status === 'in_progress')
+        .filter(b => {
+          const pickupTs = new Date(b.pickup_at).getTime();
+          const status = String(b.status || '').toLowerCase();
+          if (status === 'in_progress' || status === 'driver_accepted') return true;
+          if (status === 'cancelled' || status === 'completed') return false;
+          return pickupTs > now - 30 * 60 * 1000; // keep visible through start grace
+        })
         .sort((a, b) => new Date(a.pickup_at).getTime() - new Date(b.pickup_at).getTime());
       setRides(upcoming);
     } catch (err: any) {
