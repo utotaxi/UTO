@@ -925,6 +925,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/rides/:rideId/start-trip", async (req: Request, res: Response) => {
     try {
       const rideId = req.params.rideId as string;
       const { pin, driverId } = req.body || {};
