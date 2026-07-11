@@ -316,7 +316,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     const onAssigned = (payload: any) => {
       const booking = payload?.booking || payload;
       if (!booking?.id) return;
-      const assignedIds = [booking.assigned_driver_id, booking.driver_id]
+      const assignedIds = [
+        booking.assigned_driver_id,
+        booking.driver_id,
+        booking.assigned_user_id,
+        payload?.assignedDriverId,
+        payload?.assignedUserId,
+      ]
         .filter(Boolean)
         .map(String);
       // Only notify the assigned driver (skip if payload has no assignee)
@@ -338,7 +344,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           target: "UpcomingBookings",
           screen: "UpcomingBookings",
         },
-        { alreadyClaimed: true, skipWhenForeground: false },
+        { alreadyClaimed: true, skipWhenForeground: false, bypassAudienceCheck: true },
       );
     };
 
@@ -383,7 +389,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           target: "Marketplace",
           screen: "Marketplace",
         },
-        { alreadyClaimed: true },
+        { alreadyClaimed: true, bypassAudienceCheck: true },
       );
     };
 

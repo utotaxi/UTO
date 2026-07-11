@@ -309,6 +309,8 @@ export type LocalNotificationOptions = {
   skipWhenForeground?: boolean;
   /** If true, caller already claimed the dedupe key. */
   alreadyClaimed?: boolean;
+  /** Skip rider/driver mode gate (caller already verified role). */
+  bypassAudienceCheck?: boolean;
 };
 
 /**
@@ -327,7 +329,7 @@ export async function sendLocalNotification(
   }
 
   const payload = { ...(data || {}) };
-  if (!audienceAllowed(payload)) {
+  if (!options.bypassAudienceCheck && !audienceAllowed(payload)) {
     return false;
   }
 
@@ -346,6 +348,14 @@ export async function sendLocalNotification(
   try {
     await ensureAndroidChannels();
     const type = payload?.type ? String(payload.type) : undefined;
+    // Prefer ride-requests channel for scheduled alerts too — older APKs may
+    // not have uto-scheduled-v2, and Android drops unknown channels silently.
+    const channelId =
+      type === "ride_request" || type === "ride_requested"
+        ? ANDROID_CHANNELS.rideRequests
+        : type && channelForNotificationType(type) === ANDROID_CHANNELS.scheduled
+          ? ANDROID_CHANNELS.rideRequests
+          : channelForNotificationType(type);
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
@@ -353,9 +363,7 @@ export async function sendLocalNotification(
         data: payload,
         sound: "default",
         priority: Notifications.AndroidNotificationPriority.HIGH,
-        ...(Platform.OS === "android"
-          ? { channelId: channelForNotificationType(type) }
-          : {}),
+        ...(Platform.OS === "android" ? { channelId } : {}),
       },
       trigger: null,
     });

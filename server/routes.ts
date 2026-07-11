@@ -1816,9 +1816,26 @@ const sendExpoPushNotification = async (
 ): Promise<boolean> => {
   if (!token) return false;
   try {
-    // Default to the soft high-importance channel (matches client uto-*-v2 channels).
-    const ttlSeconds = options.ttlSeconds ?? 600;
+    // Prefer the long-lived ride-request channel so older APKs (without
+    // uto-scheduled-v2) still display marketplace / assignment alerts.
+    const ttlSeconds = options.ttlSeconds ?? 3600;
     const channelId = options.channelId || "uto-ride-requests-v2";
+
+    // Expo/FCM on Android expects flat string data — null/objects can be dropped.
+    const safeData: Record<string, string> = {};
+    for (const [key, value] of Object.entries(data || {})) {
+      if (value == null) continue;
+      if (typeof value === "string") safeData[key] = value;
+      else if (typeof value === "number" || typeof value === "boolean") safeData[key] = String(value);
+      else {
+        try {
+          safeData[key] = JSON.stringify(value);
+        } catch {
+          // skip unserializable
+        }
+      }
+    }
+
     const pushRes = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: {
@@ -1831,7 +1848,7 @@ const sendExpoPushNotification = async (
         sound: "default",
         title,
         body,
-        data,
+        data: safeData,
         priority: "high",
         channelId,
         ttl: ttlSeconds,
@@ -1847,7 +1864,7 @@ const sendExpoPushNotification = async (
     if (!ok) {
       console.warn(`⚠️ Expo push failed (${pushRes.status}):`, JSON.stringify(pushBody).slice(0, 400));
     } else {
-      console.log(`📲 Expo push ok → ${String(token).slice(0, 22)}… channel=${channelId} type=${data?.type || "n/a"}`);
+      console.log(`📲 Expo push ok → ${String(token).slice(0, 22)}… channel=${channelId} type=${safeData?.type || "n/a"}`);
     }
     return ok;
   } catch (err) {
@@ -1855,6 +1872,24 @@ const sendExpoPushNotification = async (
     return false;
   }
 };
+
+const PENDING_ASSIGNMENT_STATUSES = new Set([
+  "scheduled",
+  "marketplace",
+  "assigned",
+  "driver_assigned",
+]);
+
+const OPEN_MARKETPLACE_STATUSES = new Set([
+  "scheduled",
+  "marketplace",
+]);
+
+const isPendingAssignmentStatus = (status: string) =>
+  PENDING_ASSIGNMENT_STATUSES.has(String(status || "").toLowerCase());
+
+const isOpenMarketplaceStatus = (status: string) =>
+  OPEN_MARKETPLACE_STATUSES.has(String(status || "").toLowerCase());
 
 const resolveDriverIdentity = async (driverIdOrUserId: string) => {
   if (!driverIdOrUserId) return null;
@@ -1997,10 +2032,18 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
 
     const title = "🗓 New Scheduled Ride";
     const riderLabel = booking?.rider_name || booking?.customer_name || booking?.passenger_name || "rider";
-    const { payable } = resolveBookingPayableFare(booking);
-    const fareLabel = payable > 0 ? ` — £${payable.toFixed(2)}` : "";
+    let fareLabel = "";
+    try {
+      const { payable } = resolveBookingPayableFare(booking);
+      fareLabel = payable > 0 ? ` — £${payable.toFixed(2)}` : "";
+    } catch {
+      const fallback = Number(booking?.driver_fare ?? booking?.estimated_fare ?? booking?.estimated_price ?? 0);
+      fareLabel = fallback > 0 ? ` — £${fallback.toFixed(2)}` : "";
+    }
     const body = `A booking has been scheduled by ${riderLabel}${fareLabel}. Open Marketplace to pick up ride ${booking.id}.`;
 
+    // Use the ride-requests channel — present on all shipped APKs. uto-scheduled-v2
+    // is missing on older builds and Android silently drops those notifications.
     const results = await Promise.all(
       tokens.map((token) =>
         sendExpoPushNotification(token, title, body, {
@@ -2008,10 +2051,10 @@ const notifyDriversAboutMarketplaceBooking = async (booking: any) => {
           bookingId: booking.id,
           rideId: booking.id,
           audience: "driver",
-          sourceTable: booking.source_table || booking.sourceTable || null,
+          sourceTable: booking.source_table || booking.sourceTable || "",
           target: "Marketplace",
           screen: "Marketplace",
-        }, { channelId: "uto-scheduled-v2", ttlSeconds: 600 }),
+        }, { channelId: "uto-ride-requests-v2", ttlSeconds: 3600 }),
       ),
     );
     const sent = results.filter(Boolean).length;
@@ -2045,6 +2088,7 @@ const withPendingAssignee = (
     // the DB is missing assigned_driver_id and only stored driver_id (or vice versa).
     assigned_driver_id: booking.assigned_driver_id || assigneeId,
     driver_id: booking.driver_id || assigneeId,
+    assigned_user_id: identity.userId || booking.assigned_user_id || null,
     assignment_pending: true,
   };
 };
@@ -2098,11 +2142,13 @@ const notifyDriverOfAssignedBooking = async (
         bookingId: bookingForClient.id,
         rideId: bookingForClient.id,
         audience: "driver",
-        sourceTable: bookingForClient.source_table || null,
+        sourceTable: bookingForClient.source_table || "",
         target: "UpcomingBookings",
         screen: "UpcomingBookings",
+        assignedDriverId: identity.tableId || "",
+        assignedUserId: identity.userId || "",
       },
-      { channelId: "uto-scheduled-v2", ttlSeconds: 600 },
+      { channelId: "uto-ride-requests-v2", ttlSeconds: 3600 },
     );
     if (ok) {
       console.log(`📲 Assignment push sent for booking ${bookingForClient.id} → driver ${driverIdOrUserId}`);
@@ -2127,7 +2173,8 @@ const announceAssignedBookings = async () => {
     const status = String(booking.status || "").toLowerCase();
     const assignedId = booking.assigned_driver_id || booking.driver_id;
     // Pending assignment: driver set, but not yet accepted.
-    return !!assignedId && (status === "scheduled" || status === "marketplace" || status === "assigned");
+    // Includes web_booker "driver_assigned" (normalized to "assigned").
+    return !!assignedId && isPendingAssignmentStatus(status) && status !== "driver_accepted";
   });
 
   const activeKeys = new Set<string>();
@@ -2138,15 +2185,12 @@ const announceAssignedBookings = async () => {
     if (announcedAssignedBookingKeys.has(bookingKey)) continue;
 
     const enrichedBooking = stripPinForDrivers((await attachRiderDetails([booking]))[0] || booking);
-    const shouldEmitSocket = !assignmentSocketAnnouncedKeys.has(bookingKey);
+    // Keep re-emitting socket until push succeeds so a driver who opens the app
+    // still gets the local alert even when their push token was missing earlier.
     const pushSent = await notifyDriverOfAssignedBooking(enrichedBooking, assignedId, {
-      emitSocket: shouldEmitSocket,
+      emitSocket: true,
     });
-    if (shouldEmitSocket) {
-      assignmentSocketAnnouncedKeys.add(bookingKey);
-    }
-    // Only mark announced after a successful push so we keep retrying if the
-    // driver had no token / Expo rejected the ticket on the first attempt.
+    assignmentSocketAnnouncedKeys.add(bookingKey);
     if (pushSent) {
       announcedAssignedBookingKeys.add(bookingKey);
     }
@@ -2180,7 +2224,7 @@ const announceExternalMarketplaceBookings = async () => {
   ].filter((booking: any) => {
     const status = String(booking.status || "").toLowerCase();
     const assignedId = booking.assigned_driver_id || booking.driver_id;
-    if (!((status === "scheduled" || status === "marketplace") && !assignedId)) return false;
+    if (!(isOpenMarketplaceStatus(status) && !assignedId)) return false;
     const pickupTs = pickupTimestamp(booking);
     if (!pickupTs || pickupTs <= nowTs) return false;
     const createdTs = booking.created_at ? new Date(booking.created_at).getTime() : 0;
@@ -2321,7 +2365,13 @@ const normalizeLaterBooking = (
   sourceTable: "later_bookings" | "web_booker",
 ) => {
   const rawStatus = String(booking?.status || "").toLowerCase();
-  const status = rawStatus === "marketplace" ? "scheduled" : (rawStatus || "scheduled");
+  // web_booker uses "driver_assigned" for pending admin assignment offers.
+  const status =
+    rawStatus === "marketplace"
+      ? "scheduled"
+      : rawStatus === "driver_assigned"
+        ? "assigned"
+        : (rawStatus || "scheduled");
   // Keep accepted driver_id separate from pending assigned_driver_id when both exist.
   const acceptedDriverId = booking?.driver_id ?? null;
   const pendingAssignedId = booking?.assigned_driver_id ?? null;
@@ -2429,8 +2479,7 @@ const normalizeLaterBooking = (
     status,
     // Pending assignment = driver set but not yet accepted
     assignment_pending:
-      !!assignedDriverId &&
-      (status === "scheduled" || status === "marketplace" || status === "assigned"),
+      !!assignedDriverId && isPendingAssignmentStatus(status) && status !== "driver_accepted",
   };
 };
 
@@ -2848,17 +2897,23 @@ app.get("/api/later-bookings", async (req: Request, res: Response) => {
             return bookingMatchesDriverIdentity(booking, driverIdentity);
           }
           // Pending assignment offer — only the assigned driver sees it (Upcoming)
-          if ((status === "scheduled" || status === "marketplace" || status === "assigned") && isAssigned) {
+          if (isPendingAssignmentStatus(status) && status !== "driver_accepted" && isAssigned) {
             return bookingMatchesDriverIdentity(booking, driverIdentity);
           }
           // Open marketplace — unassigned only, outside activation window
-          if ((status === "scheduled" || status === "marketplace") && !isAssigned) {
+          if (isOpenMarketplaceStatus(status) && !isAssigned) {
             return bookingPickupTs >= nowTs + SCHEDULED_ACTIVATION_WINDOW_MS && !booking.activated_at;
           }
           return false;
         }
 
-        return status === "scheduled" || status === "driver_accepted" || status === "marketplace" || status === "assigned";
+        return (
+          status === "scheduled" ||
+          status === "driver_accepted" ||
+          status === "marketplace" ||
+          status === "assigned" ||
+          status === "driver_assigned"
+        );
       })
       .sort((a: any, b: any) => pickupTimestamp(a) - pickupTimestamp(b));
 
@@ -3875,7 +3930,7 @@ const triggerScheduledDriverReminders = async () => {
         screen: "ScheduledJobDetails",
         reminderBucket: reminderBucket.key,
       },
-      { channelId: "uto-scheduled-v2", ttlSeconds: 900 },
+      { channelId: "uto-ride-requests-v2", ttlSeconds: 900 },
     );
 
     scheduledReminderBucketByBooking.set(reminderKey, reminderBucket.key);
@@ -3955,7 +4010,7 @@ const triggerMarketplaceCheckReminders = async () => {
           screen: "Marketplace",
           slotKey,
         },
-        { channelId: "uto-scheduled-v2", ttlSeconds: 900 },
+        { channelId: "uto-ride-requests-v2", ttlSeconds: 900 },
       ),
     ),
   );

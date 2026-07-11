@@ -80,7 +80,12 @@ function isPendingAssignment(item: LaterBooking) {
   if (item.assignment_pending) return true;
   const status = String(item.status || '').toLowerCase();
   const assigned = !!(item.assigned_driver_id || item.driver_id);
-  return assigned && (status === 'scheduled' || status === 'marketplace' || status === 'assigned');
+  return assigned && (
+    status === 'scheduled' ||
+    status === 'marketplace' ||
+    status === 'assigned' ||
+    status === 'driver_assigned'
+  );
 }
 
 function UpcomingBookingCard({
