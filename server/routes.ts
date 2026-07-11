@@ -2011,12 +2011,29 @@ const bookingMatchesDriverIdentity = (booking: any, identity: { tableId: string;
   return false;
 };
 
+const withPendingAssignee = (
+  booking: any,
+  identity: { tableId: string; userId: string | null },
+) => {
+  const assigneeId = identity.tableId || identity.userId;
+  if (!booking || !assigneeId) return booking;
+  return {
+    ...booking,
+    // Ensure socket/push clients always see who the offer is for — even when
+    // the DB is missing assigned_driver_id and only stored driver_id (or vice versa).
+    assigned_driver_id: booking.assigned_driver_id || assigneeId,
+    driver_id: booking.driver_id || assigneeId,
+    assignment_pending: true,
+  };
+};
+
 const emitAssignedBookingToDriver = (booking: any, identity: { tableId: string; userId: string | null }) => {
+  const bookingForClient = withPendingAssignee(booking, identity);
   const payload = {
     type: "assigned",
-    booking,
-    bookingId: booking.id,
-    rideId: booking.id,
+    booking: bookingForClient,
+    bookingId: bookingForClient?.id,
+    rideId: bookingForClient?.id,
   };
   try {
     io.emit("later-booking:update", payload);
@@ -2034,8 +2051,9 @@ const notifyDriverOfAssignedBooking = async (
 ): Promise<boolean> => {
   try {
     const { identity, pushToken } = await resolveDriverPushToken(driverIdOrUserId);
+    const bookingForClient = withPendingAssignee(booking, identity);
     if (options.emitSocket !== false) {
-      emitAssignedBookingToDriver(booking, identity);
+      emitAssignedBookingToDriver(bookingForClient, identity);
     }
 
     if (!pushToken) {
@@ -2043,26 +2061,26 @@ const notifyDriverOfAssignedBooking = async (
       return false;
     }
 
-    const pickupLabel = booking.pickup_address || "pickup";
-    const fare = Number(booking.driver_fare ?? booking.estimated_fare ?? 0);
+    const pickupLabel = bookingForClient.pickup_address || "pickup";
+    const fare = Number(bookingForClient.driver_fare ?? bookingForClient.estimated_fare ?? 0);
     const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : "";
     const ok = await sendExpoPushNotification(
       pushToken,
       "📋 Ride Assigned To You",
-      `Ride ${booking.id} has been assigned to you (${pickupLabel})${fareLabel}. Open Upcoming to Accept or Decline.`,
+      `Ride ${bookingForClient.id} has been assigned to you (${pickupLabel})${fareLabel}. Open Upcoming to Accept or Decline.`,
       {
         type: "scheduled_booking_assigned",
-        bookingId: booking.id,
-        rideId: booking.id,
+        bookingId: bookingForClient.id,
+        rideId: bookingForClient.id,
         audience: "driver",
-        sourceTable: booking.source_table || null,
+        sourceTable: bookingForClient.source_table || null,
         target: "UpcomingBookings",
         screen: "UpcomingBookings",
       },
       { channelId: "uto-scheduled-v2", ttlSeconds: 600 },
     );
     if (ok) {
-      console.log(`📲 Assignment push sent for booking ${booking.id} → driver ${driverIdOrUserId}`);
+      console.log(`📲 Assignment push sent for booking ${bookingForClient.id} → driver ${driverIdOrUserId}`);
     }
     return ok;
   } catch (err) {
@@ -3223,11 +3241,16 @@ app.put("/api/later-bookings/:id/assign", async (req: Request, res: Response) =>
       resolvedName = userRow?.full_name || null;
     }
 
+    // Persist the pending assignee on BOTH columns. Schemas differ:
+    // - later_bookings often has driver_id but NOT assigned_driver_id
+    // - web_booker often has assigned_driver_id but NOT driver_id
+    // updateLaterBookingWithFallbackColumns strips missing columns.
+    // Never clear driver_id on assign — that wiped pending offers on later_bookings.
     const updateData: any = {
       assigned_driver_id: identity.tableId,
-      driver_id: null, // not accepted yet
+      driver_id: identity.tableId,
       assigned_driver_name: resolvedName,
-      // Keep as scheduled/marketplace so accept is still required; "assigned" if supported.
+      // Keep as scheduled/marketplace so accept is still required.
       status: sourceTable === "web_booker" ? "marketplace" : "scheduled",
       updated_at: new Date().toISOString(),
     };
@@ -3238,6 +3261,11 @@ app.put("/api/later-bookings/:id/assign", async (req: Request, res: Response) =>
       updateData,
       missingLaterBookingAssignColumns,
     );
+    if (updateResult.discoveredMissingColumns.length > 0) {
+      console.info(
+        `ℹ️ ${sourceTable} assign skipped missing optional columns: ${updateResult.discoveredMissingColumns.join(", ")}`,
+      );
+    }
     if (updateResult.error) {
       return res.status(500).json({ error: updateResult.error.message });
     }
@@ -3245,7 +3273,10 @@ app.put("/api/later-bookings/:id/assign", async (req: Request, res: Response) =>
       return res.status(404).json({ error: "Booking not found" });
     }
 
-    const normalizedBooking = normalizeLaterBooking(updateResult.data, sourceTable);
+    const normalizedBooking = withPendingAssignee(
+      normalizeLaterBooking(updateResult.data, sourceTable),
+      identity,
+    );
     const [enrichedBooking] = (await attachRiderDetails([normalizedBooking])).map(stripPinForDrivers);
 
     const pushSent = await notifyDriverOfAssignedBooking(enrichedBooking, identity.tableId);

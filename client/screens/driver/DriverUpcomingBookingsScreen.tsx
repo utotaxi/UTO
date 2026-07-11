@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
+import { useDriver } from '@/context/DriverContext';
 import { getApiUrl } from '@/lib/query-client';
 import { getSocket } from '@/lib/socket';
 import { useNavigation } from '@react-navigation/native';
@@ -232,10 +233,14 @@ export default function DriverUpcomingBookingsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const { user } = useAuth();
+  const { driverProfile } = useDriver();
+  const driverQueryId = driverProfile?.id || user?.id;
 
   const loadBookings = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiUrl()}/api/later-bookings${user?.id ? `?driverId=${user.id}` : ''}`);
+      const res = await fetch(
+        `${getApiUrl()}/api/later-bookings${driverQueryId ? `?driverId=${driverQueryId}` : ''}`,
+      );
       if (!res.ok) throw new Error('Failed to load');
       const data = await res.json();
       // Upcoming = accepted by this driver OR pending assignment offers for this driver
@@ -264,7 +269,7 @@ export default function DriverUpcomingBookingsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, [driverQueryId]);
 
   useEffect(() => { loadBookings(); }, [loadBookings]);
 
@@ -272,8 +277,10 @@ export default function DriverUpcomingBookingsScreen() {
     const socket = getSocket();
     const onUpdate = () => loadBookings();
     socket.on('later-booking:update', onUpdate);
+    socket.on('later-booking:assigned', onUpdate);
     return () => {
       socket.off('later-booking:update', onUpdate);
+      socket.off('later-booking:assigned', onUpdate);
     };
   }, [loadBookings]);
 
@@ -291,7 +298,7 @@ export default function DriverUpcomingBookingsScreen() {
               const res = await fetch(`${getApiUrl()}/api/later-bookings/${item.id}/accept`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ driverId: user?.id }),
+                body: JSON.stringify({ driverId: driverQueryId }),
               });
               if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
@@ -327,7 +334,7 @@ export default function DriverUpcomingBookingsScreen() {
               const res = await fetch(`${getApiUrl()}/api/later-bookings/${item.id}/decline`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ driverId: user?.id, reason: 'declined_assignment' }),
+                body: JSON.stringify({ driverId: driverQueryId, reason: 'declined_assignment' }),
               });
               if (!res.ok) {
                 const body = await res.json().catch(() => ({}));

@@ -311,8 +311,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const assignedIds = [booking.assigned_driver_id, booking.driver_id]
         .filter(Boolean)
         .map(String);
-      // Only notify the assigned driver
-      if (assignedIds.length > 0 && !assignedIds.some((id) => driverIds.includes(id))) return;
+      // Only notify the assigned driver (skip if payload has no assignee)
+      if (assignedIds.length === 0) return;
+      if (!assignedIds.some((id) => driverIds.includes(id))) return;
 
       const dedupeKey = `driver:scheduled_booking_assigned:${booking.id}:once`;
       if (!claimNotification(dedupeKey)) return;

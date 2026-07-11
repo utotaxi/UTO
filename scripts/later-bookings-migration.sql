@@ -6,3 +6,11 @@ ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS vehicle_type TEXT DEFAULT 's
 ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS cancellation_fee NUMERIC(10,2) DEFAULT 0;
 ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS cancellation_note TEXT DEFAULT NULL;
 ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS cancelled_by TEXT DEFAULT NULL;
+
+-- Required for pending admin→driver assignment offers (Upcoming Accept/Decline).
+-- Without this column, assign used to clear driver_id and the offer never appeared.
+ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS assigned_driver_id UUID DEFAULT NULL;
+ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS assigned_driver_name TEXT DEFAULT NULL;
+
+-- web_booker uses assigned_driver_id; ensure driver_id exists for accept/decline parity.
+ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS driver_id UUID DEFAULT NULL;
