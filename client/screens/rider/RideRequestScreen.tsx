@@ -2508,19 +2508,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
             </Pressable> */}
           </View>
 
-          <View style={styles.routeContainer}>
-            <View style={styles.routeIndicator}>
-              <View style={[styles.routeDotGreen, { backgroundColor: UTOColors.success }]} />
-              <View style={styles.routeLine} />
-              {vias.map((via) => (
-                <React.Fragment key={`dot-${via.id}`}>
-                  <View style={[styles.routeDotYellow, { backgroundColor: "#F59E0B", width: 8, height: 8, borderRadius: 4 }]} />
-                  <View style={styles.routeLine} />
-                </React.Fragment>
-              ))}
-              <View style={[styles.routeDotYellow, { backgroundColor: UTOColors.primary }]} />
-            </View>
-            <View style={styles.inputsContainer}>
+          <View style={styles.locationCard}>
               <View style={{ zIndex: 300 }}>
                 <LocationInputAutocomplete
                   label="Pickup"
@@ -2531,46 +2519,47 @@ export default function RideRequestScreen({ navigation, route }: any) {
                   type="pickup"
                 />
               </View>
+
               {vias.map((via, index) => (
-                <View key={via.id} style={{ zIndex: 250 - index, marginTop: 8 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <ThemedText style={{ color: "#F59E0B", fontSize: 12, fontWeight: "700" }}>
-                      Via {index + 1}
-                    </ThemedText>
+                <React.Fragment key={via.id}>
+                  <View style={styles.routeConnector} />
+                  <View style={{ zIndex: 250 - index, position: "relative" }}>
+                    <LocationInputAutocomplete
+                      label={`Via ${index + 1}`}
+                      value={via.address}
+                      placeholder="Add a stop"
+                      onChangeText={(text) => {
+                        setVias((prev) =>
+                          prev.map((v) => (v.id === via.id ? { ...v, address: text } : v)),
+                        );
+                      }}
+                      onSelectLocation={(loc: any) => {
+                        setVias((prev) =>
+                          prev.map((v) =>
+                            v.id === via.id
+                              ? {
+                                  ...v,
+                                  address: loc.description || loc.mainText || v.address,
+                                  latitude: loc.latitude,
+                                  longitude: loc.longitude,
+                                }
+                              : v,
+                          ),
+                        );
+                      }}
+                      type="via"
+                    />
                     <Pressable
                       onPress={() => setVias((prev) => prev.filter((v) => v.id !== via.id))}
-                      hitSlop={8}
+                      hitSlop={10}
+                      style={styles.viaRemoveBtn}
                     >
                       <MaterialIcons name="close" size={18} color="#9CA3AF" />
                     </Pressable>
                   </View>
-                  <LocationInputAutocomplete
-                    label={`Via ${index + 1}`}
-                    value={via.address}
-                    placeholder="Add a stop"
-                    onChangeText={(text) => {
-                      setVias((prev) =>
-                        prev.map((v) => (v.id === via.id ? { ...v, address: text } : v)),
-                      );
-                    }}
-                    onSelectLocation={(loc: any) => {
-                      setVias((prev) =>
-                        prev.map((v) =>
-                          v.id === via.id
-                            ? {
-                                ...v,
-                                address: loc.description || loc.mainText || v.address,
-                                latitude: loc.latitude,
-                                longitude: loc.longitude,
-                              }
-                            : v,
-                        ),
-                      );
-                    }}
-                    type="via"
-                  />
-                </View>
+                </React.Fragment>
               ))}
+
               {vias.length < MAX_RIDE_VIAS ? (
                 <Pressable
                   onPress={() => {
@@ -2580,24 +2569,17 @@ export default function RideRequestScreen({ navigation, route }: any) {
                       { id: `via_${Date.now()}_${prev.length}`, address: "" },
                     ]);
                   }}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    marginTop: 10,
-                    alignSelf: "flex-start",
-                    paddingVertical: 6,
-                    paddingHorizontal: 10,
-                    borderRadius: 8,
-                    backgroundColor: "rgba(245,158,11,0.15)",
-                  }}
+                  style={styles.addViaBtn}
                 >
                   <MaterialIcons name="add-location-alt" size={16} color="#F59E0B" />
-                  <ThemedText style={{ color: "#F59E0B", fontWeight: "700", marginLeft: 6, fontSize: 13 }}>
-                    Add via ({vias.length}/{MAX_RIDE_VIAS})
+                  <ThemedText style={styles.addViaText}>
+                    Add stop ({vias.length}/{MAX_RIDE_VIAS})
                   </ThemedText>
                 </Pressable>
               ) : null}
-              <View style={{ zIndex: 100, marginTop: 8 }}>
+
+              <View style={styles.routeConnector} />
+              <View style={{ zIndex: 100 }}>
                 <LocationInputAutocomplete
                   label="Dropoff"
                   value={dropoff}
@@ -2607,7 +2589,6 @@ export default function RideRequestScreen({ navigation, route }: any) {
                   type="dropoff"
                 />
               </View>
-            </View>
           </View>
         </View>
 
@@ -2626,6 +2607,13 @@ export default function RideRequestScreen({ navigation, route }: any) {
 
             <ThemedText style={styles.sheetTitle}>Choose a ride</ThemedText>
 
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 8 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
             {/* ── Uber-style horizontal cab slider ── */}
             <View style={styles.sliderContainer}>
               <ScrollView
@@ -2801,6 +2789,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
               )}
               {couponError ? <Text style={{ color: '#EF4444', fontSize: 12, marginTop: 6 }}>{couponError}</Text> : null}
             </View>
+            </ScrollView>
 
             <AnimatedPressable
               onPress={handleRequestRide}
@@ -3185,16 +3174,17 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.lg,
+    paddingBottom: Spacing.md,
     backgroundColor: "#000000",
     borderBottomLeftRadius: BorderRadius.xl,
     borderBottomRightRadius: BorderRadius.xl,
+    zIndex: 2,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   backButton: {
     width: 40,
@@ -3211,23 +3201,52 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
   },
-  // pickupLaterBtn: {
-  //   flexDirection: "row",
-  //   alignItems: "center",
-  //   backgroundColor: "#1A1A1A",
-  //   paddingHorizontal: 10,
-  //   paddingVertical: 8,
-  //   borderRadius: 20,
-  //   gap: 4,
-  // },
-  // pickupLaterBtnActive: {
-  //   backgroundColor: UTOColors.primary,
-  // },
-  // pickupLaterText: {
-  //   color: "#FFFFFF",
-  //   fontSize: 12,
-  //   fontWeight: "600",
-  // },
+  // Match Reserve-the-trip: stacked inputs with connector lines, no extra left rail
+  // (LocationInputAutocomplete already draws its own colored dots).
+  locationCard: {
+    backgroundColor: "#0A0A0A",
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#222222",
+  },
+  routeConnector: {
+    width: 2,
+    height: 14,
+    backgroundColor: "#333333",
+    marginLeft: 17,
+    marginVertical: 2,
+  },
+  addViaBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    marginTop: 10,
+    marginBottom: 2,
+    marginLeft: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(245,158,11,0.15)",
+  },
+  addViaText: {
+    color: "#F59E0B",
+    fontWeight: "700",
+    marginLeft: 6,
+    fontSize: 13,
+  },
+  viaRemoveBtn: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    zIndex: 5,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#2A2A2A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   routeContainer: {
     flexDirection: "row",
   },
@@ -3257,15 +3276,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bottomSheet: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    flex: 1,
+    marginTop: 4,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
     borderTopLeftRadius: BorderRadius.xl,
     borderTopRightRadius: BorderRadius.xl,
     backgroundColor: "#000000",
+    minHeight: 280,
   },
   sheetHandle: {
     alignItems: "center",
