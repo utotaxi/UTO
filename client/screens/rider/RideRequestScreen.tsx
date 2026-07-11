@@ -1835,8 +1835,9 @@ import { LocationInputAutocomplete } from "@/components/LocationInputAutocomplet
 import { VehicleCard } from "@/components/VehicleCard";
 import { MapViewWrapper, MarkerWrapper } from "@/components/MapView";
 import { useTheme } from "@/hooks/useTheme";
-import { useRide, RideType, Location as RideLocation } from "@/context/RideContext";
+import { useRide, RideType, Location as RideLocation, RideVia } from "@/context/RideContext";
 import { useAuth } from "@/context/AuthContext";
+import { viasToWaypointsParam, sumDirectionsLegs, MAX_RIDE_VIAS } from "@shared/vias";
 import { getApiUrl } from "@/lib/query-client";
 import { UTOColors, Spacing, BorderRadius, Shadows, formatPrice } from "@/constants/theme";
 import { useStripe } from "@stripe/stripe-react-native";
@@ -1920,6 +1921,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
   const [dropoff, setDropoff] = useState("");
   const [pickupLocation, setPickupLocation] = useState<any>(null);
   const [dropoffLocation, setDropoffLocation] = useState<any>(null);
+  const [vias, setVias] = useState<Array<{ id: string; address: string; latitude?: number; longitude?: number }>>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<RideType>("saloon");
   const [showVehicleSelector, setShowVehicleSelector] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
@@ -2238,20 +2240,26 @@ export default function RideRequestScreen({ navigation, route }: any) {
     if (dropoff.length >= 3 && dropoffLocation) {
       setShowVehicleSelector(true);
       
-      // Fetch actual distance
+      // Fetch actual distance including vias (A → via1 → … → B)
       (async () => {
         try {
           const baseUrl = getApiUrl();
           const originStr = `${pickupLocation?.latitude || location?.coords.latitude || 51.5074},${pickupLocation?.longitude || location?.coords.longitude || -0.1278}`;
           const destStr = `${dropoffLocation.latitude},${dropoffLocation.longitude}`;
+          const readyVias = vias
+            .filter((v) => v.address && Number.isFinite(v.latitude) && Number.isFinite(v.longitude))
+            .map((v) => ({ address: v.address, latitude: Number(v.latitude), longitude: Number(v.longitude) }));
+          const waypoints = viasToWaypointsParam(readyVias);
+          let url = `${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
+          if (waypoints) url += `&waypoints=${encodeURIComponent(waypoints)}`;
           
-          const res = await fetch(`${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`);
+          const res = await fetch(url);
           const data = await res.json();
           
-          if (data.status === "OK" && data.routes?.[0]?.legs?.[0]) {
-            const leg = data.routes[0].legs[0];
-            setDistanceKm((leg.distance?.value || 0) / 1000);
-            setDurationMin(Math.round((leg.duration?.value || 0) / 60));
+          if (data.status === "OK" && data.routes?.[0]?.legs?.length) {
+            const { distanceMeters, durationSeconds } = sumDirectionsLegs(data.routes[0]);
+            setDistanceKm(distanceMeters / 1000);
+            setDurationMin(Math.max(1, Math.round(durationSeconds / 60)));
           } else {
             setDistanceKm(5.5);
             setDurationMin(15);
@@ -2263,7 +2271,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
         }
       })();
     }
-  }, [dropoff, dropoffLocation]);
+  }, [dropoff, dropoffLocation, pickupLocation, vias, location]);
 
   const calculatePrice = (type: RideType): number => {
     return calculateDynamicFare(distanceKm ? (distanceKm * 0.621371) : 3.5, durationMin || 15, type);
@@ -2359,6 +2367,13 @@ export default function RideRequestScreen({ navigation, route }: any) {
       }
 
       const riderName = user?.fullName || user?.email?.split("@")[0] || "Rider";
+      const rideVias: RideVia[] = vias
+        .filter((v) => v.address && Number.isFinite(v.latitude) && Number.isFinite(v.longitude))
+        .map((v) => ({
+          address: v.address,
+          latitude: Number(v.latitude),
+          longitude: Number(v.longitude),
+        }));
 
       await requestRide(
         pickupLoc,
@@ -2370,6 +2385,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
         isCouponApplied ? couponCode.trim() : undefined,
         isCouponApplied ? couponDiscount : 0,
         isCouponApplied ? couponDescription : undefined,
+        rideVias,
       );
     } catch (error) {
       console.error("Failed to request ride:", error);
@@ -2496,10 +2512,16 @@ export default function RideRequestScreen({ navigation, route }: any) {
             <View style={styles.routeIndicator}>
               <View style={[styles.routeDotGreen, { backgroundColor: UTOColors.success }]} />
               <View style={styles.routeLine} />
+              {vias.map((via) => (
+                <React.Fragment key={`dot-${via.id}`}>
+                  <View style={[styles.routeDotYellow, { backgroundColor: "#F59E0B", width: 8, height: 8, borderRadius: 4 }]} />
+                  <View style={styles.routeLine} />
+                </React.Fragment>
+              ))}
               <View style={[styles.routeDotYellow, { backgroundColor: UTOColors.primary }]} />
             </View>
             <View style={styles.inputsContainer}>
-              <View style={{ zIndex: 200 }}>
+              <View style={{ zIndex: 300 }}>
                 <LocationInputAutocomplete
                   label="Pickup"
                   value={pickup}
@@ -2509,7 +2531,73 @@ export default function RideRequestScreen({ navigation, route }: any) {
                   type="pickup"
                 />
               </View>
-              <View style={{ zIndex: 100 }}>
+              {vias.map((via, index) => (
+                <View key={via.id} style={{ zIndex: 250 - index, marginTop: 8 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                    <ThemedText style={{ color: "#F59E0B", fontSize: 12, fontWeight: "700" }}>
+                      Via {index + 1}
+                    </ThemedText>
+                    <Pressable
+                      onPress={() => setVias((prev) => prev.filter((v) => v.id !== via.id))}
+                      hitSlop={8}
+                    >
+                      <MaterialIcons name="close" size={18} color="#9CA3AF" />
+                    </Pressable>
+                  </View>
+                  <LocationInputAutocomplete
+                    label={`Via ${index + 1}`}
+                    value={via.address}
+                    placeholder="Add a stop"
+                    onChangeText={(text) => {
+                      setVias((prev) =>
+                        prev.map((v) => (v.id === via.id ? { ...v, address: text } : v)),
+                      );
+                    }}
+                    onSelectLocation={(loc: any) => {
+                      setVias((prev) =>
+                        prev.map((v) =>
+                          v.id === via.id
+                            ? {
+                                ...v,
+                                address: loc.description || loc.mainText || v.address,
+                                latitude: loc.latitude,
+                                longitude: loc.longitude,
+                              }
+                            : v,
+                        ),
+                      );
+                    }}
+                    type="via"
+                  />
+                </View>
+              ))}
+              {vias.length < MAX_RIDE_VIAS ? (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setVias((prev) => [
+                      ...prev,
+                      { id: `via_${Date.now()}_${prev.length}`, address: "" },
+                    ]);
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginTop: 10,
+                    alignSelf: "flex-start",
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 8,
+                    backgroundColor: "rgba(245,158,11,0.15)",
+                  }}
+                >
+                  <MaterialIcons name="add-location-alt" size={16} color="#F59E0B" />
+                  <ThemedText style={{ color: "#F59E0B", fontWeight: "700", marginLeft: 6, fontSize: 13 }}>
+                    Add via ({vias.length}/{MAX_RIDE_VIAS})
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+              <View style={{ zIndex: 100, marginTop: 8 }}>
                 <LocationInputAutocomplete
                   label="Dropoff"
                   value={dropoff}

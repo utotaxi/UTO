@@ -34,7 +34,7 @@ interface LocationInputAutocompleteProps {
   placeholder: string;
   onChangeText: (text: string) => void;
   onSelectLocation: (location: PlaceSuggestion) => void;
-  type: "pickup" | "dropoff";
+  type: "pickup" | "dropoff" | "via";
   autoFocus?: boolean;
 }
 
@@ -60,7 +60,8 @@ export function LocationInputAutocomplete({
   // Use a ref for the debounce timer so it persists across renders
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const dotColor = type === "pickup" ? UTOColors.success : UTOColors.primary;
+  const dotColor =
+    type === "pickup" ? UTOColors.success : type === "via" ? "#F59E0B" : UTOColors.primary;
 
   const loadSavedPlaces = useCallback(async () => {
     if (!user?.id) return;

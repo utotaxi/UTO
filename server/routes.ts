@@ -107,6 +107,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log('ℹ️ Migration check skipped:', (e as Error).message);
   }
 
+  // ─── Ensure ride_vias table for ASAP intermediate stops (up to 5) ───
+  try {
+    const { error: viaTableErr } = await supabase.rpc("exec_sql", {
+      sql: `
+        CREATE TABLE IF NOT EXISTS public.ride_vias (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          ride_id TEXT NOT NULL,
+          sequence_order INTEGER NOT NULL CHECK (sequence_order >= 1 AND sequence_order <= 5),
+          address TEXT NOT NULL,
+          latitude DOUBLE PRECISION NOT NULL,
+          longitude DOUBLE PRECISION NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (ride_id, sequence_order)
+        );
+        CREATE INDEX IF NOT EXISTS ride_vias_ride_id_idx ON public.ride_vias (ride_id);
+      `,
+    });
+    if (viaTableErr) {
+      console.log("ℹ️ ride_vias ensure skipped (run scripts/ride-vias-migration.sql in Supabase if needed):", viaTableErr.message);
+    } else {
+      console.log("✅ Ensured ride_vias table exists");
+    }
+  } catch (e) {
+    console.log("ℹ️ ride_vias migration check skipped:", (e as Error).message);
+  }
+
   // ─── Safe migration: ensure estimated_fare & vehicle_type columns on later_bookings ───
   try {
     await supabase.rpc('exec_sql', {
@@ -874,7 +900,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/rides/:rideId/start-trip", async (req: Request, res: Response) => {
+  app.get("/api/rides/:rideId/vias", async (req: Request, res: Response) => {
+    try {
+      const rideId = req.params.rideId as string;
+      if (!rideId) return res.status(400).json({ error: "rideId is required" });
+      const { data, error } = await supabase
+        .from("ride_vias")
+        .select("id, ride_id, sequence_order, address, latitude, longitude")
+        .eq("ride_id", rideId)
+        .order("sequence_order", { ascending: true });
+      if (error) {
+        return res.status(200).json({ vias: [] });
+      }
+      res.json({
+        vias: (data || []).map((row: any) => ({
+          address: row.address,
+          latitude: Number(row.latitude),
+          longitude: Number(row.longitude),
+          sequenceOrder: Number(row.sequence_order),
+        })),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to load vias" });
+    }
+  });
+
     try {
       const rideId = req.params.rideId as string;
       const { pin, driverId } = req.body || {};
@@ -1509,34 +1559,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const generateMockRoute = () => {
         const originCoords = (origin as string).split(",").map(Number);
         const destCoords = (destination as string).split(",").map(Number);
+        const viaCoords: number[][] = [];
+        if (waypoints) {
+          String(waypoints)
+            .split("|")
+            .map((p) => p.trim())
+            .filter(Boolean)
+            .forEach((p) => {
+              const parts = p.split(",").map(Number);
+              if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+                viaCoords.push([parts[0], parts[1]]);
+              }
+            });
+        }
 
-        const latDiff = destCoords[0] - originCoords[0];
-        const lngDiff = destCoords[1] - originCoords[1];
-        const distanceKm = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff) * 111;
-        const distanceMiles = distanceKm * 0.621371;
-        const distanceMeters = Math.round(distanceKm * 1000);
-        const durationSeconds = Math.round(distanceKm * 120);
-
+        const pointsChain = [originCoords, ...viaCoords, destCoords];
+        const legs: any[] = [];
         const points: { latitude: number; longitude: number }[] = [];
-        const steps = 20;
-        for (let i = 0; i <= steps; i++) {
-          const t = i / steps;
-          const midOffset = Math.sin(t * Math.PI) * 0.002;
-          points.push({
-            latitude: originCoords[0] + latDiff * t + midOffset * (lngDiff > 0 ? 1 : -1),
-            longitude: originCoords[1] + lngDiff * t + midOffset * (latDiff > 0 ? -1 : 1),
+
+        for (let i = 0; i < pointsChain.length - 1; i++) {
+          const a = pointsChain[i];
+          const b = pointsChain[i + 1];
+          const latDiff = b[0] - a[0];
+          const lngDiff = b[1] - a[1];
+          const distanceKm = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff) * 111;
+          const distanceMeters = Math.round(distanceKm * 1000);
+          const durationSeconds = Math.round(distanceKm * 120);
+          legs.push({
+            distance: { text: `${(distanceKm * 0.621371).toFixed(1)} mi`, value: distanceMeters },
+            duration: { text: `${Math.round(durationSeconds / 60)} mins`, value: durationSeconds },
+            start_location: { lat: a[0], lng: a[1] },
+            end_location: { lat: b[0], lng: b[1] },
           });
+          const steps = 10;
+          for (let s = 0; s <= steps; s++) {
+            const t = s / steps;
+            if (i > 0 && s === 0) continue;
+            points.push({
+              latitude: a[0] + latDiff * t,
+              longitude: a[1] + lngDiff * t,
+            });
+          }
         }
 
         return {
           routes: [{
             overview_polyline: { points: "" },
-            legs: [{
-              distance: { text: `${(distanceMiles).toFixed(1)} mi`, value: distanceMeters },
-              duration: { text: `${Math.round(durationSeconds / 60)} mins`, value: durationSeconds },
-              start_location: { lat: originCoords[0], lng: originCoords[1] },
-              end_location: { lat: destCoords[0], lng: destCoords[1] },
-            }],
+            legs,
             decodedPolyline: points,
           }],
           status: "OK",

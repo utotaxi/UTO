@@ -863,6 +863,7 @@ import { getApiUrl } from "@/lib/query-client";
 import { normalizeBackendTimestamp } from "@/lib/dateTime";
 import { useAuth } from "./AuthContext";
 import { sendLocalNotification } from "@/hooks/useNotifications";
+import { normalizeVias, viasToWaypointsParam, sumDirectionsLegs, MAX_RIDE_VIAS, type RideVia } from "@shared/vias";
 
 export type RideType = "saloon" | "people_carrier" | "minibus";
 export type RideStatus = "pending" | "accepted" | "arrived" | "in_progress" | "completed" | "cancelled" | "cancelled_no_drivers" | "cancelled_no_show";
@@ -873,10 +874,13 @@ export interface Location {
   longitude: number;
 }
 
+export type { RideVia };
+
 export interface Ride {
   id: string;
   pickupLocation: Location;
   dropoffLocation: Location;
+  vias?: RideVia[];
   rideType: RideType;
   status: RideStatus;
   farePrice: number;
@@ -916,6 +920,7 @@ interface RideContextType {
     couponCode?: string,
     discountAmount?: number,
     couponDescription?: string,
+    vias?: RideVia[],
   ) => Promise<Ride>;
   startRide: (rideId: string, otp: string) => Promise<boolean>;
   cancelRide: (rideId: string, withPenalty?: boolean) => Promise<void>;
@@ -1668,27 +1673,31 @@ export function RideProvider({ children }: { children: ReactNode }) {
     couponCode?: string,
     discountAmount: number = 0,
     couponDescription?: string,
+    viasInput: RideVia[] = [],
   ): Promise<Ride> => {
     let distanceKm = 0;
     let durationMinutes = 0;
+    const vias = normalizeVias(viasInput).slice(0, MAX_RIDE_VIAS);
 
     try {
       const baseUrl = getApiUrl();
       const originStr = `${pickup.latitude},${pickup.longitude}`;
       const destStr = `${dropoff.latitude},${dropoff.longitude}`;
-      const url = `${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
+      const waypoints = viasToWaypointsParam(vias);
+      let url = `${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
+      if (waypoints) {
+        url += `&waypoints=${encodeURIComponent(waypoints)}`;
+      }
 
-      console.log('📍 Fetching directions for ride request:', url);
+      console.log('📍 Fetching directions for ride request:', url, vias.length ? `(${vias.length} via(s))` : "");
       const res = await fetch(url);
       const data = await res.json();
 
-      if (data.status === "OK" && data.routes?.[0]?.legs?.[0]) {
-        const leg = data.routes[0].legs[0];
-        // distance.value is always in meters from Google API, convert to miles
-        const distanceMeters = leg.distance?.value || 0;
-        distanceKm = distanceMeters / 1000; // keep km for fare calculation
-        durationMinutes = Math.round((leg.duration?.value || 0) / 60);
-        console.log(`✅ Directions API success: ${distanceMeters}m = ${distanceKm.toFixed(1)}km = ${(distanceMeters / 1609.344).toFixed(1)}mi, duration=${durationMinutes}min`);
+      if (data.status === "OK" && data.routes?.[0]?.legs?.length) {
+        const { distanceMeters, durationSeconds } = sumDirectionsLegs(data.routes[0]);
+        distanceKm = distanceMeters / 1000;
+        durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
+        console.log(`✅ Directions API success (with vias): ${distanceMeters}m = ${distanceKm.toFixed(1)}km, duration=${durationMinutes}min, legs=${data.routes[0].legs.length}`);
       } else {
         console.warn('⚠️ Directions API returned non-OK status:', data.status, 'error_message:', data.error_message);
         distanceKm = Math.round((5 + Math.random() * 15) * 10) / 10;
@@ -1717,6 +1726,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
       id: `ride_${Date.now()}`,
       pickupLocation: pickup,
       dropoffLocation: dropoff,
+      vias,
       rideType,
       status: "pending",
       farePrice: fullFare,
@@ -1744,7 +1754,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
       newRide.paymentStatus = "pending";
     }
 
-    console.log(`🚕 Ride created: distance=${distanceMiles}mi, duration=${durationMinutes}min, fare=${fullFare}`);
+    console.log(`🚕 Ride created: distance=${distanceMiles}mi, duration=${durationMinutes}min, fare=${fullFare}, vias=${vias.length}`);
 
     setActiveRide(newRide);
     await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(newRide));
@@ -1760,6 +1770,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
         riderId: user?.id,
         riderName: riderName || user?.fullName || "Rider",
         riderPhone: user?.phone || "",
+        vias,
       });
     } catch (err) {
       console.warn("Socket emit failed:", err);

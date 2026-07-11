@@ -2231,6 +2231,7 @@ import { capturePaymentIntent, chargeSavedCard, releaseAuthorization } from "./s
 import { DEFAULT_DRIVER_RADIUS_MILES, haversineDistanceMiles } from "../server/services/driverMatching";
 import { DRIVER_DEDUCTION_TYPE, formatLiveRideCancellationPenalty } from "../shared/driverDeductions";
 import { getDiscountedFare, getDriverCancelPenalty } from "../shared/fare";
+import { normalizeVias, type RideVia } from "../shared/vias";
 import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 
 export const serverRideEmitter = new EventEmitter();
@@ -2445,6 +2446,53 @@ const normalizeVehicleType = (value: any): string => {
   }
 };
 
+async function saveRideVias(rideId: string, rawVias: any): Promise<RideVia[]> {
+  const vias = normalizeVias(rawVias);
+  if (!rideId || vias.length === 0) return [];
+
+  const rows = vias.map((via, index) => ({
+    ride_id: rideId,
+    sequence_order: index + 1,
+    address: via.address,
+    latitude: via.latitude,
+    longitude: via.longitude,
+  }));
+
+  try {
+    await supabase.from("ride_vias").delete().eq("ride_id", rideId);
+    const { error } = await supabase.from("ride_vias").insert(rows);
+    if (error) {
+      console.warn(`⚠️ Could not save ride_vias for ${rideId}:`, error.message);
+      return vias;
+    }
+    console.log(`✅ Saved ${rows.length} via(s) for ride ${rideId}`);
+  } catch (err) {
+    console.warn(`⚠️ Exception saving ride_vias for ${rideId}:`, err);
+  }
+  return vias;
+}
+
+async function loadRideVias(rideId: string): Promise<RideVia[]> {
+  try {
+    const { data, error } = await supabase
+      .from("ride_vias")
+      .select("address, latitude, longitude, sequence_order")
+      .eq("ride_id", rideId)
+      .order("sequence_order", { ascending: true });
+    if (error || !data) return [];
+    return normalizeVias(
+      data.map((row: any) => ({
+        address: row.address,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        sequenceOrder: row.sequence_order,
+      })),
+    );
+  } catch {
+    return [];
+  }
+}
+
 // Track active dispatch queues so we can cancel/advance them
 // rideId -> { heap, timer, rideData, riderSocketId, currentDriverId }
 interface DispatchState {
@@ -2507,8 +2555,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
     return driverByUserId?.id || null;
   };
 
-  const buildRideDataFromDbRide = (ride: any) => {
+  const buildRideDataFromDbRide = async (ride: any) => {
     const normalizedRideType = normalizeVehicleType(ride.vehicle_type || "saloon");
+    const vias = await loadRideVias(ride.id);
     return {
     id: ride.id,
     riderId: ride.rider_id,
@@ -2535,6 +2584,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
     discountAmount: Number(ride.discount_amount || 0),
     paymentMethod: ride.payment_method || "card",
     otp: ride.otp || null,
+    vias,
   };
   };
 
@@ -2758,6 +2808,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 otp: enrichedRide.otp,
                 paymentMethod: enrichedRide.paymentMethod || "card",
                 rideType: enrichedRide.rideType || enrichedRide.vehicleType,
+                vias: enrichedRide.vias || [],
               },
             },
             priority: "high",
@@ -2811,6 +2862,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
       const handleRideRequest = async (rideData: any, sourceSocketId: string | null) => {
       console.log('🚕 New ride request from:', rideData.riderId, 'Ride ID:', rideData.id);
       console.log('🚕 Ride data keys:', Object.keys(rideData));
+      rideData.vias = normalizeVias(rideData.vias || rideData.viaStops || rideData.waypoints);
 
       if (rideData.id) {
         const existingRideInfo = activeRides.get(rideData.id);
@@ -2889,6 +2941,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
               return;
             } else {
               console.log(`✅ Saved ride ${rideData.id} to Supabase! Row:`, insertedData?.id);
+              const savedVias = await saveRideVias(
+                rideData.id,
+                rideData.vias || rideData.viaStops || rideData.waypoints,
+              );
+              if (savedVias.length > 0) {
+                rideData.vias = savedVias;
+              }
             }
           } catch (error) {
             console.error("❌ Exception saving ride request to DB:", error);
@@ -3849,7 +3908,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           }
 
           const riderSocketId = rideInfo?.riderSocketId || connectedRiders.get(ride.rider_id) || "";
-          const rideData = rideInfo?.rideData || buildRideDataFromDbRide(ride);
+          const rideData = rideInfo?.rideData || (await buildRideDataFromDbRide(ride));
           activeRides.set(data.rideId, {
             riderSocketId,
             riderId: ride.rider_id,

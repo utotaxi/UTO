@@ -655,6 +655,7 @@ export default function DriverHomeScreen({ navigation }: any) {
             riderName={activeRideRequest.riderName}
             pickupAddress={activeRideRequest.pickupAddress}
             dropoffAddress={activeRideRequest.dropoffAddress}
+            vias={activeRideRequest.vias}
             estimatedFare={activeRideRequest.estimatedFare}
             pickupDistance={activeRideRequest.pickupDistance}
             distanceMiles={activeRideRequest.distanceMiles}
@@ -729,6 +730,17 @@ export default function DriverHomeScreen({ navigation }: any) {
                   {activeRideRequest.pickupAddress}
                 </ThemedText>
               </View>
+              {(activeRideRequest.vias || []).map((via, index) => (
+                <React.Fragment key={`accepted-via-${index}`}>
+                  <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+                  <View style={styles.routeRow}>
+                    <View style={[styles.routeDot, { backgroundColor: "#F59E0B" }]} />
+                    <ThemedText style={styles.routeAddress} numberOfLines={1}>
+                      Via {index + 1}: {via.address}
+                    </ThemedText>
+                  </View>
+                </React.Fragment>
+              ))}
               <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
               <View style={styles.routeRow}>
                 <View style={[styles.routeDot, { backgroundColor: UTOColors.error }]} />
@@ -1062,6 +1074,17 @@ export default function DriverHomeScreen({ navigation }: any) {
                     {activeRideRequest.pickupAddress}
                   </ThemedText>
                 </View>
+                {(activeRideRequest.vias || []).map((via, index) => (
+                  <React.Fragment key={`progress-via-${index}`}>
+                    <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+                    <View style={styles.routeRow}>
+                      <View style={[styles.routeDot, { backgroundColor: "#F59E0B" }]} />
+                      <ThemedText style={styles.routeAddress} numberOfLines={1}>
+                        Via {index + 1}: {via.address}
+                      </ThemedText>
+                    </View>
+                  </React.Fragment>
+                ))}
                 <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
                 <View style={styles.routeRow}>
                   <View style={[styles.routeDot, { backgroundColor: UTOColors.error }]} />

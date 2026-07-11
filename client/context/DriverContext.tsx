@@ -20,6 +20,7 @@ import {
   isCancellationCreditDeduction,
 } from "@shared/driverDeductions";
 import { getDiscountedFare, getDriverCancelPenalty } from "@shared/fare";
+import { normalizeVias, type RideVia } from "@shared/vias";
 
 export interface DriverProfile {
   id?: string;
@@ -101,6 +102,7 @@ export interface RideRequest {
   pickupLongitude: number;
   dropoffLatitude: number;
   dropoffLongitude: number;
+  vias?: RideVia[];
   estimatedFare: number;
   distanceMiles: number;
   durationMinutes: number;
@@ -196,6 +198,7 @@ function mapRidePayload(ride: any): RideRequest {
         ? ride.expectedCollectAmount
         : payableFare,
     discountAmount,
+    vias: normalizeVias(ride.vias || ride.viaStops || ride.waypoints),
   };
 }
 

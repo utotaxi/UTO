@@ -19,6 +19,7 @@ interface RideRequestCardProps {
   riderName: string;
   pickupAddress: string;
   dropoffAddress: string;
+  vias?: Array<{ address: string }>;
   estimatedFare: number;
   pickupDistance: number;
   distanceMiles?: number;
@@ -34,6 +35,7 @@ export function RideRequestCard({
   riderName,
   pickupAddress,
   dropoffAddress,
+  vias = [],
   estimatedFare,
   pickupDistance,
   distanceMiles,
@@ -141,6 +143,17 @@ export function RideRequestCard({
             {pickupAddress}
           </ThemedText>
         </View>
+        {vias.map((via, index) => (
+          <React.Fragment key={`via-${index}-${via.address}`}>
+            <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+            <View style={styles.routeRow}>
+              <View style={[styles.dot, { backgroundColor: "#F59E0B" }]} />
+              <ThemedText style={styles.address} numberOfLines={1}>
+                Via {index + 1}: {via.address}
+              </ThemedText>
+            </View>
+          </React.Fragment>
+        ))}
         <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
         <View style={styles.routeRow}>
           <View style={[styles.dot, { backgroundColor: UTOColors.driver.primary }]} />

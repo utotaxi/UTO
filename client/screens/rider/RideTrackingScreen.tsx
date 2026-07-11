@@ -104,13 +104,17 @@ export default function RideTrackingScreen({ navigation }: any) {
         const apiUrl = getApiUrl();
         const pickupToDropoff = `${activeRide.pickupLocation.latitude},${activeRide.pickupLocation.longitude}`;
         const dropoff = `${activeRide.dropoffLocation.latitude},${activeRide.dropoffLocation.longitude}`;
+        const viaParam = (activeRide.vias || [])
+          .filter((v) => Number.isFinite(v.latitude) && Number.isFinite(v.longitude))
+          .map((v) => `${v.latitude},${v.longitude}`)
+          .join("|");
 
         console.log('🚀 Fetching route...');
+        const routeUrl = viaParam
+          ? `/api/directions?origin=${pickupToDropoff}&destination=${dropoff}&waypoints=${encodeURIComponent(viaParam)}`
+          : `/api/directions?origin=${pickupToDropoff}&destination=${dropoff}`;
         const routeResponse = await fetch(
-          new URL(
-            `/api/directions?origin=${pickupToDropoff}&destination=${dropoff}`,
-            apiUrl,
-          ).toString(),
+          new URL(routeUrl, apiUrl).toString(),
         );
         const routeData = await routeResponse.json();
 
