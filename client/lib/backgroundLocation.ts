@@ -38,7 +38,7 @@ async function maybeNotifyPendingAssigned(pending: any) {
 
   try {
     const { claimNotification } = await import('./notificationDedupe');
-    const dedupeKey = `scheduled_booking_assigned:${pending.id}`;
+    const dedupeKey = `driver:scheduled_booking_assigned:${pending.id}:once`;
     if (!claimNotification(dedupeKey)) return;
 
     const Notifications = await import('expo-notifications');

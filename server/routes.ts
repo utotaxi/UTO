@@ -3596,6 +3596,7 @@ const triggerMarketplaceCheckReminders = async () => {
             audience: "driver",
             target: "Marketplace",
             screen: "Marketplace",
+            slotKey,
           },
           { channelId: "uto-scheduled-v2", ttlSeconds: 3600 },
         ),

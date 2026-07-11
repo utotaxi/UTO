@@ -36,8 +36,11 @@ export function notificationDedupeKey(data: Record<string, any> | null | undefin
   if (!data || typeof data !== "object") return null;
   const type = String(data.type || data.target || "").trim();
   const id = String(data.bookingId || data.rideId || data.ride?.id || "").trim();
-  if (!type && !id) return null;
-  return `${type || "notice"}:${id || "general"}`;
+  const audience = String(data.audience || "").trim().toLowerCase();
+  // Distinct reminder stages (1h / 30m / contact) must each alert once.
+  const stage = String(data.reminderBucket || data.slotKey || data.stage || "").trim();
+  if (!type && !id && !stage) return null;
+  return [audience || "any", type || "notice", id || "general", stage || "once"].join(":");
 }
 
 /** Soft in-app beep (single play). Used instead of looping ride alerts for most notices. */

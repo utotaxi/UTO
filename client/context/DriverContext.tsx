@@ -311,7 +311,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       // Only notify the assigned driver
       if (assignedIds.length > 0 && !assignedIds.some((id) => driverIds.includes(id))) return;
 
-      const dedupeKey = `scheduled_booking_assigned:${booking.id}`;
+      const dedupeKey = `driver:scheduled_booking_assigned:${booking.id}:once`;
       if (!claimNotification(dedupeKey)) return;
 
       playRideAlert();
@@ -354,7 +354,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const assigned = booking.assigned_driver_id || booking.driver_id;
       if (assigned) return;
 
-      const dedupeKey = `scheduled_marketplace_created:${booking.id}`;
+      const dedupeKey = `driver:scheduled_marketplace_created:${booking.id}:once`;
       if (!claimNotification(dedupeKey)) return;
 
       const fare = Number(booking.driver_fare || booking.estimated_fare || 0);
@@ -410,7 +410,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(scheduledTrip)).catch((err) =>
         console.warn("⚠️ Failed to persist scheduled active ride:", err)
       );
-      const liveKey = `scheduled_ride_live:${ride.id}`;
+      const liveKey = `driver:scheduled_ride_live:${ride.id}:once`;
       if (claimNotification(liveKey)) {
         playRideAlert();
         sendLocalNotification(
@@ -430,7 +430,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     setRideState("incoming");
 
     // Alert at most once per ride — opening the app / pending-dispatch must not re-flood.
-    const requestKey = `ride_request:${mappedRequest.id}`;
+    const requestKey = `driver:ride_request:${mappedRequest.id}:once`;
     if (isNewOffer && claimNotification(requestKey)) {
       playRideAlert();
       sendLocalNotification(
