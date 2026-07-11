@@ -17,7 +17,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useDriver } from '@/context/DriverContext';
 import { getApiUrl } from '@/lib/query-client';
 import { getSocket } from '@/lib/socket';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 const UTO_YELLOW = '#FFD000';
 
@@ -277,6 +277,12 @@ export default function DriverUpcomingBookingsScreen() {
   }, [driverQueryId]);
 
   useEffect(() => { loadBookings(); }, [loadBookings]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBookings();
+    }, [loadBookings]),
+  );
 
   useEffect(() => {
     const socket = getSocket();

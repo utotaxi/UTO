@@ -332,10 +332,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       const dedupeKey = `driver:scheduled_booking_assigned:${booking.id}:once`;
       if (!claimNotification(dedupeKey)) return;
 
-      playRideAlert();
+      const title = "📋 Ride Assigned To You";
+      const body = `Ride ${booking.id} has been assigned to you. Open Upcoming to Accept or Decline.`;
+      // Schedule banner FIRST — vibrate alone previously looked like a "failed" alert.
       sendLocalNotification(
-        "📋 Ride Assigned To You",
-        `Ride ${booking.id} has been assigned to you. Open Upcoming to Accept or Decline.`,
+        title,
+        body,
         {
           type: "scheduled_booking_assigned",
           bookingId: String(booking.id),
@@ -345,7 +347,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           screen: "UpcomingBookings",
         },
         { alreadyClaimed: true, skipWhenForeground: false, bypassAudienceCheck: true },
-      );
+      ).catch(() => {});
+      playRideAlert();
+      if (AppState.currentState === "active") {
+        Alert.alert(title, body, [{ text: "OK" }]);
+      }
     };
 
     socket.on("later-booking:assigned", onAssigned);
@@ -377,10 +383,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       const fare = Number(booking.driver_fare || booking.estimated_fare || 0);
       const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : "";
-      playRideAlert();
+      const title = "🗓 New Scheduled Ride";
+      const body = `A booking has been scheduled${fareLabel}. Open Marketplace to pick up ride ${booking.id}.`;
       sendLocalNotification(
-        "🗓 New Scheduled Ride",
-        `A booking has been scheduled${fareLabel}. Open Marketplace to pick up ride ${booking.id}.`,
+        title,
+        body,
         {
           type: "scheduled_marketplace_created",
           bookingId: String(booking.id),
@@ -390,7 +397,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           screen: "Marketplace",
         },
         { alreadyClaimed: true, bypassAudienceCheck: true },
-      );
+      ).catch(() => {});
+      playRideAlert();
+      if (AppState.currentState === "active") {
+        Alert.alert(title, body, [{ text: "OK" }]);
+      }
     };
 
     // Prefer dedicated marketplace event — do NOT also listen to later-booking:update

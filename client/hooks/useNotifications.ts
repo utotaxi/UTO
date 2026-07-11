@@ -30,6 +30,11 @@ try {
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
       const data = (notification?.request?.content?.data || {}) as Record<string, any>;
+      const trigger = notification?.request?.trigger as any;
+      // Local (trigger null / non-push) vs remote Expo/FCM push.
+      const isRemotePush =
+        trigger?.type === "push" ||
+        (trigger != null && typeof trigger === "object" && "remoteMessage" in trigger);
 
       // Only suppress cross-role banners while the app is actively open in the
       // other mode. Background / killed delivery must still show so offline
@@ -44,8 +49,11 @@ try {
       }
 
       const key = notificationDedupeKey(data);
-      // If we already alerted for this event (socket/local/push), suppress repeats.
-      if (key && wasNotificationClaimed(key)) {
+      // CRITICAL: socket code claims the key BEFORE scheduling a local
+      // notification. If we suppress on any claim, the banner never shows and
+      // the driver only feels the vibrate from playSoftBeep.
+      // Only suppress duplicate *remote* pushes after we've already alerted.
+      if (isRemotePush && key && wasNotificationClaimed(key)) {
         return {
           shouldShowBanner: false,
           shouldShowList: false,

@@ -14,9 +14,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
+import { useDriver } from '@/context/DriverContext';
 import { getApiUrl } from '@/lib/query-client';
 import { getSocket } from '@/lib/socket';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 const UTO_YELLOW = '#FFD000';
 
@@ -234,10 +235,14 @@ export default function DriverMarketplaceScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
+  const { driverProfile } = useDriver();
+  const driverQueryId = driverProfile?.id || user?.id;
 
   const loadBookings = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiUrl()}/api/later-bookings${user?.id ? `?driverId=${user.id}` : ''}`);
+      const res = await fetch(
+        `${getApiUrl()}/api/later-bookings${driverQueryId ? `?driverId=${driverQueryId}` : ''}`,
+      );
       if (!res.ok) throw new Error('Failed to load');
       const data = await res.json();
       // Marketplace = open unassigned jobs only. Assigned pending offers live in Upcoming.
@@ -253,9 +258,15 @@ export default function DriverMarketplaceScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, [driverQueryId]);
 
   useEffect(() => { loadBookings(); }, [loadBookings]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBookings();
+    }, [loadBookings]),
+  );
 
   useEffect(() => {
     const socket = getSocket();
@@ -272,8 +283,10 @@ export default function DriverMarketplaceScreen() {
       }
     };
     socket.on('later-booking:update', onUpdate);
+    socket.on('later-booking:marketplace', onUpdate);
     return () => {
       socket.off('later-booking:update', onUpdate);
+      socket.off('later-booking:marketplace', onUpdate);
     };
   }, [loadBookings]);
 
@@ -290,7 +303,7 @@ export default function DriverMarketplaceScreen() {
               const res = await fetch(`${getApiUrl()}/api/later-bookings/${id}/accept`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ driverId: user?.id })
+                body: JSON.stringify({ driverId: driverQueryId })
               });
               if (!res.ok) throw new Error('Failed to accept');
               loadBookings();
