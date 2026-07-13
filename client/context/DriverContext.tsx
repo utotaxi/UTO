@@ -472,7 +472,21 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       playRideAlert();
       sendLocalNotification(
         "🚕 New Ride Request",
-        `${ride.riderName || "A rider"} needs a ride from ${ride.pickupAddress || ride.pickup_address || "nearby"}`,
+        (() => {
+          const typeRaw = String(
+            ride.rideType || ride.vehicleType || ride.vehicle_type || mappedRequest.rideType || "saloon",
+          )
+            .trim()
+            .toLowerCase()
+            .replace(/[\s-]+/g, "_");
+          const typeLabel =
+            typeRaw === "people_carrier" || typeRaw === "peoplecarrier"
+              ? "People Carrier"
+              : typeRaw === "minibus" || typeRaw === "mini_bus"
+                ? "Minibus"
+                : "Saloon";
+          return `${typeLabel} · ${ride.riderName || mappedRequest.riderName || "A rider"} needs a ride from ${ride.pickupAddress || ride.pickup_address || mappedRequest.pickupAddress || "nearby"}`;
+        })(),
         { type: "ride_request", rideId: ride.id, audience: "driver" },
         { alreadyClaimed: true },
       );
