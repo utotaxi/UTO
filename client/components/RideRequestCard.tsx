@@ -20,12 +20,21 @@ interface RideRequestCardProps {
   pickupAddress: string;
   dropoffAddress: string;
   vias?: Array<{ address: string }>;
+  /** Rider-requested vehicle type: saloon | people_carrier | minibus */
+  rideRequestedType?: string;
   estimatedFare: number;
   pickupDistance: number;
   distanceMiles?: number;
   durationMinutes?: number;
   onAccept: () => void;
   onDecline: () => void;
+}
+
+function formatRideRequestedType(value?: string): string {
+  const normalized = String(value || "saloon").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "people_carrier" || normalized === "peoplecarrier") return "People Carrier";
+  if (normalized === "minibus" || normalized === "mini_bus") return "Minibus";
+  return "Saloon";
 }
 
 const AnimatedView = Animated.createAnimatedComponent(View);
@@ -36,6 +45,7 @@ export function RideRequestCard({
   pickupAddress,
   dropoffAddress,
   vias = [],
+  rideRequestedType,
   estimatedFare,
   pickupDistance,
   distanceMiles,
@@ -133,6 +143,16 @@ export function RideRequestCard({
             Passenger
           </ThemedText>
         </View>
+      </View>
+
+      <View style={[styles.rideTypeRow, { backgroundColor: theme.backgroundSecondary || "#F8F9FA" }]}>
+        <MaterialIcons name="directions-car" size={16} color={UTOColors.driver.primary} />
+        <ThemedText style={[styles.rideTypeLabel, { color: theme.textSecondary }]}>
+          Ride requested type
+        </ThemedText>
+        <ThemedText style={styles.rideTypeValue}>
+          {formatRideRequestedType(rideRequestedType)}
+        </ThemedText>
       </View>
 
       {/* Route */}
@@ -281,6 +301,24 @@ const styles = StyleSheet.create({
   },
   pickupDistance: {
     fontSize: 13,
+  },
+  rideTypeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.md,
+  },
+  rideTypeLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    flex: 1,
+  },
+  rideTypeValue: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   routeSection: {
     marginBottom: Spacing.md,

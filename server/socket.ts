@@ -2773,11 +2773,23 @@ export function setupSocketIO(httpServer: HTTPServer) {
             enrichedRide.pickupLocation?.address ||
             enrichedRide.pickupAddress ||
             "nearby";
+          const rideTypeRaw = String(
+            enrichedRide.rideType || enrichedRide.vehicleType || enrichedRide.vehicle_type || "saloon",
+          )
+            .trim()
+            .toLowerCase()
+            .replace(/[\s-]+/g, "_");
+          const rideTypeLabel =
+            rideTypeRaw === "people_carrier" || rideTypeRaw === "peoplecarrier"
+              ? "People Carrier"
+              : rideTypeRaw === "minibus" || rideTypeRaw === "mini_bus"
+                ? "Minibus"
+                : "Saloon";
           const pushMessage = {
             to: userRow.push_token,
             sound: "default",
             title: "🚕 New Ride Request",
-            body: `New ride from ${pickupLabel} — £${fareLabel}`,
+            body: `${rideTypeLabel} · from ${pickupLabel} — £${fareLabel}`,
             data: {
               type: "ride_request",
               rideId,
@@ -2808,6 +2820,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 otp: enrichedRide.otp,
                 paymentMethod: enrichedRide.paymentMethod || "card",
                 rideType: enrichedRide.rideType || enrichedRide.vehicleType,
+                vehicleType: enrichedRide.rideType || enrichedRide.vehicleType,
                 vias: enrichedRide.vias || [],
               },
             },

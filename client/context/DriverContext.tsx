@@ -103,6 +103,8 @@ export interface RideRequest {
   dropoffLatitude: number;
   dropoffLongitude: number;
   vias?: RideVia[];
+  /** Rider-requested vehicle: saloon | people_carrier | minibus */
+  rideType?: string;
   estimatedFare: number;
   distanceMiles: number;
   durationMinutes: number;
@@ -199,6 +201,12 @@ function mapRidePayload(ride: any): RideRequest {
         : payableFare,
     discountAmount,
     vias: normalizeVias(ride.vias || ride.viaStops || ride.waypoints),
+    rideType: String(
+      ride.rideType || ride.vehicleType || ride.vehicle_type || ride.ride_type || "saloon",
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_") || "saloon",
   };
 }
 

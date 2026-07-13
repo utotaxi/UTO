@@ -656,6 +656,7 @@ export default function DriverHomeScreen({ navigation }: any) {
             pickupAddress={activeRideRequest.pickupAddress}
             dropoffAddress={activeRideRequest.dropoffAddress}
             vias={activeRideRequest.vias}
+            rideRequestedType={activeRideRequest.rideType}
             estimatedFare={activeRideRequest.estimatedFare}
             pickupDistance={activeRideRequest.pickupDistance}
             distanceMiles={activeRideRequest.distanceMiles}
