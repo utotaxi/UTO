@@ -3841,30 +3841,43 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
           if (data.applyPenalty && penaltyAmount > 0 && actualDriverId) {
             try {
-              // Deduct penalty from driver's total_earnings
-              const { data: driverData } = await supabase
-                .from("drivers")
-                .select("total_earnings")
-                .eq("id", actualDriverId)
-                .single();
-              const currentEarnings = Number(driverData?.total_earnings || 0);
-              const newEarnings = Number((currentEarnings - penaltyAmount).toFixed(2));
-              const { error: earningsUpdateErr } = await supabase
-                .from("drivers")
-                .update({ total_earnings: newEarnings })
-                .eq("id", actualDriverId);
-
-              // Create deduction record
+              // Create/upsert deduction FIRST. Only deduct earnings when this is
+              // the first penalty for this ride — prevents double-charge if the
+              // cancel event is emitted twice.
               const deductionLabel = formatLiveRideCancellationPenalty(data.rideId);
+              let createdPenalty = false;
               try {
-                await upsertDriverPenaltyDeduction(supabase, {
+                const result = await upsertDriverPenaltyDeduction(supabase, {
                   driverId: actualDriverId,
                   amount: deductionAmount,
                   type: DRIVER_DEDUCTION_TYPE.PENALTY,
                   reason: deductionLabel,
+                  rideId: data.rideId,
                 });
+                createdPenalty = !!result?.created;
               } catch (deductionErr) {
                 console.error(`❌ Failed to create driver deduction for ride ${data.rideId}:`, deductionErr);
+              }
+
+              if (createdPenalty) {
+                const { data: driverData } = await supabase
+                  .from("drivers")
+                  .select("total_earnings")
+                  .eq("id", actualDriverId)
+                  .single();
+                const currentEarnings = Number(driverData?.total_earnings || 0);
+                const newEarnings = Number((currentEarnings - penaltyAmount).toFixed(2));
+                const { error: earningsUpdateErr } = await supabase
+                  .from("drivers")
+                  .update({ total_earnings: newEarnings })
+                  .eq("id", actualDriverId);
+                if (earningsUpdateErr) {
+                  console.error(`❌ Failed to update earnings after penalty for ${data.rideId}:`, earningsUpdateErr);
+                } else {
+                  console.log(`💸 Applied one-time cancel penalty £${penaltyAmount.toFixed(2)} for ride ${data.rideId} → driver ${actualDriverId}`);
+                }
+              } else {
+                console.log(`⏭️ Cancel penalty already recorded for ride ${data.rideId} — skipping duplicate charge`);
               }
             } catch (penaltyErr) {
               console.error(`❌ Failed to apply cancellation penalty to driver ${actualDriverId}:`, penaltyErr);

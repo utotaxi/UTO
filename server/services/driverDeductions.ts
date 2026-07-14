@@ -78,6 +78,42 @@ async function insertDeductionWithFallback(
   }
 }
 
+export async function findExistingDriverPenaltyDeduction(
+  supabase: { from: (table: string) => any },
+  params: { driverId: string; reason: string; rideId?: string },
+): Promise<{ id: string } | null> {
+  const { driverId, reason, rideId } = params;
+
+  const { data: byReason, error: reasonErr } = await supabase
+    .from("driver_deductions")
+    .select("id")
+    .eq("driver_id", driverId)
+    .eq("reason", reason)
+    .limit(1)
+    .maybeSingle();
+  if (reasonErr) throw reasonErr;
+  if (byReason?.id) return { id: byReason.id };
+
+  // Fallback: any prior row whose reason mentions this ride id (covers label drift).
+  if (rideId) {
+    const { data: byRide, error: rideErr } = await supabase
+      .from("driver_deductions")
+      .select("id, reason")
+      .eq("driver_id", driverId)
+      .ilike("reason", `%${rideId}%`)
+      .limit(5);
+    if (rideErr) throw rideErr;
+    const match = (byRide || []).find((row: any) => String(row?.reason || "").includes(rideId));
+    if (match?.id) return { id: match.id };
+  }
+
+  return null;
+}
+
+/**
+ * Insert-or-update a driver penalty. Returns created=true only on first insert
+ * so callers can deduct earnings exactly once per ride.
+ */
 export async function upsertDriverPenaltyDeduction(
   supabase: { from: (table: string) => any },
   params: {
@@ -86,19 +122,15 @@ export async function upsertDriverPenaltyDeduction(
     type: string;
     reason: string;
     createdAt?: string;
+    rideId?: string;
   },
-): Promise<void> {
-  const { driverId, amount, type, reason, createdAt } = params;
-  const { data: existing, error: lookupError } = await supabase
-    .from("driver_deductions")
-    .select("id")
-    .eq("driver_id", driverId)
-    .eq("reason", reason)
-    .maybeSingle();
-
-  if (lookupError) {
-    throw lookupError;
-  }
+): Promise<{ created: boolean; id?: string }> {
+  const { driverId, amount, type, reason, createdAt, rideId } = params;
+  const existing = await findExistingDriverPenaltyDeduction(supabase, {
+    driverId,
+    reason,
+    rideId,
+  });
 
   const driverUserId = await resolveDriverUserId(supabase, driverId);
   const payload: Record<string, any> = {
@@ -106,16 +138,24 @@ export async function upsertDriverPenaltyDeduction(
     amount,
     type,
     reason,
-    created_at: createdAt || new Date().toISOString(),
   };
   if (driverUserId) {
     payload.user_id = driverUserId;
   }
 
   if (existing?.id) {
-    await updateDeductionWithFallback(supabase, existing.id, payload);
-    return;
+    // Do not bump created_at on updates — keeps the original charge time.
+    await updateDeductionWithFallback(supabase, existing.id, {
+      driver_id: payload.driver_id,
+      amount: payload.amount,
+      type: payload.type,
+      reason: payload.reason,
+      ...(payload.user_id ? { user_id: payload.user_id } : {}),
+    });
+    return { created: false, id: existing.id };
   }
 
+  payload.created_at = createdAt || new Date().toISOString();
   await insertDeductionWithFallback(supabase, payload);
+  return { created: true };
 }

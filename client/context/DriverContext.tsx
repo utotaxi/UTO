@@ -823,9 +823,15 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               if (feeAmount > 0) {
                 // Check if this deduction already exists (avoid duplicates)
                 const driverPenaltyLabel = formatLiveRideCancellationPenalty(ride.id);
-                const deductionExists = allDeductions.some((d: any) =>
-                  d.reason === driverPenaltyLabel || d.type === driverPenaltyLabel
-                );
+                const rideToken = String(ride.id || "");
+                const deductionExists = allDeductions.some((d: any) => {
+                  const reason = String(d.reason || "");
+                  return (
+                    reason === driverPenaltyLabel ||
+                    d.type === driverPenaltyLabel ||
+                    (rideToken && reason.includes(rideToken))
+                  );
+                });
                 if (!deductionExists) {
                   const cancelledByRider = ride.paymentStatus === 'cancellation_fee_wallet_charged';
                   allDeductions.push({
@@ -848,13 +854,33 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           console.warn("⚠️ Could not fetch cancelled rides for deductions:", ridesErr);
         }
 
-        // Merge with existing local deductions (optimistic updates)
-        // Keep local deductions that match the ride ID pattern, only replace from server data
+        // Merge with existing local deductions (optimistic updates).
+        // Drop local_* rows once the server has the same ride penalty reason —
+        // otherwise Earnings shows the same cancellation fee twice.
         setDriverDeductions((prevDeductions) => {
-          const serverDeductionIds = new Set(allDeductions.map((d: any) => d.id));
-          const localOnly = prevDeductions.filter((d: any) => !serverDeductionIds.has(d.id) && d.id.startsWith("local_"));
-          const merged = [...allDeductions, ...localOnly];
-          return merged;
+          const dedupeKey = (d: any) => {
+            const reason = String(d?.reason || "").trim().toLowerCase();
+            if (reason) return `reason:${reason}`;
+            return `id:${d?.id}`;
+          };
+          const seen = new Set<string>();
+          const dedupedServer: any[] = [];
+          for (const entry of allDeductions) {
+            const key = dedupeKey(entry);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            dedupedServer.push(entry);
+          }
+          const serverIds = new Set(dedupedServer.map((d: any) => d.id));
+          const localOnly = prevDeductions.filter((d: any) => {
+            if (!d?.id || !String(d.id).startsWith("local_")) return false;
+            if (serverIds.has(d.id)) return false;
+            const key = dedupeKey(d);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          return [...dedupedServer, ...localOnly];
         });
 
       } catch (deductionErr) {
