@@ -396,26 +396,29 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   const handleCancel = () => {
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); } catch (_) { }
-    const arrivedAtMs = (activeRide as any)?.driverArrivedAt
-      ? new Date((activeRide as any).driverArrivedAt).getTime()
+    // 1 free minute from the moment a driver accepts; after that, full payable fare.
+    const acceptedAtMs = (activeRide as any)?.acceptedAt
+      ? new Date((activeRide as any).acceptedAt).getTime()
       : 0;
-    const arrivedElapsedMs = arrivedAtMs ? Date.now() - arrivedAtMs : 0;
-    // Free until driver arrives, then 1 free minute after arrival.
-    const driverHasArrived = ["arrived", "at_pickup", "in_progress"].includes(String(activeRide?.status || ""));
-    const withinFreeMinute = !driverHasArrived || (arrivedAtMs > 0 && arrivedElapsedMs < 60_000);
-    const freeSecondsRemaining = (driverHasArrived && arrivedAtMs > 0 && arrivedElapsedMs < 60_000)
-      ? Math.max(1, Math.ceil((60_000 - arrivedElapsedMs) / 1000))
-      : 0;
-    const fullFare = (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0;
+    const driverAccepted = !!acceptedAtMs || ["accepted", "arriving", "arrived", "at_pickup", "in_progress"].includes(
+      String(activeRide?.status || "").toLowerCase(),
+    );
+    const acceptedElapsedMs = acceptedAtMs ? Date.now() - acceptedAtMs : (driverAccepted ? 60_000 : 0);
+    const withinFreeMinute = !driverAccepted || acceptedElapsedMs < 60_000;
+    const freeSecondsRemaining =
+      driverAccepted && acceptedElapsedMs < 60_000
+        ? Math.max(1, Math.ceil((60_000 - acceptedElapsedMs) / 1000))
+        : 0;
+    const fullFare = Number((activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0);
     const discount = Math.max(0, Number(activeRide?.discountAmount || 0));
-    const fareAmount = Math.max(0, fullFare - discount);
+    // Charge whatever the rider would pay (fare after discount when a coupon applies).
+    const fareAmount = Math.max(0, Number((fullFare - discount).toFixed(2)));
     const cancellationFeeApplies = fareAmount > 0 && !withinFreeMinute;
 
     if (cancellationFeeApplies) {
-      const feeReason = "Your free cancellation period has ended.";
       Alert.alert(
         "Cancellation Fee Applies",
-        `${feeReason} Cancelling now will result in a 100% cancellation fee of £${fareAmount.toFixed(2)} being charged.`,
+        `Your free cancellation period has ended and your driver is on the way. Cancelling now will result in the full fare amount of £${fareAmount.toFixed(2)} being charged to your payment method.`,
         [
           { text: "Keep Ride", style: "cancel" },
           {

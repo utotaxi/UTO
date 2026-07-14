@@ -4394,7 +4394,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
             updateData.cancelled_at = new Date().toISOString();
 
             // ── Server-side cancellation fee processing ──────────────────────
-            // Rider fee ONLY when the rider cancels after driver arrival + 1 free minute.
+            // Rider fee when the rider cancels after 1 free minute from driver accept.
+            // Charge the full payable fare (after discount when applicable).
             // Driver-initiated cancels must NEVER charge the rider (ASAP or otherwise).
             try {
               const { data: cancelledRide, error: cancelledRideErr } = await supabase
@@ -4403,12 +4404,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 .eq("id", update.rideId)
                 .single();
 
-              const arrivedAt = cancelledRide?.arrived_at
-                ? new Date(cancelledRide.arrived_at).getTime()
+              const acceptedAt = cancelledRide?.accepted_at
+                ? new Date(cancelledRide.accepted_at).getTime()
                 : 0;
-              const arrivedElapsedMs = arrivedAt ? Date.now() - arrivedAt : 0;
-              const isAfterFreeMinute = arrivedAt > 0 && arrivedElapsedMs >= 60_000;
-              const isDriverAlreadyAtPickup = cancelledRide && ["arrived", "at_pickup", "in_progress"].includes(cancelledRide.status);
+              const acceptedElapsedMs = acceptedAt ? Date.now() - acceptedAt : 0;
+              const driverHasAccepted =
+                acceptedAt > 0 ||
+                !!(cancelledRide?.driver_id) ||
+                ["accepted", "arriving", "arrived", "at_pickup", "in_progress"].includes(
+                  String(cancelledRide?.status || "").toLowerCase(),
+                );
+              // 1 free minute from accept; if accepted_at is missing but a driver is
+              // already assigned, treat the free window as already elapsed.
+              const isAfterFreeMinute =
+                driverHasAccepted &&
+                (acceptedAt > 0 ? acceptedElapsedMs >= 60_000 : true);
               const cancelledByRaw = String((update as any).cancelledBy || "").toLowerCase();
               const emitterIsDriverSocket = Array.from(connectedDrivers.values()).includes(socket.id);
               // Never trust a "rider" cancel flag that arrives from a driver socket.
@@ -4433,13 +4443,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 "paid",
                 "succeeded",
               ]).has(cancellationPaymentStatus);
-              // Product rule: free cancel until driver arrives, then 1 free minute
-              // after arrival. Charge only after that window — and only for rider cancels.
+              // Product rule: 1 free minute from driver accept, then full payable fare
+              // on rider cancel. Driver cancels never charge the rider.
               const shouldChargeCancellationFee =
                 !!cancelledRide &&
                 riderInitiatedCancellation &&
                 !driverInitiatedCancellation &&
-                isDriverAlreadyAtPickup &&
                 isAfterFreeMinute;
 
               if (cancelledRide && shouldChargeCancellationFee) {
@@ -4606,10 +4615,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   console.log(`🆓 Driver cancel for ride ${update.rideId}: no rider charge applied`);
                 } else if (!riderInitiatedCancellation) {
                   (update as any).cancellationPolicy = "unspecified_actor_no_fee";
-                } else if (!isDriverAlreadyAtPickup) {
-                  (update as any).cancellationPolicy = "free_before_arrival";
+                } else if (!driverHasAccepted) {
+                  (update as any).cancellationPolicy = "free_before_accept";
                 } else if (!isAfterFreeMinute) {
-                  (update as any).cancellationPolicy = "free_minute_after_arrival";
+                  (update as any).cancellationPolicy = "free_minute_after_accept";
                 }
 
                 // Free / driver cancellation → release any card authorization hold so the
