@@ -411,7 +411,7 @@ export default function RideTrackingScreen({ navigation }: any) {
         : 0;
     const fullFare = Number((activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0);
     const discount = Math.max(0, Number(activeRide?.discountAmount || 0));
-    // Charge whatever the rider would pay (fare after discount when a coupon applies).
+    // Match on-screen Total Fare (payable amount with or without coupon).
     const fareAmount = Math.max(0, Number((fullFare - discount).toFixed(2)));
     const cancellationFeeApplies = fareAmount > 0 && !withinFreeMinute;
 

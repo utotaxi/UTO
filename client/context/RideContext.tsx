@@ -1002,7 +1002,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
           const updated: Ride = {
             ...current,
             status: "accepted",
-            acceptedAt: data.acceptedAt || new Date().toISOString(),
+            acceptedAt: data.acceptedAt || current.acceptedAt || new Date().toISOString(),
             ...((data as any).driverInfo
               ? {
                 driverName: (data as any).driverInfo.driverName,
@@ -1308,7 +1308,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 }
                 : {}),
               ...(update.status === "accepted"
-                ? { acceptedAt: (update as any).acceptedAt || (update as any).accepted_at || new Date().toISOString() }
+                ? {
+                    acceptedAt:
+                      (update as any).acceptedAt ||
+                      (update as any).accepted_at ||
+                      current.acceptedAt ||
+                      new Date().toISOString(),
+                  }
                 : {}),
               // Capture driverArrivedAt timestamp when status transitions to "arrived"
               ...(update.status === "arrived" && (update as any).driverArrivedAt

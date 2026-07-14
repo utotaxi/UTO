@@ -4211,8 +4211,25 @@ export function setupSocketIO(httpServer: HTTPServer) {
             } else {
               console.warn(`⚠️ Could not resolve driver_id from socket ${socket.id} on accept`);
             }
-            updateData.accepted_at = new Date().toISOString();
-            (update as any).acceptedAt = updateData.accepted_at;
+            // Preserve the original accept timestamp — overwriting it would reset
+            // the rider's 1-minute free cancellation window.
+            try {
+              const { data: existingAcceptRow } = await supabase
+                .from("rides")
+                .select("accepted_at")
+                .eq("id", update.rideId)
+                .maybeSingle();
+              if (existingAcceptRow?.accepted_at) {
+                updateData.accepted_at = existingAcceptRow.accepted_at;
+                (update as any).acceptedAt = existingAcceptRow.accepted_at;
+              } else {
+                updateData.accepted_at = new Date().toISOString();
+                (update as any).acceptedAt = updateData.accepted_at;
+              }
+            } catch (_) {
+              updateData.accepted_at = new Date().toISOString();
+              (update as any).acceptedAt = updateData.accepted_at;
+            }
 
             if (resolvedDriverId) {
               const driverLocation = await getLatestDriverLocation(update.rideId, resolvedDriverId, socket.id);
