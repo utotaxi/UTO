@@ -204,7 +204,8 @@ export default function ScheduledJobDetailsScreen() {
   const withinStartWindow =
     msUntilPickup <= ACTIVATION_WINDOW_MS && msUntilPickup >= -START_GRACE_AFTER_MS;
   const tripIsLive = !!liveRideId || !!booking.live_ride_id;
-  const tripInProgress = liveRideStatus === "in_progress";
+  const tripInProgress =
+    liveRideStatus === "in_progress" || String(booking.status || "").toLowerCase() === "in_progress";
   const isExpiredRide =
     msUntilPickup < -START_GRACE_AFTER_MS &&
     !tripInProgress &&
@@ -217,6 +218,10 @@ export default function ScheduledJobDetailsScreen() {
     !tripInProgress &&
     (withinStartWindow || tripIsLive) &&
     !isExpiredRide;
+  const canFinishTrip =
+    driverOwnsThis &&
+    tripInProgress &&
+    ["driver_accepted", "in_progress"].includes(String(booking.status || "").toLowerCase());
 
 
   const handleAccept = async () => {
@@ -438,17 +443,22 @@ export default function ScheduledJobDetailsScreen() {
   };
 
   const finishTrip = async (reason?: string) => {
-    if (!liveRideId) return;
+    const rideId = liveRideId || booking?.live_ride_id;
+    if (!rideId) {
+      Alert.alert("Error", "No active live ride found for this booking.");
+      return;
+    }
     setIsFinishingTrip(true);
     try {
       const socket = getSocket();
       socket.emit("ride:status", {
-        rideId: liveRideId,
+        rideId,
         status: "completed",
         driverId: user?.id,
         ...(reason?.trim() ? { earlyCompletionReason: reason.trim() } : {}),
       });
       setLiveRideStatus("completed");
+      setBooking((prev: any) => (prev ? { ...prev, status: "completed" } : prev));
       setShowEarlyCompleteModal(false);
       Alert.alert("Trip Completed", "This scheduled ride has been marked as completed. Payment was already collected.", [
         { text: "OK", onPress: () => navigation.goBack() },
@@ -687,7 +697,7 @@ export default function ScheduledJobDetailsScreen() {
             </Pressable>
           </View>
         )}
-        {booking.status === 'driver_accepted' && driverOwnsThis && tripInProgress && (
+        {canFinishTrip && (
           <>
             <Pressable style={s.driveBtn} onPress={openNavigationToDropoff}>
               <Text style={s.driveBtnText}>Navigate To Destination</Text>

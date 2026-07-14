@@ -995,8 +995,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Keep scheduled booking row in sync when this live ride came from later_bookings / web_booker
       try {
+        const schedMatch = String(rideId).match(/^sched_([0-9a-f-]{36})_/i);
+        const bookingIdFromRide = schedMatch?.[1] || null;
+        // Prefer live_ride_id link; fall back to booking id embedded in sched_ live-ride ids
+        // (live_ride_id column may be missing on older schemas).
         await supabase.from("later_bookings").update({ status: "in_progress" }).eq("live_ride_id", rideId);
         await supabase.from("web_booker").update({ status: "in_progress" }).eq("live_ride_id", rideId);
+        if (bookingIdFromRide) {
+          await supabase.from("later_bookings").update({ status: "in_progress" }).eq("id", bookingIdFromRide);
+          await supabase.from("web_booker").update({ status: "in_progress" }).eq("id", bookingIdFromRide);
+        }
       } catch (syncErr) {
         console.warn("⚠️ Could not sync scheduled booking status to in_progress:", syncErr);
       }
@@ -3008,6 +3016,10 @@ app.get("/api/later-bookings/:id", async (req: Request, res: Response) => {
  * Driver taps Start Trip on an accepted upcoming booking.
  * Creates the live ride on demand (with the rider's booking PIN) so the driver
  * can enter PIN immediately — does not wait for the 60‑minute poller.
+ *
+ * NOTE: Some Supabase schemas are missing otp / live_ride_id / activated_at on
+ * later_bookings / web_booker. Those fields are best-effort; activating the
+ * live `rides` row must still succeed so PIN start works.
  */
 app.post("/api/later-bookings/:id/prepare-start", async (req: Request, res: Response) => {
   try {
@@ -3041,7 +3053,11 @@ app.post("/api/later-bookings/:id/prepare-start", async (req: Request, res: Resp
 
     const booking = normalizeLaterBooking(raw, sourceTable);
     const status = String(booking.status || "").toLowerCase();
-    if (status !== "driver_accepted") {
+    if (status === "completed" || status === "cancelled") {
+      return res.status(400).json({ error: `Cannot start a ${status} booking` });
+    }
+    // Allow start for accepted bookings; also tolerate in_progress if a live ride already exists.
+    if (status !== "driver_accepted" && status !== "in_progress") {
       return res.status(400).json({ error: "Only accepted upcoming bookings can be started" });
     }
     if (!bookingMatchesDriverIdentity(booking, identity)) {
@@ -3053,9 +3069,26 @@ app.post("/api/later-bookings/:id/prepare-start", async (req: Request, res: Resp
     const msUntilPickup = pickupTs - nowTs;
     const START_EARLY_MS = SCHEDULED_ACTIVATION_WINDOW_MS; // 60 min before
     const START_LATE_MS = 30 * 60 * 1000; // 30 min after pickup
-    const hasExistingLive = !!booking.live_ride_id;
 
-    if (!hasExistingLive) {
+    // Reuse an existing live ride linked on the booking OR created earlier with sched_ prefix
+    // (when live_ride_id column is missing from the booking table).
+    let existingLiveId = booking.live_ride_id ? String(booking.live_ride_id) : null;
+    if (!existingLiveId) {
+      try {
+        const { data: existingByPrefix } = await sb
+          .from("rides")
+          .select("id, status, driver_id, otp, created_at")
+          .like("id", `sched_${bookingId}_%`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (existingByPrefix?.id) existingLiveId = String(existingByPrefix.id);
+      } catch (lookupErr) {
+        console.warn(`⚠️ prepare-start existing ride lookup failed for ${bookingId}:`, lookupErr);
+      }
+    }
+
+    if (!existingLiveId) {
       if (!pickupTs) {
         return res.status(400).json({ error: "Booking has no pickup time" });
       }
@@ -3071,45 +3104,57 @@ app.post("/api/later-bookings/:id/prepare-start", async (req: Request, res: Resp
       }
     }
 
-    // Ensure PIN exists (older bookings may lack one)
+    // Ensure PIN exists (in-memory + best-effort persist; otp column may be missing)
     let otp = typeof booking.otp === "string" && booking.otp.trim() ? String(booking.otp).trim() : null;
+    if (!otp && existingLiveId) {
+      const { data: rideForPin } = await sb.from("rides").select("otp").eq("id", existingLiveId).maybeSingle();
+      if (rideForPin?.otp) otp = String(rideForPin.otp);
+    }
     if (!otp) {
       otp = generateRidePin();
-      await updateLaterBookingWithFallbackColumns(
-        sourceTable,
-        bookingId,
-        { otp },
-        missingLaterBookingActivationColumns,
-      );
     }
+    await updateLaterBookingWithFallbackColumns(
+      sourceTable,
+      bookingId,
+      { otp },
+      missingLaterBookingActivationColumns,
+    );
 
-    // Reuse existing live ride when possible
-    if (booking.live_ride_id) {
+    if (existingLiveId) {
       const { data: existingRide } = await sb
         .from("rides")
         .select("id, status, driver_id, otp")
-        .eq("id", booking.live_ride_id)
+        .eq("id", existingLiveId)
         .maybeSingle();
 
       if (existingRide) {
         const rideStatus = String(existingRide.status || "").toLowerCase();
-        if (rideStatus === "in_progress") {
+        if (rideStatus === "completed" || rideStatus === "cancelled") {
+          // Stale link — fall through and create a fresh live ride
+        } else if (rideStatus === "in_progress") {
           return res.json({
             success: true,
             alreadyStarted: true,
             liveRideId: existingRide.id,
-            booking: stripPinForDrivers({ ...booking, live_ride_id: existingRide.id, otp }),
+            booking: stripPinForDrivers({ ...booking, live_ride_id: existingRide.id, status: "in_progress", otp }),
           });
-        }
-        if (["accepted", "arrived", "at_pickup", "arriving"].includes(rideStatus)) {
-          // Keep OTP on the live ride in sync with booking PIN
+        } else if (["accepted", "arrived", "at_pickup", "arriving", "pending"].includes(rideStatus)) {
           if (otp && String(existingRide.otp || "") !== otp) {
-            await sb.from("rides").update({ otp }).eq("id", existingRide.id);
+            await sb.from("rides").update({ otp, driver_id: identity.tableId }).eq("id", existingRide.id);
+          } else if (String(existingRide.driver_id || "") !== String(identity.tableId)) {
+            await sb.from("rides").update({ driver_id: identity.tableId }).eq("id", existingRide.id);
           }
+          // Best-effort re-link on booking row
+          await updateLaterBookingWithFallbackColumns(
+            sourceTable,
+            bookingId,
+            { live_ride_id: existingRide.id, activated_at: new Date().toISOString(), otp },
+            missingLaterBookingActivationColumns,
+          );
           return res.json({
             success: true,
             liveRideId: existingRide.id,
-            booking: stripPinForDrivers({ ...booking, live_ride_id: existingRide.id }),
+            booking: stripPinForDrivers({ ...booking, live_ride_id: existingRide.id, otp }),
           });
         }
       }
@@ -3155,25 +3200,45 @@ app.post("/api/later-bookings/:id/prepare-start", async (req: Request, res: Resp
       sourceTable,
     };
 
-    const markResult = await updateLaterBookingWithFallbackColumns(
-      sourceTable,
-      bookingId,
-      { activated_at: new Date().toISOString(), live_ride_id: liveRideId },
-      missingLaterBookingActivationColumns,
-    );
-    if (markResult.error || !markResult.data) {
-      return res.status(500).json({ error: "Could not prepare this booking for start. Please try again." });
-    }
-
+    // Activate live ride FIRST — do not block on optional booking columns.
     const handedOver = await scheduledRideHooks.activateAcceptedScheduledRide?.(rideData, identity.tableId);
     if (!handedOver) {
-      await updateLaterBookingWithFallbackColumns(
+      return res.status(500).json({ error: "Could not activate the live ride. Please try again." });
+    }
+
+    // Best-effort: persist live link / PIN on booking when columns exist.
+    const markPayload: Record<string, any> = {
+      activated_at: new Date().toISOString(),
+      live_ride_id: liveRideId,
+      otp,
+      status: "driver_accepted",
+    };
+    for (const col of missingLaterBookingActivationColumns) delete markPayload[col];
+    // Always keep status update even if activation columns are missing
+    markPayload.status = "driver_accepted";
+
+    let markResult: { data: any; error: any; discoveredMissingColumns?: string[] } = {
+      data: null,
+      error: null,
+      discoveredMissingColumns: [],
+    };
+    if (Object.keys(markPayload).length > 0) {
+      markResult = await updateLaterBookingWithFallbackColumns(
         sourceTable,
         bookingId,
-        { live_ride_id: null },
+        markPayload,
         missingLaterBookingActivationColumns,
       );
-      return res.status(500).json({ error: "Could not activate the live ride. Please try again." });
+    }
+    if (markResult.error) {
+      console.warn(
+        `⚠️ prepare-start: live ride ${liveRideId} created but booking ${bookingId} could not be updated:`,
+        markResult.error.message,
+      );
+    } else if (markResult.discoveredMissingColumns?.length) {
+      console.info(
+        `ℹ️ prepare-start skipped missing booking columns: ${markResult.discoveredMissingColumns.join(", ")}`,
+      );
     }
 
     io.emit("later-booking:update", {
@@ -3185,7 +3250,12 @@ app.post("/api/later-bookings/:id/prepare-start", async (req: Request, res: Resp
     return res.json({
       success: true,
       liveRideId,
-      booking: stripPinForDrivers({ ...enriched, live_ride_id: liveRideId, activated_at: new Date().toISOString() }),
+      booking: stripPinForDrivers({
+        ...enriched,
+        live_ride_id: liveRideId,
+        activated_at: new Date().toISOString(),
+        otp,
+      }),
     });
   } catch (error: any) {
     console.error("prepare-start error:", error);
