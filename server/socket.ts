@@ -2261,24 +2261,94 @@ const SCHEDULED_RIDE_ID_PREFIX = "sched_";
 export const isScheduledLiveRideId = (rideId?: string | null): boolean =>
   typeof rideId === "string" && rideId.startsWith(SCHEDULED_RIDE_ID_PREFIX);
 
+/** Extract later_bookings / web_booker UUID from live ride ids like sched_<uuid>_<suffix>. */
+export const extractScheduledBookingId = (rideId?: string | null): string | null => {
+  if (!rideId || !isScheduledLiveRideId(rideId)) return null;
+  const match = String(rideId).match(/^sched_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_/i);
+  return match?.[1] || null;
+};
+
+const DISPATCHABLE_RIDE_STATUSES = new Set(["pending"]);
+/** Pending ASAP offers older than this must never be re-served to drivers. */
+const STALE_PENDING_RIDE_MS = 45 * 60 * 1000;
+
+/**
+ * Returns true only when this ride is still a live offerable request.
+ * Blocks cancelled / completed / accepted / stale pending rides from being
+ * emitted again as "new ride" offers.
+ */
+async function assertRideStillOfferable(rideId: string): Promise<boolean> {
+  try {
+    const { data: ride, error } = await supabase
+      .from("rides")
+      .select("id, status, requested_at, created_at, cancelled_at")
+      .eq("id", rideId)
+      .maybeSingle();
+
+    if (error || !ride) {
+      console.warn(`⚠️ Offerability check: ride ${rideId} not found — blocking dispatch`);
+      return false;
+    }
+
+    const status = String(ride.status || "").toLowerCase();
+    if (!DISPATCHABLE_RIDE_STATUSES.has(status)) {
+      console.log(`🛑 Blocking re-offer of ride ${rideId} — status is "${status}" (not pending)`);
+      return false;
+    }
+
+    const createdMs = new Date(ride.requested_at || ride.created_at || 0).getTime();
+    if (Number.isFinite(createdMs) && createdMs > 0 && Date.now() - createdMs > STALE_PENDING_RIDE_MS) {
+      console.log(`🛑 Blocking stale pending ride ${rideId} (>${STALE_PENDING_RIDE_MS / 60000} min old) — auto-cancelling`);
+      await supabase
+        .from("rides")
+        .update({
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: "system",
+          cancellation_reason: "stale_pending_auto_cancelled",
+        })
+        .eq("id", rideId)
+        .eq("status", "pending");
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.warn(`⚠️ Offerability check failed for ride ${rideId}:`, err);
+    return false;
+  }
+}
+
 // Keep the source later_bookings / web_booker row in sync with the live ride status
 async function syncScheduledBookingForRide(rideId: string, status: string, extra?: Record<string, any>) {
   if (!isScheduledLiveRideId(rideId)) return;
+  const bookingId = extractScheduledBookingId(rideId);
+
   for (const table of ["later_bookings", "web_booker"] as const) {
     try {
-      let { data, error } = await supabase
-        .from(table)
-        .update({ status, updated_at: new Date().toISOString(), ...(extra || {}) })
-        .eq("live_ride_id", rideId)
-        .select();
+      const payload = { status, updated_at: new Date().toISOString(), ...(extra || {}) };
+      let data: any[] | null = null;
+      let error: any = null;
+
+      // Prefer live_ride_id link; fall back to booking id embedded in sched_ ride ids
+      // (live_ride_id may have been cleared by a prior retry release).
+      const byLive = await supabase.from(table).update(payload).eq("live_ride_id", rideId).select();
+      data = byLive.data;
+      error = byLive.error;
+
+      if ((!data || data.length === 0) && bookingId) {
+        const byId = await supabase.from(table).update(payload).eq("id", bookingId).select();
+        data = byId.data;
+        error = byId.error;
+      }
 
       // If an optional column is missing in this table, retry with the bare status update
       if (error && extra && /column/i.test(String(error.message || ""))) {
-        const retry = await supabase
-          .from(table)
-          .update({ status, updated_at: new Date().toISOString() })
-          .eq("live_ride_id", rideId)
-          .select();
+        const bare = { status, updated_at: new Date().toISOString() };
+        let retry = await supabase.from(table).update(bare).eq("live_ride_id", rideId).select();
+        if ((!retry.data || retry.data.length === 0) && bookingId) {
+          retry = await supabase.from(table).update(bare).eq("id", bookingId).select();
+        }
         data = retry.data;
         error = retry.error;
       }
@@ -2298,10 +2368,27 @@ async function syncScheduledBookingForRide(rideId: string, status: string, extra
 
 // No driver could be found for the activated booking — clear the live ride link
 // so the activation engine can retry dispatching it on a later cycle.
+// NEVER reopen a booking that was cancelled/completed.
 async function releaseScheduledBookingForRetry(rideId: string) {
   if (!isScheduledLiveRideId(rideId)) return;
+  const bookingId = extractScheduledBookingId(rideId);
+
   for (const table of ["later_bookings", "web_booker"] as const) {
     try {
+      // If booking is already cancelled/completed, do not clear live_ride_id for retry.
+      if (bookingId) {
+        const { data: bookingRow } = await supabase
+          .from(table)
+          .select("id, status")
+          .eq("id", bookingId)
+          .maybeSingle();
+        const bookingStatus = String(bookingRow?.status || "").toLowerCase();
+        if (bookingStatus === "cancelled" || bookingStatus === "completed") {
+          console.log(`⏭️ Skipping retry release for ${table} ${bookingId} — status is ${bookingStatus}`);
+          return;
+        }
+      }
+
       const { data, error } = await supabase
         .from(table)
         .update({ live_ride_id: null, updated_at: new Date().toISOString() })
@@ -2310,6 +2397,20 @@ async function releaseScheduledBookingForRetry(rideId: string) {
       if (!error && data && data.length > 0) {
         console.log(`🔁 Released scheduled booking in ${table} for retry (live ride ${rideId})`);
         return;
+      }
+
+      // Fallback: clear by booking id when live_ride_id column/link is missing
+      if (bookingId) {
+        const byId = await supabase
+          .from(table)
+          .update({ live_ride_id: null, updated_at: new Date().toISOString() })
+          .eq("id", bookingId)
+          .not("status", "in", "(cancelled,completed)")
+          .select();
+        if (!byId.error && byId.data && byId.data.length > 0) {
+          console.log(`🔁 Released scheduled booking ${bookingId} in ${table} for retry (by id)`);
+          return;
+        }
       }
     } catch (err) {
       console.warn(`⚠️ Could not release scheduled booking for retry in ${table} (ride ${rideId}):`, err);
@@ -2667,6 +2768,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
       return;
     }
 
+    // Never offer a ride that was already cancelled/completed/accepted or is stale.
+    const stillOfferable = await assertRideStillOfferable(rideId);
+    if (!stillOfferable) {
+      if (state.timer) clearTimeout(state.timer);
+      state.cancelled = true;
+      dispatchQueues.delete(rideId);
+      activeRides.delete(rideId);
+      console.log(`🛑 Stopped dispatch queue for non-offerable ride ${rideId}`);
+      return;
+    }
+
     // Clear any previous timeout
     if (state.timer) clearTimeout(state.timer);
 
@@ -2729,6 +2841,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
       pickupDistance: Math.round(entry.distance * 100) / 100,   // in miles, 2 decimals
       _dispatchedTo: entry.driverId, // private marker
     };
+
+    // Final gate right before emit — status may have changed during heap work.
+    if (!(await assertRideStillOfferable(rideId))) {
+      if (state.timer) clearTimeout(state.timer);
+      state.cancelled = true;
+      dispatchQueues.delete(rideId);
+      activeRides.delete(rideId);
+      return;
+    }
 
     // Ensure rider phone is present — look up from DB if not in ride data
     if (!enrichedRide.riderPhone && enrichedRide.riderId) {
@@ -3311,8 +3432,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
     const actualDriverId = await resolveDriverTableId(rawDriverId);
     if (!actualDriverId) return null;
 
-    for (const [, state] of dispatchQueues.entries()) {
+    for (const [rideId, state] of dispatchQueues.entries()) {
       if (state.cancelled || state.currentDriverId !== actualDriverId) continue;
+      if (!(await assertRideStillOfferable(rideId))) {
+        if (state.timer) clearTimeout(state.timer);
+        state.cancelled = true;
+        dispatchQueues.delete(rideId);
+        continue;
+      }
       return {
         ...state.rideData,
         pickupDistance: state.rideData?.pickupDistance || 0,
@@ -3584,6 +3711,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
       for (const [rideId, state] of dispatchQueues.entries()) {
         if (state.cancelled || state.currentDriverId !== connectedDriverId) continue;
+
+        if (!(await assertRideStillOfferable(rideId))) {
+          if (state.timer) clearTimeout(state.timer);
+          state.cancelled = true;
+          dispatchQueues.delete(rideId);
+          continue;
+        }
 
         const reconnectFull = Number(state.rideData?.farePrice || state.rideData?.estimatedPrice || 0);
         const reconnectDiscount = Math.max(0, Number(state.rideData?.discountAmount || 0));
@@ -3892,6 +4026,38 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
           // Remove the current driver assignment and reset the ride to pending.
           // Do NOT charge the rider — driver cancel never imposes rider fees.
+          // If the original request is already stale (old/yesterday), fully cancel
+          // instead of redistributing it as a "new" offer.
+          try {
+            const { data: ageRow } = await supabase
+              .from("rides")
+              .select("requested_at, created_at")
+              .eq("id", data.rideId)
+              .maybeSingle();
+            const createdMs = new Date(ageRow?.requested_at || ageRow?.created_at || 0).getTime();
+            if (Number.isFinite(createdMs) && createdMs > 0 && Date.now() - createdMs > STALE_PENDING_RIDE_MS) {
+              await supabase
+                .from("rides")
+                .update({
+                  status: "cancelled",
+                  cancelled_at: new Date().toISOString(),
+                  cancelled_by: "driver",
+                  cancellation_fee: 0,
+                  driver_id: null,
+                })
+                .eq("id", data.rideId);
+              const disp = dispatchQueues.get(data.rideId);
+              if (disp?.timer) clearTimeout(disp.timer);
+              dispatchQueues.delete(data.rideId);
+              activeRides.delete(data.rideId);
+              await syncScheduledBookingForRide(data.rideId, "cancelled");
+              console.log(`🛑 Driver cancel on stale ride ${data.rideId} — fully cancelled, not redistributed`);
+              return;
+            }
+          } catch (ageErr) {
+            console.warn(`⚠️ Could not age-check ride ${data.rideId} before reassignment:`, ageErr);
+          }
+
           await supabase
             .from("rides")
             .update({

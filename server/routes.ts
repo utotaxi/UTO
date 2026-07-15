@@ -4144,6 +4144,9 @@ setInterval(async () => {
     ].filter((booking: any) => {
       const status = String(booking.status || "").toLowerCase();
       if (status !== "scheduled" && status !== "driver_accepted") return false;
+      // Never reactivate cancelled/completed bookings (defensive — status filter above
+      // should already exclude these, but keep hard block for safety).
+      if (status === "cancelled" || status === "completed") return false;
       if (!booking.rider_id || !booking.pickup_at) return false;
 
       const pickupTs = pickupTimestamp(booking);
@@ -4176,6 +4179,29 @@ setInterval(async () => {
 
     for (const booking of enrichedCandidates) {
       try {
+        // If the rider already cancelled a prior live attempt for this booking,
+        // never create another automatic ride:new for drivers.
+        const { data: riderCancelledLive } = await sb
+          .from("rides")
+          .select("id, cancelled_by, status")
+          .like("id", `sched_${booking.id}_%`)
+          .eq("status", "cancelled")
+          .eq("cancelled_by", "rider")
+          .limit(1)
+          .maybeSingle();
+        if (riderCancelledLive?.id) {
+          console.log(
+            `⏭️ Skipping activation for booking ${booking.id} — rider previously cancelled live ride ${riderCancelledLive.id}`,
+          );
+          await updateLaterBookingWithFallbackColumns(
+            booking.source_table,
+            booking.id,
+            { status: "cancelled", live_ride_id: null },
+            missingLaterBookingActivationColumns,
+          );
+          continue;
+        }
+
         // Ensure the booking has a PIN (older bookings may predate PIN generation)
         let otp = typeof booking.otp === "string" && booking.otp ? booking.otp : null;
         if (!otp) {
@@ -4275,6 +4301,52 @@ setInterval(async () => {
     console.error('Scheduled activation engine error:', err);
   }
 }, 60000); // 1 minute interval
+
+// ─── Stale pending ASAP ride cleanup ───
+// Cancels leftover pending rides so they can never be re-offered to drivers.
+const STALE_PENDING_ASAP_MS = 45 * 60 * 1000;
+setInterval(async () => {
+  try {
+    const cutoff = new Date(Date.now() - STALE_PENDING_ASAP_MS).toISOString();
+    const { data, error } = await sb
+      .from("rides")
+      .update({
+        status: "cancelled",
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: "system",
+        cancellation_reason: "stale_pending_auto_cancelled",
+      })
+      .eq("status", "pending")
+      .is("driver_id", null)
+      .lt("requested_at", cutoff)
+      .select("id");
+
+    if (error) {
+      // requested_at may be missing on some schemas — try created_at
+      const fallback = await sb
+        .from("rides")
+        .update({
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: "system",
+          cancellation_reason: "stale_pending_auto_cancelled",
+        })
+        .eq("status", "pending")
+        .is("driver_id", null)
+        .lt("created_at", cutoff)
+        .select("id");
+      if (fallback.error) {
+        console.warn("⚠️ Stale pending ride cleanup failed:", fallback.error.message);
+      } else if (fallback.data?.length) {
+        console.log(`🧹 Auto-cancelled ${fallback.data.length} stale pending ride(s)`);
+      }
+    } else if (data?.length) {
+      console.log(`🧹 Auto-cancelled ${data.length} stale pending ride(s)`);
+    }
+  } catch (err) {
+    console.warn("⚠️ Stale pending ride cleanup error:", err);
+  }
+}, 5 * 60 * 1000);
 
 // ─── Driver Payout Methods ────────────────────────────────────────
 app.get("/api/driver-payout-methods/:driverId", async (req: Request, res: Response) => {
