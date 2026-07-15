@@ -621,9 +621,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               setRideCancelledByRider(true);
 
               // 🔔 Notify driver of cancellation
+              const cancelFee = Number(update.cancellationFee || update.cancellation_fee || 0);
               sendLocalNotification(
-                "❌ Ride Cancelled",
-                `${currentRide?.riderName || "The rider"} has cancelled the ride.`,
+                cancelFee > 0 ? "💰 Ride Cancelled — Fee Credited" : "❌ Ride Cancelled",
+                cancelFee > 0
+                  ? `${currentRide?.riderName || "The rider"} cancelled. £${cancelFee.toFixed(2)} was added to your earnings.`
+                  : `${currentRide?.riderName || "The rider"} has cancelled the ride.`,
                 { type: "ride_cancelled", rideId: update.rideId, audience: "driver" }
               );
 
@@ -631,6 +634,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               setActiveRide(null);
               saveActiveRide(null).catch((err) => console.warn("⚠️ Failed to clear active ride:", err));
               setRideState("none");
+              // Sync earnings so cancellation fee credit appears immediately
+              setTimeout(() => {
+                refreshData().catch((err: any) => console.warn("⚠️ Post rider-cancel refreshData failed:", err));
+              }, 1500);
             }
           } else if (!currentRide && update.status === "cancelled_no_show") {
             // Ride already cleared by noShowRide() — just log and refresh
@@ -807,17 +814,25 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             cancelledRides.forEach((ride: any) => {
               // Use stored cancellation_fee if available, otherwise calculate from estimated price
               let feeAmount = 0;
+              const paymentStatus = String(ride.paymentStatus || ride.payment_status || "").toLowerCase();
+              const cancelledBy = String(ride.cancelled_by || ride.cancelledBy || "").toLowerCase();
+              const storedFee = Number(ride.cancellation_fee ?? ride.cancellationFee ?? 0);
+              const riderCancelPaymentStatuses = new Set([
+                "cancellation_fee_wallet_charged",
+                "cancellation_fee_card_captured",
+                "cancellation_fee_card_charged",
+                "prepaid_retained",
+              ]);
+              const isRiderCancelCredit =
+                cancelledBy === "rider" || riderCancelPaymentStatuses.has(paymentStatus);
 
-              if (ride.cancellation_fee && ride.cancellation_fee > 0) {
-                // Use the fee stored in the database
-                feeAmount = Number(ride.cancellation_fee);
-              } else if (ride.paymentStatus && ride.paymentStatus.includes('cancellation')) {
-                // If it's a cancellation payment status, calculate fee (50% of discounted fare)
-                if (ride.paymentStatus === 'cancellation_fee_wallet_charged') {
-                  feeAmount = getDiscountedFare(ride.estimatedPrice || 0, ride.discountAmount || 0);
-                } else {
-                  feeAmount = getDriverCancelPenalty(ride.estimatedPrice || 0, ride.discountAmount || 0);
-                }
+              if (storedFee > 0) {
+                feeAmount = storedFee;
+              } else if (isRiderCancelCredit && paymentStatus.includes("cancellation")) {
+                // Payable fare (with or without coupon) — same as Total Fare charged to rider
+                feeAmount = getDiscountedFare(ride.estimatedPrice || 0, ride.discountAmount || 0);
+              } else if (paymentStatus.includes("cancellation") && cancelledBy === "driver") {
+                feeAmount = getDriverCancelPenalty(ride.estimatedPrice || 0, ride.discountAmount || 0);
               }
 
               if (feeAmount > 0) {
@@ -833,15 +848,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                   );
                 });
                 if (!deductionExists) {
-                  const cancelledByRider = ride.paymentStatus === 'cancellation_fee_wallet_charged';
                   allDeductions.push({
                     id: `ride_${ride.id}_cancellation`,
                     driverId: driver.id,
-                    amount: cancelledByRider ? Math.abs(feeAmount) : -Math.abs(feeAmount),
-                    type: cancelledByRider
+                    amount: isRiderCancelCredit ? Math.abs(feeAmount) : -Math.abs(feeAmount),
+                    type: isRiderCancelCredit
                       ? DRIVER_DEDUCTION_TYPE.COMMISSION
                       : DRIVER_DEDUCTION_TYPE.PENALTY,
-                    reason: cancelledByRider
+                    reason: isRiderCancelCredit
                       ? `Cancellation Fee Credit - Passenger Cancelled - ${ride.pickupAddress || 'Trip'}`
                       : driverPenaltyLabel,
                     createdAt: normalizeBackendTimestamp(ride.cancelledAt || ride.updatedAt || new Date().toISOString()),

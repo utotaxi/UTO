@@ -16,6 +16,10 @@ export function formatLiveRideCancellationPenalty(rideId: string): string {
   return `50% cancellation penalty for ride ${rideId}`;
 }
 
+export function formatRiderCancellationFeeCredit(rideId: string): string {
+  return `Cancellation Fee Credit - Passenger Cancelled - ride ${rideId}`;
+}
+
 export function formatScheduledBookingCancellationPenalty(bookingId: string): string {
   return `50% cancellation penalty for scheduled booking ${bookingId}`;
 }
