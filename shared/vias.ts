@@ -15,12 +15,15 @@ export function normalizeVias(raw: any): RideVia[] {
       const address = String(v?.address || v?.description || "").trim();
       const latitude = Number(v?.latitude ?? v?.lat);
       const longitude = Number(v?.longitude ?? v?.lng);
-      if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+      if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude))
+        return null;
       return {
         address,
         latitude,
         longitude,
-        sequenceOrder: Number(v?.sequenceOrder ?? v?.sequence_order ?? index + 1),
+        sequenceOrder: Number(
+          v?.sequenceOrder ?? v?.sequence_order ?? index + 1,
+        ),
       } as RideVia;
     })
     .filter(Boolean)
@@ -35,7 +38,10 @@ export function viasToWaypointsParam(vias: RideVia[]): string | null {
 }
 
 /** Sum all legs from a Directions API response (required when vias are used). */
-export function sumDirectionsLegs(route: any): { distanceMeters: number; durationSeconds: number } {
+export function sumDirectionsLegs(route: any): {
+  distanceMeters: number;
+  durationSeconds: number;
+} {
   const legs = Array.isArray(route?.legs) ? route.legs : [];
   let distanceMeters = 0;
   let durationSeconds = 0;

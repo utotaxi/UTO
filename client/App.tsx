@@ -15,7 +15,10 @@ import {
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
 import { MaterialIcons } from "@expo/vector-icons";
-import { defineBackgroundLocationTask, setupAppStateListener } from '@/lib/backgroundLocation';
+import {
+  defineBackgroundLocationTask,
+  setupAppStateListener,
+} from "@/lib/backgroundLocation";
 
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
@@ -29,7 +32,10 @@ import { ModeProvider, useMode } from "@/context/ModeContext";
 import { RideProvider } from "@/context/RideContext";
 import { DriverProvider } from "@/context/DriverContext";
 import { ThemeProvider } from "@/context/ThemeContext";
-import { useNotifications, setNotificationAppMode } from "@/hooks/useNotifications";
+import {
+  useNotifications,
+  setNotificationAppMode,
+} from "@/hooks/useNotifications";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -66,10 +72,10 @@ export default function App() {
   useEffect(() => {
     // Initialize background location task
     defineBackgroundLocationTask();
-    
+
     // Setup app state listener
     const unsubscribeAppState = setupAppStateListener();
-    
+
     return () => {
       unsubscribeAppState();
     };
@@ -86,7 +92,9 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <StripeProvider publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""}>
+      <StripeProvider
+        publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""}
+      >
         <SafeAreaProvider>
           <GestureHandlerRootView style={styles.root}>
             <KeyboardProvider>

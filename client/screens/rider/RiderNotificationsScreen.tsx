@@ -100,7 +100,9 @@ export default function RiderNotificationsScreen({ navigation }: any) {
   useEffect(() => {
     (async () => {
       try {
-        const key = user?.id ? `${NOTIF_PREFS_KEY}_${user.id}` : NOTIF_PREFS_KEY;
+        const key = user?.id
+          ? `${NOTIF_PREFS_KEY}_${user.id}`
+          : NOTIF_PREFS_KEY;
         const stored = await AsyncStorage.getItem(key);
         if (stored) {
           const parsed = JSON.parse(stored);
@@ -115,15 +117,22 @@ export default function RiderNotificationsScreen({ navigation }: any) {
   }, [user?.id]);
 
   // Persist prefs to AsyncStorage (debounced)
-  const persistPrefs = useCallback(async (updated: NotificationPrefs) => {
-    try {
-      const key = user?.id ? `${NOTIF_PREFS_KEY}_${user.id}` : NOTIF_PREFS_KEY;
-      await AsyncStorage.setItem(key, JSON.stringify(updated));
-      setLastSaved(new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/London" }));
-    } catch (err) {
-      console.warn("Failed to save notification prefs:", err);
-    }
-  }, [user?.id]);
+  const persistPrefs = useCallback(
+    async (updated: NotificationPrefs) => {
+      try {
+        const key = user?.id
+          ? `${NOTIF_PREFS_KEY}_${user.id}`
+          : NOTIF_PREFS_KEY;
+        await AsyncStorage.setItem(key, JSON.stringify(updated));
+        setLastSaved(
+          new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/London" }),
+        );
+      } catch (err) {
+        console.warn("Failed to save notification prefs:", err);
+      }
+    },
+    [user?.id],
+  );
 
   // Toggle a single pref
   const togglePref = (key: keyof NotificationPrefs) => {
@@ -138,16 +147,16 @@ export default function RiderNotificationsScreen({ navigation }: any) {
   const handleUnsubscribeAll = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const updated: NotificationPrefs = {
-      pushRideUpdates: true,  // Keep essential
+      pushRideUpdates: true, // Keep essential
       pushPromotions: false,
-      pushPayments: true,     // Keep essential
-      pushSafety: true,       // Always on
+      pushPayments: true, // Keep essential
+      pushSafety: true, // Always on
       smsRideUpdates: false,
       smsPromotions: false,
-      emailReceipts: true,    // Keep essential
+      emailReceipts: true, // Keep essential
       emailPromotions: false,
       emailNewsletter: false,
-      emailSafety: true,      // Always on
+      emailSafety: true, // Always on
     };
     setPrefs(updated);
     persistPrefs(updated);
@@ -177,7 +186,12 @@ export default function RiderNotificationsScreen({ navigation }: any) {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top + 60, alignItems: "center" }]}>
+      <View
+        style={[
+          styles.container,
+          { paddingTop: insets.top + 60, alignItems: "center" },
+        ]}
+      >
         <ActivityIndicator size="large" color={UTOColors.primary} />
       </View>
     );
@@ -187,22 +201,52 @@ export default function RiderNotificationsScreen({ navigation }: any) {
     {
       title: "PUSH NOTIFICATIONS",
       items: [
-        { key: "pushRideUpdates" as const, label: "Ride Updates", subtitle: "Driver arrival, ride status, and trip progress", icon: "directions-car" as const },
-        { key: "pushPayments" as const, label: "Payments & Receipts", subtitle: "Payment confirmations and wallet updates", icon: "payment" as const },
-        { key: "pushPromotions" as const, label: "Promotions & Offers", subtitle: "Discounts, promo codes, and special deals", icon: "local-offer" as const },
+        {
+          key: "pushRideUpdates" as const,
+          label: "Ride Updates",
+          subtitle: "Driver arrival, ride status, and trip progress",
+          icon: "directions-car" as const,
+        },
+        {
+          key: "pushPayments" as const,
+          label: "Payments & Receipts",
+          subtitle: "Payment confirmations and wallet updates",
+          icon: "payment" as const,
+        },
+        {
+          key: "pushPromotions" as const,
+          label: "Promotions & Offers",
+          subtitle: "Discounts, promo codes, and special deals",
+          icon: "local-offer" as const,
+        },
       ],
     },
     {
       title: "SMS",
       items: [
-        { key: "smsRideUpdates" as const, label: "Ride Updates via SMS", subtitle: "Text messages for ride confirmations", icon: "sms" as const },
+        {
+          key: "smsRideUpdates" as const,
+          label: "Ride Updates via SMS",
+          subtitle: "Text messages for ride confirmations",
+          icon: "sms" as const,
+        },
       ],
     },
     {
       title: "EMAIL",
       items: [
-        { key: "emailReceipts" as const, label: "Trip Receipts", subtitle: "Receive trip receipts via email", icon: "receipt" as const },
-        { key: "emailPromotions" as const, label: "Promotions", subtitle: "Stay updated with upcoming offers", icon: "mail" as const },
+        {
+          key: "emailReceipts" as const,
+          label: "Trip Receipts",
+          subtitle: "Receive trip receipts via email",
+          icon: "receipt" as const,
+        },
+        {
+          key: "emailPromotions" as const,
+          label: "Promotions",
+          subtitle: "Stay updated with upcoming offers",
+          icon: "mail" as const,
+        },
       ],
     },
   ];
@@ -239,13 +283,15 @@ export default function RiderNotificationsScreen({ navigation }: any) {
           entering={FadeInDown.delay(100).duration(400)}
           style={styles.infoBanner}
         >
-          <MaterialIcons name="info-outline" size={20} color={UTOColors.primary} />
+          <MaterialIcons
+            name="info-outline"
+            size={20}
+            color={UTOColors.primary}
+          />
           <ThemedText style={styles.infoBannerText}>
             Manage how you receive notifications to stay updated on your trips.
           </ThemedText>
         </Animated.View>
-
-
 
         {sections.map((section, sIndex) => (
           <Animated.View
@@ -271,8 +317,6 @@ export default function RiderNotificationsScreen({ navigation }: any) {
             </View>
           </Animated.View>
         ))}
-
-
       </ScrollView>
     </View>
   );
@@ -281,49 +325,76 @@ export default function RiderNotificationsScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000000" },
   header: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: Spacing.lg, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: "#1A1A1A",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1A1A1A",
   },
   backButton: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#1A1A1A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "600" },
   scrollContent: { paddingTop: Spacing.lg },
   // Info banner
   infoBanner: {
-    flexDirection: "row", backgroundColor: UTOColors.primary + "10",
-    marginHorizontal: Spacing.lg, marginBottom: Spacing.md,
-    padding: Spacing.md, borderRadius: BorderRadius.md, gap: Spacing.sm,
-    borderWidth: 1, borderColor: UTOColors.primary + "20",
+    flexDirection: "row",
+    backgroundColor: UTOColors.primary + "10",
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: UTOColors.primary + "20",
   },
   infoBannerText: { flex: 1, color: "#9CA3AF", fontSize: 13, lineHeight: 18 },
   // Status
   statusBar: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    marginHorizontal: Spacing.lg, marginBottom: Spacing.xl,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.xl,
   },
   statusText: { color: "#6B7280", fontSize: 13 },
   savedText: { color: "#10B981", fontSize: 12, fontWeight: "600" },
   // Section
   section: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.xl },
   sectionTitle: {
-    color: "#6B7280", fontSize: 13, fontWeight: "600",
-    letterSpacing: 1, marginBottom: Spacing.md,
+    color: "#6B7280",
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 1,
+    marginBottom: Spacing.md,
   },
   sectionCard: {
-    backgroundColor: "#1A1A1A", borderRadius: BorderRadius.lg, overflow: "hidden",
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.lg,
+    overflow: "hidden",
   },
   // Toggle
   toggleItem: {
-    flexDirection: "row", alignItems: "center",
-    paddingVertical: 14, paddingHorizontal: Spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
   },
   toggleBorder: { borderBottomWidth: 1, borderBottomColor: "#2A2A2A" },
   toggleIconContainer: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#333333", alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#333333",
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: Spacing.md,
   },
   toggleContent: { flex: 1, marginRight: Spacing.md },
@@ -332,10 +403,16 @@ const styles = StyleSheet.create({
   // Actions
   actionRow: { flexDirection: "row", gap: Spacing.md },
   unsubscribeButton: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    backgroundColor: "#1A1A1A", borderRadius: BorderRadius.lg,
-    paddingVertical: 14, gap: Spacing.sm,
-    borderWidth: 1, borderColor: "#EF444430",
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 14,
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: "#EF444430",
   },
   unsubscribeText: { color: "#EF4444", fontSize: 14, fontWeight: "500" },
 });

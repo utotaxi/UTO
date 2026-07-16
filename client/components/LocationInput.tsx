@@ -27,7 +27,8 @@ export function LocationInput({
 }: LocationInputProps) {
   const { theme } = useTheme();
 
-  const dotColor = type === "pickup" ? UTOColors.success : UTOColors.rider.primary;
+  const dotColor =
+    type === "pickup" ? UTOColors.success : UTOColors.rider.primary;
 
   return (
     <Pressable

@@ -15,7 +15,9 @@ export function HeaderTitle() {
         style={styles.icon}
         resizeMode="contain"
       />
-      <ThemedText style={[styles.title, { color: isDark ? "#FFFFFF" : "#000000" }]}>
+      <ThemedText
+        style={[styles.title, { color: isDark ? "#FFFFFF" : "#000000" }]}
+      >
         UTO
       </ThemedText>
     </View>

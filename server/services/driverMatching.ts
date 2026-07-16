@@ -5,7 +5,7 @@ export function haversineDistanceMiles(
   lat1: number,
   lon1: number,
   lat2: number,
-  lon2: number
+  lon2: number,
 ): number {
   const R = 3958.8;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -25,7 +25,10 @@ export function isDriverWithinRadiusMiles(
   pickupLng: number,
   driverLat: number,
   driverLng: number,
-  radiusMiles = DEFAULT_DRIVER_RADIUS_MILES
+  radiusMiles = DEFAULT_DRIVER_RADIUS_MILES,
 ): boolean {
-  return haversineDistanceMiles(pickupLat, pickupLng, driverLat, driverLng) <= radiusMiles;
+  return (
+    haversineDistanceMiles(pickupLat, pickupLng, driverLat, driverLng) <=
+    radiusMiles
+  );
 }

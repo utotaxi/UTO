@@ -2,7 +2,9 @@ type RideRequestListener = (rideId: string, ride?: any) => void;
 
 const listeners = new Set<RideRequestListener>();
 
-export function onRideRequestNotification(listener: RideRequestListener): () => void {
+export function onRideRequestNotification(
+  listener: RideRequestListener,
+): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }

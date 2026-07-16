@@ -41,14 +41,33 @@ export default function ActivityScreen({ navigation }: any) {
       <FlatList
         data={rideHistory}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <RideCard ride={item} onRebook={() => navigation.navigate("RideRequest", { prefill: { pickup: item.pickupLocation, dropoff: item.dropoffLocation } })} />}
-        ListHeaderComponent={activeRide ? (
-          <View style={styles.ongoingSection}>
-            <ThemedText style={styles.sectionTitle}>Ongoing</ThemedText>
-            <ThemedText style={styles.sectionSubtitle}>Choose an activity to track progress</ThemedText>
-            <RideCard ride={activeRide} onPress={() => navigation.navigate('RideTracking')} />
-          </View>
-        ) : null}
+        renderItem={({ item }) => (
+          <RideCard
+            ride={item}
+            onRebook={() =>
+              navigation.navigate("RideRequest", {
+                prefill: {
+                  pickup: item.pickupLocation,
+                  dropoff: item.dropoffLocation,
+                },
+              })
+            }
+          />
+        )}
+        ListHeaderComponent={
+          activeRide ? (
+            <View style={styles.ongoingSection}>
+              <ThemedText style={styles.sectionTitle}>Ongoing</ThemedText>
+              <ThemedText style={styles.sectionSubtitle}>
+                Choose an activity to track progress
+              </ThemedText>
+              <RideCard
+                ride={activeRide}
+                onPress={() => navigation.navigate("RideTracking")}
+              />
+            </View>
+          ) : null
+        }
         contentContainerStyle={[
           styles.listContent,
           { paddingBottom: tabBarHeight + Spacing.xl },

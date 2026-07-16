@@ -52,20 +52,23 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
   const [newAddress, setNewAddress] = useState("");
 
   // Load places from server
-  const loadPlaces = useCallback(async (showRefresh = false) => {
-    if (!user?.id) return;
-    if (showRefresh) setIsRefreshing(true);
+  const loadPlaces = useCallback(
+    async (showRefresh = false) => {
+      if (!user?.id) return;
+      if (showRefresh) setIsRefreshing(true);
 
-    try {
-      const serverPlaces = await api.savedPlaces.getAll(user.id);
-      setPlaces(serverPlaces || []);
-    } catch (err) {
-      console.error("Failed to load saved places:", err);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [user?.id]);
+      try {
+        const serverPlaces = await api.savedPlaces.getAll(user.id);
+        setPlaces(serverPlaces || []);
+      } catch (err) {
+        console.error("Failed to load saved places:", err);
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    },
+    [user?.id],
+  );
 
   useEffect(() => {
     loadPlaces();
@@ -119,9 +122,13 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
       setPlaces((prev) =>
         prev.map((p) =>
           p.id === editingPlace.id
-            ? { ...p, address: editAddress.trim(), name: editName.trim() || p.name }
-            : p
-        )
+            ? {
+                ...p,
+                address: editAddress.trim(),
+                name: editName.trim() || p.name,
+              }
+            : p,
+        ),
       );
       setEditingPlace(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -199,9 +206,16 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top + 60, alignItems: "center" }]}>
+      <View
+        style={[
+          styles.container,
+          { paddingTop: insets.top + 60, alignItems: "center" },
+        ]}
+      >
         <ActivityIndicator size="large" color={UTOColors.primary} />
-        <ThemedText style={{ color: "#6B7280", marginTop: 12 }}>Loading saved places…</ThemedText>
+        <ThemedText style={{ color: "#6B7280", marginTop: 12 }}>
+          Loading saved places…
+        </ThemedText>
       </View>
     );
   }
@@ -263,7 +277,11 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
                   style={[styles.quickAddBtn, { borderColor: "#10B98140" }]}
                 >
                   <MaterialIcons name="home" size={20} color="#10B981" />
-                  <ThemedText style={[styles.quickAddText, { color: "#10B981" }]}>Add Home</ThemedText>
+                  <ThemedText
+                    style={[styles.quickAddText, { color: "#10B981" }]}
+                  >
+                    Add Home
+                  </ThemedText>
                 </Pressable>
               )}
               {!hasWork && (
@@ -276,7 +294,11 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
                   style={[styles.quickAddBtn, { borderColor: "#3B82F640" }]}
                 >
                   <MaterialIcons name="work" size={20} color="#3B82F6" />
-                  <ThemedText style={[styles.quickAddText, { color: "#3B82F6" }]}>Add Work</ThemedText>
+                  <ThemedText
+                    style={[styles.quickAddText, { color: "#3B82F6" }]}
+                  >
+                    Add Work
+                  </ThemedText>
                 </Pressable>
               )}
             </View>
@@ -314,7 +336,9 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
                     />
                   </View>
                   <View style={styles.placeContent}>
-                    <ThemedText style={styles.placeName}>{place.name}</ThemedText>
+                    <ThemedText style={styles.placeName}>
+                      {place.name}
+                    </ThemedText>
                     <ThemedText style={styles.placeAddress}>
                       {place.address || "Tap to add address"}
                     </ThemedText>
@@ -325,7 +349,11 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
                       style={styles.deletePlaceButton}
                       hitSlop={10}
                     >
-                      <MaterialIcons name="delete-outline" size={20} color="#EF4444" />
+                      <MaterialIcons
+                        name="delete-outline"
+                        size={20}
+                        color="#EF4444"
+                      />
                     </Pressable>
                   ) : (
                     <MaterialIcons name="edit" size={18} color="#6B7280" />
@@ -340,7 +368,9 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
             style={styles.emptyState}
           >
             <MaterialIcons name="place" size={48} color="#333333" />
-            <ThemedText style={styles.emptyTitle}>No saved places yet</ThemedText>
+            <ThemedText style={styles.emptyTitle}>
+              No saved places yet
+            </ThemedText>
             <ThemedText style={styles.emptySubtitle}>
               Add your favourite places for faster ride booking
             </ThemedText>
@@ -360,7 +390,11 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
             }}
             style={styles.addPlaceButton}
           >
-            <MaterialIcons name="add-circle-outline" size={22} color={UTOColors.primary} />
+            <MaterialIcons
+              name="add-circle-outline"
+              size={22}
+              color={UTOColors.primary}
+            />
             <ThemedText style={styles.addPlaceText}>Add a New Place</ThemedText>
           </Pressable>
         </Animated.View>
@@ -377,10 +411,17 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <Pressable style={styles.modalBackground} onPress={() => setEditingPlace(null)} />
-          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}>
+          <Pressable
+            style={styles.modalBackground}
+            onPress={() => setEditingPlace(null)}
+          />
+          <View
+            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
+          >
             <View style={styles.modalHandle} />
-            <ThemedText style={styles.modalTitle}>Edit {editingPlace?.name}</ThemedText>
+            <ThemedText style={styles.modalTitle}>
+              Edit {editingPlace?.name}
+            </ThemedText>
 
             {getPlaceType(editingPlace?.name || "") === "custom" && (
               <>
@@ -407,7 +448,10 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
             />
 
             <View style={styles.modalActions}>
-              <Pressable onPress={() => setEditingPlace(null)} style={styles.modalCancelBtn}>
+              <Pressable
+                onPress={() => setEditingPlace(null)}
+                style={styles.modalCancelBtn}
+              >
                 <ThemedText style={styles.modalCancelText}>Cancel</ThemedText>
               </Pressable>
               <Pressable
@@ -437,8 +481,13 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <Pressable style={styles.modalBackground} onPress={() => setShowAddModal(false)} />
-          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}>
+          <Pressable
+            style={styles.modalBackground}
+            onPress={() => setShowAddModal(false)}
+          />
+          <View
+            style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}
+          >
             <View style={styles.modalHandle} />
             <ThemedText style={styles.modalTitle}>Add New Place</ThemedText>
 
@@ -464,7 +513,14 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
             />
 
             <View style={styles.modalActions}>
-              <Pressable onPress={() => { setShowAddModal(false); setNewName(""); setNewAddress(""); }} style={styles.modalCancelBtn}>
+              <Pressable
+                onPress={() => {
+                  setShowAddModal(false);
+                  setNewName("");
+                  setNewAddress("");
+                }}
+                style={styles.modalCancelBtn}
+              >
                 <ThemedText style={styles.modalCancelText}>Cancel</ThemedText>
               </Pressable>
               <Pressable
@@ -475,7 +531,9 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
                 {isSaving ? (
                   <ActivityIndicator size="small" color="#000" />
                 ) : (
-                  <ThemedText style={styles.modalSaveText}>Add Place</ThemedText>
+                  <ThemedText style={styles.modalSaveText}>
+                    Add Place
+                  </ThemedText>
                 )}
               </Pressable>
             </View>
@@ -489,46 +547,75 @@ export default function RiderSavedPlacesScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000000" },
   header: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: Spacing.lg, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: "#1A1A1A",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1A1A1A",
   },
   backButton: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#1A1A1A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "600" },
   addButton: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#1A1A1A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   scrollContent: { paddingTop: Spacing.lg },
   section: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.xl },
   sectionTitle: {
-    color: "#6B7280", fontSize: 13, fontWeight: "600",
-    letterSpacing: 1, marginBottom: Spacing.md,
+    color: "#6B7280",
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 1,
+    marginBottom: Spacing.md,
   },
   sectionCard: {
-    backgroundColor: "#1A1A1A", borderRadius: BorderRadius.lg, overflow: "hidden",
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.lg,
+    overflow: "hidden",
   },
   // Quick Add
   quickAddRow: { flexDirection: "row", gap: Spacing.md },
   quickAddBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    backgroundColor: "#1A1A1A", borderRadius: BorderRadius.lg,
-    paddingVertical: 14, gap: Spacing.sm,
-    borderWidth: 1, borderColor: "#333333",
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 14,
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: "#333333",
   },
   quickAddText: { fontSize: 14, fontWeight: "600" },
   // Place item
   placeItem: {
-    flexDirection: "row", alignItems: "center",
-    paddingVertical: 16, paddingHorizontal: Spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: Spacing.md,
   },
   placeBorder: { borderBottomWidth: 1, borderBottomColor: "#2A2A2A" },
   placeIconContainer: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: "#333333", alignItems: "center", justifyContent: "center",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#333333",
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: Spacing.md,
   },
   placeContent: { flex: 1 },
@@ -537,17 +624,34 @@ const styles = StyleSheet.create({
   deletePlaceButton: { padding: 8 },
   // Empty
   emptyState: {
-    alignItems: "center", paddingVertical: Spacing["4xl"],
+    alignItems: "center",
+    paddingVertical: Spacing["4xl"],
     paddingHorizontal: Spacing.xl,
   },
-  emptyTitle: { color: "#6B7280", fontSize: 18, fontWeight: "600", marginTop: Spacing.md },
-  emptySubtitle: { color: "#555555", fontSize: 14, textAlign: "center", marginTop: Spacing.sm },
+  emptyTitle: {
+    color: "#6B7280",
+    fontSize: 18,
+    fontWeight: "600",
+    marginTop: Spacing.md,
+  },
+  emptySubtitle: {
+    color: "#555555",
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: Spacing.sm,
+  },
   // Add place
   addPlaceButton: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    backgroundColor: "#1A1A1A", borderRadius: BorderRadius.lg,
-    paddingVertical: 16, gap: Spacing.sm,
-    borderWidth: 1, borderColor: UTOColors.primary + "30", borderStyle: "dashed",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 16,
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: UTOColors.primary + "30",
+    borderStyle: "dashed",
   },
   addPlaceText: { color: UTOColors.primary, fontSize: 15, fontWeight: "600" },
   // Modals
@@ -555,30 +659,61 @@ const styles = StyleSheet.create({
   modalBackground: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
   modalContent: {
     backgroundColor: "#1A1A1A",
-    borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
     padding: Spacing.xl,
   },
   modalHandle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: "#333333", alignSelf: "center", marginBottom: Spacing.xl,
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#333333",
+    alignSelf: "center",
+    marginBottom: Spacing.xl,
   },
-  modalTitle: { color: "#FFFFFF", fontSize: 20, fontWeight: "700", marginBottom: Spacing.xl },
-  modalLabel: { color: "#9CA3AF", fontSize: 13, fontWeight: "600", marginBottom: 6, marginTop: 12 },
+  modalTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: Spacing.xl,
+  },
+  modalLabel: {
+    color: "#9CA3AF",
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 6,
+    marginTop: 12,
+  },
   modalInput: {
-    backgroundColor: "#2A2A2A", borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md, paddingVertical: 14,
-    color: "#FFFFFF", fontSize: 16,
-    borderWidth: 1, borderColor: "#333333",
+    backgroundColor: "#2A2A2A",
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 14,
+    color: "#FFFFFF",
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: "#333333",
   },
-  modalActions: { flexDirection: "row", gap: Spacing.md, marginTop: Spacing.xl },
+  modalActions: {
+    flexDirection: "row",
+    gap: Spacing.md,
+    marginTop: Spacing.xl,
+  },
   modalCancelBtn: {
-    flex: 1, borderWidth: 1, borderColor: "#333333",
-    borderRadius: BorderRadius.md, paddingVertical: 14, alignItems: "center",
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#333333",
+    borderRadius: BorderRadius.md,
+    paddingVertical: 14,
+    alignItems: "center",
   },
   modalCancelText: { color: "#9CA3AF", fontSize: 16, fontWeight: "600" },
   modalSaveBtn: {
-    flex: 1, backgroundColor: UTOColors.primary,
-    borderRadius: BorderRadius.md, paddingVertical: 14, alignItems: "center",
+    flex: 1,
+    backgroundColor: UTOColors.primary,
+    borderRadius: BorderRadius.md,
+    paddingVertical: 14,
+    alignItems: "center",
   },
   modalSaveText: { color: "#000000", fontSize: 16, fontWeight: "700" },
 });

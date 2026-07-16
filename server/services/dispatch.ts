@@ -35,7 +35,12 @@ export async function reassignRide(rideId: string): Promise<void> {
     }
 
     const toRadians = (deg: number) => (deg * Math.PI) / 180;
-    const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const haversine = (
+      lat1: number,
+      lon1: number,
+      lat2: number,
+      lon2: number,
+    ) => {
       const R = 6371e3; // metres
       const φ1 = toRadians(lat1);
       const φ2 = toRadians(lat2);
@@ -53,7 +58,12 @@ export async function reassignRide(rideId: string): Promise<void> {
     for (const d of drivers) {
       if (driver_id && d.id === driver_id) continue; // exclude current driver
       if (d.latitude == null || d.longitude == null) continue;
-      const dist = haversine(pickup_latitude, pickup_longitude, d.latitude, d.longitude);
+      const dist = haversine(
+        pickup_latitude,
+        pickup_longitude,
+        d.latitude,
+        d.longitude,
+      );
       if (dist < minDist) {
         minDist = dist;
         nearestDriver = d;
@@ -61,7 +71,9 @@ export async function reassignRide(rideId: string): Promise<void> {
     }
 
     if (!nearestDriver) {
-      console.warn(`⚠️ No suitable driver found for reassigning ride ${rideId}`);
+      console.warn(
+        `⚠️ No suitable driver found for reassigning ride ${rideId}`,
+      );
       return;
     }
 
@@ -73,7 +85,10 @@ export async function reassignRide(rideId: string): Promise<void> {
     if (updateErr) throw updateErr;
 
     // Emit new ride request to the chosen driver
-    io.to(`driver:${nearestDriver.id}`).emit("ride:new", { rideId, driverId: nearestDriver.id });
+    io.to(`driver:${nearestDriver.id}`).emit("ride:new", {
+      rideId,
+      driverId: nearestDriver.id,
+    });
     console.log(`✅ Ride ${rideId} reassigned to driver ${nearestDriver.id}`);
   } catch (e) {
     console.error(`❌ Failed to reassign ride ${rideId}:`, e);

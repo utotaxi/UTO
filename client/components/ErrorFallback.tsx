@@ -85,7 +85,15 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
           </ThemedText>
         </Pressable>
 
-        <ThemedText style={{ fontSize: 10, color: theme.textSecondary, marginTop: Spacing.xl, textAlign: "center", opacity: 0.6 }}>
+        <ThemedText
+          style={{
+            fontSize: 10,
+            color: theme.textSecondary,
+            marginTop: Spacing.xl,
+            textAlign: "center",
+            opacity: 0.6,
+          }}
+        >
           {error?.message || "Unknown error"}
         </ThemedText>
       </View>

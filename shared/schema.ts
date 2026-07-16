@@ -1,5 +1,15 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, doublePrecision, serial, jsonb } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  varchar,
+  integer,
+  boolean,
+  timestamp,
+  doublePrecision,
+  serial,
+  jsonb,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -27,7 +37,9 @@ export const drivers = pgTable("drivers", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   vehicleType: text("vehicle_type").default("standard"),
   councilLicence: text("council_licence"),
   badgeNo: text("badge_no"),
@@ -49,19 +61,31 @@ export const drivers = pgTable("drivers", {
   documentInsuranceUrl: text("document_insurance_url"),
   documentInsuranceStatus: text("document_insurance_status").default("pending"),
   documentInspectionUrl: text("document_inspection_url"),
-  documentInspectionStatus: text("document_inspection_status").default("pending"),
+  documentInspectionStatus: text("document_inspection_status").default(
+    "pending",
+  ),
   documentDvlaLicenceUrl: text("document_dvla_licence_url"),
-  documentDvlaLicenceStatus: text("document_dvla_licence_status").default("pending"),
+  documentDvlaLicenceStatus: text("document_dvla_licence_status").default(
+    "pending",
+  ),
   documentBankStatementUrl: text("document_bank_statement_url"),
-  documentBankStatementStatus: text("document_bank_statement_status").default("pending"),
+  documentBankStatementStatus: text("document_bank_statement_status").default(
+    "pending",
+  ),
   documentDvlaCheckCodeUrl: text("document_dvla_check_code_url"),
-  documentDvlaCheckCodeStatus: text("document_dvla_check_code_status").default("pending"),
+  documentDvlaCheckCodeStatus: text("document_dvla_check_code_status").default(
+    "pending",
+  ),
   documentNationalInsuranceUrl: text("document_national_insurance_url"),
-  documentNationalInsuranceStatus: text("document_national_insurance_status").default("pending"),
+  documentNationalInsuranceStatus: text(
+    "document_national_insurance_status",
+  ).default("pending"),
   documentPhdlUrl: text("document_phdl_url"),
   documentPhdlStatus: text("document_phdl_status").default("pending"),
   documentProfilePhotoUrl: text("document_profile_photo_url"),
-  documentProfilePhotoStatus: text("document_profile_photo_status").default("pending"),
+  documentProfilePhotoStatus: text("document_profile_photo_status").default(
+    "pending",
+  ),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -69,7 +93,9 @@ export const rides = pgTable("rides", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  riderId: varchar("rider_id").notNull().references(() => users.id),
+  riderId: varchar("rider_id")
+    .notNull()
+    .references(() => users.id),
   driverId: varchar("driver_id").references(() => drivers.id),
   status: text("status").notNull().default("pending"),
   vehicleType: text("vehicle_type").notNull(),
@@ -101,8 +127,12 @@ export const payments = pgTable("payments", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  rideId: varchar("ride_id").notNull().references(() => rides.id),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  rideId: varchar("ride_id")
+    .notNull()
+    .references(() => rides.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   amount: doublePrecision("amount").notNull(),
   currency: text("currency").notNull().default("gbp"),
   status: text("status").notNull().default("pending"),
@@ -119,7 +149,9 @@ export const savedPlaces = pgTable("saved_places", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   name: text("name").notNull(),
   address: text("address").notNull(),
   latitude: doublePrecision("latitude").notNull(),
@@ -129,7 +161,9 @@ export const savedPlaces = pgTable("saved_places", {
 
 export const driverLocations = pgTable("driver_locations", {
   id: serial("id").primaryKey(),
-  driverId: varchar("driver_id").notNull().references(() => drivers.id),
+  driverId: varchar("driver_id")
+    .notNull()
+    .references(() => drivers.id),
   latitude: doublePrecision("latitude").notNull(),
   longitude: doublePrecision("longitude").notNull(),
   heading: doublePrecision("heading"),
@@ -141,7 +175,9 @@ export const riderPayoutMethods = pgTable("rider_payout_methods", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
   accountName: text("account_name").notNull(),
   accountNo: text("account_no").notNull(),
   sortCode: text("sort_code").notNull(),
@@ -154,8 +190,12 @@ export const withdrawals = pgTable("withdrawals", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  payoutMethodId: varchar("payout_method_id").references(() => riderPayoutMethods.id),
+  userId: varchar("user_id")
+    .notNull()
+    .references(() => users.id),
+  payoutMethodId: varchar("payout_method_id").references(
+    () => riderPayoutMethods.id,
+  ),
   amount: doublePrecision("amount").notNull(),
   status: text("status").notNull().default("pending"),
   transactionId: text("transaction_id"),
@@ -190,7 +230,9 @@ export const insertSavedPlaceSchema = createInsertSchema(savedPlaces).omit({
   createdAt: true,
 });
 
-export const insertRiderPayoutMethodSchema = createInsertSchema(riderPayoutMethods).omit({
+export const insertRiderPayoutMethodSchema = createInsertSchema(
+  riderPayoutMethods,
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -213,6 +255,8 @@ export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type SavedPlace = typeof savedPlaces.$inferSelect;
 export type InsertSavedPlace = z.infer<typeof insertSavedPlaceSchema>;
 export type RiderPayoutMethod = typeof riderPayoutMethods.$inferSelect;
-export type InsertRiderPayoutMethod = z.infer<typeof insertRiderPayoutMethodSchema>;
+export type InsertRiderPayoutMethod = z.infer<
+  typeof insertRiderPayoutMethodSchema
+>;
 export type Withdrawal = typeof withdrawals.$inferSelect;
 export type InsertWithdrawal = z.infer<typeof insertWithdrawalSchema>;

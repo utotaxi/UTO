@@ -30,9 +30,7 @@ export function getDriverCancelPenalty(
  */
 export function getPayableFareFromRide(ride: any): number {
   if (!ride) return 0;
-  const finalPrice = Number(
-    ride.final_price ?? ride.finalPrice ?? 0
-  );
+  const finalPrice = Number(ride.final_price ?? ride.finalPrice ?? 0);
   if (finalPrice > 0) {
     return Number(finalPrice.toFixed(2));
   }
@@ -42,10 +40,8 @@ export function getPayableFareFromRide(ride: any): number {
       ride.farePrice ??
       ride.fare_price ??
       ride.estimated_fare ??
-      0
+      0,
   );
-  const discount = Number(
-    ride.discount_amount ?? ride.discountAmount ?? 0
-  );
+  const discount = Number(ride.discount_amount ?? ride.discountAmount ?? 0);
   return getDiscountedFare(fullFare, discount);
 }

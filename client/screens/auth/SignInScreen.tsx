@@ -115,7 +115,9 @@ export default function SignInScreen({ navigation, route }: any) {
 
       if (sessionError || !sessionData?.user?.email) {
         console.error("🔑 setSession error:", sessionError);
-        setError(`Auth Error: ${sessionError?.message || "Failed to verify Google account"}`);
+        setError(
+          `Auth Error: ${sessionError?.message || "Failed to verify Google account"}`,
+        );
         setIsGoogleLoading(false);
         return;
       }
@@ -128,15 +130,32 @@ export default function SignInScreen({ navigation, route }: any) {
 
       console.log("🔑 Google OAuth: authenticated as", userEmail);
 
-      const signedInUser = await signIn(userEmail, "google", true, userFullName, selectedRole);
+      const signedInUser = await signIn(
+        userEmail,
+        "google",
+        true,
+        userFullName,
+        selectedRole,
+      );
       if (!signedInUser) {
         throw new Error("Failed to sign in");
       }
       const serverRole = (signedInUser.role || "rider").toLowerCase();
-      setUserRole(serverRole === "both" ? "both" : serverRole === "driver" ? "driver" : "rider");
+      setUserRole(
+        serverRole === "both"
+          ? "both"
+          : serverRole === "driver"
+            ? "driver"
+            : "rider",
+      );
     } catch (err: any) {
       console.error("🔑 Google OAuth redirect error:", err);
-      setError(parseAuthError(err, "Server Error: Google sign in failed on the backend"));
+      setError(
+        parseAuthError(
+          err,
+          "Server Error: Google sign in failed on the backend",
+        ),
+      );
     } finally {
       setIsGoogleLoading(false);
     }
@@ -175,12 +194,24 @@ export default function SignInScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      const signedInUser = await signIn(email, password, false, undefined, selectedRole);
+      const signedInUser = await signIn(
+        email,
+        password,
+        false,
+        undefined,
+        selectedRole,
+      );
       if (!signedInUser) {
         throw new Error("Invalid email or password");
       }
       const serverRole = (signedInUser.role || "rider").toLowerCase();
-      setUserRole(serverRole === "both" ? "both" : serverRole === "driver" ? "driver" : "rider");
+      setUserRole(
+        serverRole === "both"
+          ? "both"
+          : serverRole === "driver"
+            ? "driver"
+            : "rider",
+      );
     } catch (err) {
       setError(parseAuthError(err, "Invalid email or password"));
     } finally {
@@ -214,7 +245,10 @@ export default function SignInScreen({ navigation, route }: any) {
       }
 
       // Open WebBrowser — it handles the deep-link return automatically without restarting the app
-      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      const result = await WebBrowser.openAuthSessionAsync(
+        data.url,
+        redirectUrl,
+      );
       console.log("🔑 Google OAuth: WebBrowser result =", result.type);
 
       if (result.type === "success" && result.url) {
@@ -249,7 +283,10 @@ export default function SignInScreen({ navigation, route }: any) {
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: insets.top + Spacing.xl, paddingBottom: insets.bottom + Spacing.xl },
+            {
+              paddingTop: insets.top + Spacing.xl,
+              paddingBottom: insets.bottom + Spacing.xl,
+            },
           ]}
           keyboardShouldPersistTaps="handled"
         >
@@ -318,7 +355,12 @@ export default function SignInScreen({ navigation, route }: any) {
             <View style={styles.inputContainer}>
               <ThemedText style={styles.inputLabel}>Email address</ThemedText>
               <View style={styles.inputWrapper}>
-                <Feather name="mail" size={20} color="#6B7280" style={styles.inputIcon} />
+                <Feather
+                  name="mail"
+                  size={20}
+                  color="#6B7280"
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your email"
@@ -336,7 +378,12 @@ export default function SignInScreen({ navigation, route }: any) {
             <View style={styles.inputContainer}>
               <ThemedText style={styles.inputLabel}>Password</ThemedText>
               <View style={styles.inputWrapper}>
-                <Feather name="lock" size={20} color="#6B7280" style={styles.inputIcon} />
+                <Feather
+                  name="lock"
+                  size={20}
+                  color="#6B7280"
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your password"
@@ -358,8 +405,19 @@ export default function SignInScreen({ navigation, route }: any) {
                   />
                 </Pressable>
               </View>
-              <Pressable onPress={() => navigation.navigate("ResetPassword", { email })} style={{ alignSelf: "flex-end", marginTop: 4 }}>
-                <ThemedText style={{ color: UTOColors.primary, fontSize: 13, fontWeight: "500" }}>Forgot password?</ThemedText>
+              <Pressable
+                onPress={() => navigation.navigate("ResetPassword", { email })}
+                style={{ alignSelf: "flex-end", marginTop: 4 }}
+              >
+                <ThemedText
+                  style={{
+                    color: UTOColors.primary,
+                    fontSize: 13,
+                    fontWeight: "500",
+                  }}
+                >
+                  Forgot password?
+                </ThemedText>
               </Pressable>
             </View>
 
@@ -379,7 +437,9 @@ export default function SignInScreen({ navigation, route }: any) {
               {isLoading ? (
                 <ActivityIndicator color="#000000" />
               ) : (
-                <ThemedText style={styles.signInButtonText}>Continue</ThemedText>
+                <ThemedText style={styles.signInButtonText}>
+                  Continue
+                </ThemedText>
               )}
             </AnimatedPressable>
 

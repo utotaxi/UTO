@@ -6,7 +6,7 @@ export const UTOColors = {
   primary: "#F7C948",
   primaryDark: "#D4A738",
   primaryLight: "#FFE082",
-  
+
   // Mode colors
   rider: {
     primary: "#F7C948",
@@ -25,7 +25,7 @@ export const UTOColors = {
   border: "#333333",
   disabled: "#555555",
   overlay: "rgba(0, 0, 0, 0.6)",
-  
+
   // Background variations
   background: "#000000",
   backgroundSecondary: "#1A1A1A",
@@ -216,7 +216,8 @@ export const Fonts = Platform.select({
   web: {
     sans: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
     serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
+    rounded:
+      "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });

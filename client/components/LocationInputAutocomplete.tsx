@@ -54,14 +54,18 @@ export function LocationInputAutocomplete({
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [savedPlaces, setSavedPlaces] = useState<PlaceSuggestion[]>([]);
   const [sessionToken] = useState(() =>
-    Math.random().toString(36).substring(7)
+    Math.random().toString(36).substring(7),
   );
 
   // Use a ref for the debounce timer so it persists across renders
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dotColor =
-    type === "pickup" ? UTOColors.success : type === "via" ? "#F59E0B" : UTOColors.primary;
+    type === "pickup"
+      ? UTOColors.success
+      : type === "via"
+        ? "#F59E0B"
+        : UTOColors.primary;
 
   const loadSavedPlaces = useCallback(async () => {
     if (!user?.id) return;
@@ -91,53 +95,56 @@ export function LocationInputAutocomplete({
   //   }
   // }, [user?.id, loadSavedPlaces]);
 
-  const fetchPlaceSuggestions = useCallback(async (input: string) => {
-    try {
-      setIsLoading(true);
+  const fetchPlaceSuggestions = useCallback(
+    async (input: string) => {
+      try {
+        setIsLoading(true);
 
-      const baseUrl = getApiUrl();
-      const url = `${baseUrl}/api/places/autocomplete?input=${encodeURIComponent(
-        input
-      )}&sessiontoken=${sessionToken}`;
+        const baseUrl = getApiUrl();
+        const url = `${baseUrl}/api/places/autocomplete?input=${encodeURIComponent(
+          input,
+        )}&sessiontoken=${sessionToken}`;
 
-      const response = await fetch(url);
+        const response = await fetch(url);
 
-      if (!response.ok) {
-        console.error(
-          "Places API error:",
-          response.status,
-          response.statusText
-        );
+        if (!response.ok) {
+          console.error(
+            "Places API error:",
+            response.status,
+            response.statusText,
+          );
+          setSuggestions([]);
+          return;
+        }
+
+        const data = await response.json();
+
+        if (data.predictions && data.predictions.length > 0) {
+          const formattedSuggestions: PlaceSuggestion[] = data.predictions.map(
+            (prediction: any) => ({
+              id: prediction.place_id,
+              description: prediction.description,
+              mainText:
+                prediction.structured_formatting?.main_text ||
+                prediction.description,
+              secondaryText:
+                prediction.structured_formatting?.secondary_text || "",
+            }),
+          );
+
+          setSuggestions(formattedSuggestions);
+        } else {
+          setSuggestions([]);
+        }
+      } catch (error) {
+        console.error("Error fetching place suggestions:", error);
         setSuggestions([]);
-        return;
+      } finally {
+        setIsLoading(false);
       }
-
-      const data = await response.json();
-
-      if (data.predictions && data.predictions.length > 0) {
-        const formattedSuggestions: PlaceSuggestion[] = data.predictions.map(
-          (prediction: any) => ({
-            id: prediction.place_id,
-            description: prediction.description,
-            mainText:
-              prediction.structured_formatting?.main_text ||
-              prediction.description,
-            secondaryText:
-              prediction.structured_formatting?.secondary_text || "",
-          })
-        );
-
-        setSuggestions(formattedSuggestions);
-      } else {
-        setSuggestions([]);
-      }
-    } catch (error) {
-      console.error("Error fetching place suggestions:", error);
-      setSuggestions([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [sessionToken]);
+    },
+    [sessionToken],
+  );
 
   const handleTextChange = useCallback(
     (text: string) => {
@@ -168,35 +175,40 @@ export function LocationInputAutocomplete({
         setIsLoading(false);
       }
     },
-    [onChangeText, fetchPlaceSuggestions, savedPlaces]
+    [onChangeText, fetchPlaceSuggestions, savedPlaces],
   );
 
-  const handleSelectLocation = useCallback(async (location: PlaceSuggestion) => {
-    onChangeText(location.secondaryText || location.mainText);
+  const handleSelectLocation = useCallback(
+    async (location: PlaceSuggestion) => {
+      onChangeText(location.secondaryText || location.mainText);
 
-    // If it's a saved place, it already has coordinates
-    const isSavedPlace = location.latitude && location.longitude;
+      // If it's a saved place, it already has coordinates
+      const isSavedPlace = location.latitude && location.longitude;
 
-    // Only fetch place details for non-saved places (Google Places API)
-  if (!isSavedPlace) {
-    try {
-      const baseUrl = getApiUrl();
-      const response = await fetch(`${baseUrl}/api/places/details/${location.id}`);
-      const data = await response.json();
+      // Only fetch place details for non-saved places (Google Places API)
+      if (!isSavedPlace) {
+        try {
+          const baseUrl = getApiUrl();
+          const response = await fetch(
+            `${baseUrl}/api/places/details/${location.id}`,
+          );
+          const data = await response.json();
 
-      if (data.result?.geometry?.location) {
-        location.latitude = data.result.geometry.location.lat;
-        location.longitude = data.result.geometry.location.lng;
+          if (data.result?.geometry?.location) {
+            location.latitude = data.result.geometry.location.lat;
+            location.longitude = data.result.geometry.location.lng;
+          }
+        } catch (error) {
+          console.error("Error fetching place details:", error);
+        }
       }
-    } catch (error) {
-      console.error("Error fetching place details:", error);
-    }
-    }
 
-    onSelectLocation(location);
-    setSuggestions([]);
-    setIsFocused(false);
-  }, [onChangeText, onSelectLocation]);
+      onSelectLocation(location);
+      setSuggestions([]);
+      setIsFocused(false);
+    },
+    [onChangeText, onSelectLocation],
+  );
 
   const handleFocus = useCallback(() => {
     setIsFocused(true);
@@ -219,17 +231,25 @@ export function LocationInputAutocomplete({
       isSavedPlace && item.mainText.toLowerCase() === "home"
         ? "home"
         : isSavedPlace && item.mainText.toLowerCase() === "work"
-        ? "work"
-        : isSavedPlace
-        ? "place"
-        : "map-pin";
+          ? "work"
+          : isSavedPlace
+            ? "place"
+            : "map-pin";
 
     return (
       <Pressable
         onPress={() => handleSelectLocation(item)}
-        style={[styles.suggestionItem,{ borderBottomColor: isDark ? "#333333" : theme.border },]}
+        style={[
+          styles.suggestionItem,
+          { borderBottomColor: isDark ? "#333333" : theme.border },
+        ]}
       >
-      <View style={[styles.suggestionIcon, { backgroundColor: isDark ? "#333333" : theme.backgroundDefault }]}>
+        <View
+          style={[
+            styles.suggestionIcon,
+            { backgroundColor: isDark ? "#333333" : theme.backgroundDefault },
+          ]}
+        >
           {isSavedPlace ? (
             <MaterialIcons
               name={iconName as any}
@@ -237,11 +257,20 @@ export function LocationInputAutocomplete({
               color={isDark ? "#9CA3AF" : theme.textSecondary}
             />
           ) : (
-            <Feather name="map-pin" size={16} color={isDark ? "#9CA3AF" : theme.textSecondary} />
+            <Feather
+              name="map-pin"
+              size={16}
+              color={isDark ? "#9CA3AF" : theme.textSecondary}
+            />
           )}
         </View>
         <View style={styles.suggestionText}>
-          <ThemedText style={[ styles.mainText, { color: isDark ? "#FFFFFF" : theme.text } ]} >
+          <ThemedText
+            style={[
+              styles.mainText,
+              { color: isDark ? "#FFFFFF" : theme.text },
+            ]}
+          >
             {item.secondaryText}
           </ThemedText>
           {item.secondaryText ? (
@@ -269,8 +298,8 @@ export function LocationInputAutocomplete({
             borderColor: isFocused
               ? UTOColors.primary
               : isDark
-              ? "#333333"
-              : theme.border,
+                ? "#333333"
+                : theme.border,
           },
         ]}
       >

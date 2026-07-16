@@ -371,15 +371,22 @@ export class SupabaseStorage implements IStorage {
     if (updates.password !== undefined) snakeData.password = updates.password;
     if (updates.phone !== undefined) snakeData.phone = updates.phone;
     if (updates.email !== undefined) snakeData.email = updates.email;
-    if (updates.profileImage !== undefined) snakeData.profile_image = updates.profileImage;
+    if (updates.profileImage !== undefined)
+      snakeData.profile_image = updates.profileImage;
     if (updates.role !== undefined) snakeData.role = updates.role;
     if (updates.rating !== undefined) snakeData.rating = updates.rating;
-    if (updates.totalRides !== undefined) snakeData.total_rides = updates.totalRides;
-    if (updates.isVerified !== undefined) snakeData.is_verified = updates.isVerified;
-    if (updates.stripeCustomerId !== undefined) snakeData.stripe_customer_id = updates.stripeCustomerId;
-    if (updates.walletBalance !== undefined) snakeData.wallet_balance = updates.walletBalance;
-    if (updates.pushToken !== undefined) snakeData.push_token = updates.pushToken;
-    if (updates.isDeleted !== undefined) snakeData.is_deleted = updates.isDeleted;
+    if (updates.totalRides !== undefined)
+      snakeData.total_rides = updates.totalRides;
+    if (updates.isVerified !== undefined)
+      snakeData.is_verified = updates.isVerified;
+    if (updates.stripeCustomerId !== undefined)
+      snakeData.stripe_customer_id = updates.stripeCustomerId;
+    if (updates.walletBalance !== undefined)
+      snakeData.wallet_balance = updates.walletBalance;
+    if (updates.pushToken !== undefined)
+      snakeData.push_token = updates.pushToken;
+    if (updates.isDeleted !== undefined)
+      snakeData.is_deleted = updates.isDeleted;
     snakeData.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -440,7 +447,8 @@ export class SupabaseStorage implements IStorage {
     if (driver.id) insertData.id = driver.id;
     if (driver.vehicleYear) insertData.vehicle_year = driver.vehicleYear;
     if (driver.vehicleColor) insertData.vehicle_color = driver.vehicleColor;
-    if (driver.councilLicence) insertData.council_licence = driver.councilLicence;
+    if (driver.councilLicence)
+      insertData.council_licence = driver.councilLicence;
     if (driver.badgeNo) insertData.badge_no = driver.badgeNo;
 
     let data: any = null;
@@ -469,38 +477,75 @@ export class SupabaseStorage implements IStorage {
   async updateDriver(id: string, updates: any) {
     const snakeData: any = {};
     if (updates.isOnline !== undefined) snakeData.is_online = updates.isOnline;
-    if (updates.isAvailable !== undefined) snakeData.is_available = updates.isAvailable;
-    if (updates.currentLatitude !== undefined) snakeData.current_latitude = updates.currentLatitude;
-    if (updates.currentLongitude !== undefined) snakeData.current_longitude = updates.currentLongitude;
-    if (updates.totalEarnings !== undefined) snakeData.total_earnings = updates.totalEarnings;
-    if (updates.vehicleType !== undefined) snakeData.vehicle_type = updates.vehicleType;
-    if (updates.vehicleMake !== undefined) snakeData.vehicle_make = updates.vehicleMake;
-    if (updates.vehicleModel !== undefined) snakeData.vehicle_model = updates.vehicleModel;
-    if (updates.licensePlate !== undefined) snakeData.license_plate = updates.licensePlate;
-    if (updates.vehicleYear !== undefined) snakeData.vehicle_year = updates.vehicleYear;
-    if (updates.vehicleColor !== undefined) snakeData.vehicle_color = updates.vehicleColor;
-    if (updates.councilLicence !== undefined) snakeData.council_licence = updates.councilLicence;
+    if (updates.isAvailable !== undefined)
+      snakeData.is_available = updates.isAvailable;
+    if (updates.currentLatitude !== undefined)
+      snakeData.current_latitude = updates.currentLatitude;
+    if (updates.currentLongitude !== undefined)
+      snakeData.current_longitude = updates.currentLongitude;
+    if (updates.totalEarnings !== undefined)
+      snakeData.total_earnings = updates.totalEarnings;
+    if (updates.vehicleType !== undefined)
+      snakeData.vehicle_type = updates.vehicleType;
+    if (updates.vehicleMake !== undefined)
+      snakeData.vehicle_make = updates.vehicleMake;
+    if (updates.vehicleModel !== undefined)
+      snakeData.vehicle_model = updates.vehicleModel;
+    if (updates.licensePlate !== undefined)
+      snakeData.license_plate = updates.licensePlate;
+    if (updates.vehicleYear !== undefined)
+      snakeData.vehicle_year = updates.vehicleYear;
+    if (updates.vehicleColor !== undefined)
+      snakeData.vehicle_color = updates.vehicleColor;
+    if (updates.councilLicence !== undefined)
+      snakeData.council_licence = updates.councilLicence;
     if (updates.badgeNo !== undefined) snakeData.badge_no = updates.badgeNo;
-    if (updates.documentPhvlUrl !== undefined) snakeData.document_phvl_url = updates.documentPhvlUrl;
-    if (updates.documentPhvlStatus !== undefined) snakeData.document_phvl_status = updates.documentPhvlStatus;
-    if (updates.documentLogbookUrl !== undefined) snakeData.document_logbook_url = updates.documentLogbookUrl;
-    if (updates.documentLogbookStatus !== undefined) snakeData.document_logbook_status = updates.documentLogbookStatus;
-    if (updates.documentInsuranceUrl !== undefined) snakeData.document_insurance_url = updates.documentInsuranceUrl;
-    if (updates.documentInsuranceStatus !== undefined) snakeData.document_insurance_status = updates.documentInsuranceStatus;
-    if (updates.documentInspectionUrl !== undefined) snakeData.document_inspection_url = updates.documentInspectionUrl;
-    if (updates.documentInspectionStatus !== undefined) snakeData.document_inspection_status = updates.documentInspectionStatus;
-    if (updates.documentDvlaLicenceUrl !== undefined) snakeData.document_dvla_licence_url = updates.documentDvlaLicenceUrl;
-    if (updates.documentDvlaLicenceStatus !== undefined) snakeData.document_dvla_licence_status = updates.documentDvlaLicenceStatus;
-    if (updates.documentBankStatementUrl !== undefined) snakeData.document_bank_statement_url = updates.documentBankStatementUrl;
-    if (updates.documentBankStatementStatus !== undefined) snakeData.document_bank_statement_status = updates.documentBankStatementStatus;
-    if (updates.documentDvlaCheckCodeUrl !== undefined) snakeData.document_dvla_check_code_url = updates.documentDvlaCheckCodeUrl;
-    if (updates.documentDvlaCheckCodeStatus !== undefined) snakeData.document_dvla_check_code_status = updates.documentDvlaCheckCodeStatus;
-    if (updates.documentNationalInsuranceUrl !== undefined) snakeData.document_national_insurance_url = updates.documentNationalInsuranceUrl;
-    if (updates.documentNationalInsuranceStatus !== undefined) snakeData.document_national_insurance_status = updates.documentNationalInsuranceStatus;
-    if (updates.documentPhdlUrl !== undefined) snakeData.document_phdl_url = updates.documentPhdlUrl;
-    if (updates.documentPhdlStatus !== undefined) snakeData.document_phdl_status = updates.documentPhdlStatus;
-    if (updates.documentProfilePhotoUrl !== undefined) snakeData.document_profile_photo_url = updates.documentProfilePhotoUrl;
-    if (updates.documentProfilePhotoStatus !== undefined) snakeData.document_profile_photo_status = updates.documentProfilePhotoStatus;
+    if (updates.documentPhvlUrl !== undefined)
+      snakeData.document_phvl_url = updates.documentPhvlUrl;
+    if (updates.documentPhvlStatus !== undefined)
+      snakeData.document_phvl_status = updates.documentPhvlStatus;
+    if (updates.documentLogbookUrl !== undefined)
+      snakeData.document_logbook_url = updates.documentLogbookUrl;
+    if (updates.documentLogbookStatus !== undefined)
+      snakeData.document_logbook_status = updates.documentLogbookStatus;
+    if (updates.documentInsuranceUrl !== undefined)
+      snakeData.document_insurance_url = updates.documentInsuranceUrl;
+    if (updates.documentInsuranceStatus !== undefined)
+      snakeData.document_insurance_status = updates.documentInsuranceStatus;
+    if (updates.documentInspectionUrl !== undefined)
+      snakeData.document_inspection_url = updates.documentInspectionUrl;
+    if (updates.documentInspectionStatus !== undefined)
+      snakeData.document_inspection_status = updates.documentInspectionStatus;
+    if (updates.documentDvlaLicenceUrl !== undefined)
+      snakeData.document_dvla_licence_url = updates.documentDvlaLicenceUrl;
+    if (updates.documentDvlaLicenceStatus !== undefined)
+      snakeData.document_dvla_licence_status =
+        updates.documentDvlaLicenceStatus;
+    if (updates.documentBankStatementUrl !== undefined)
+      snakeData.document_bank_statement_url = updates.documentBankStatementUrl;
+    if (updates.documentBankStatementStatus !== undefined)
+      snakeData.document_bank_statement_status =
+        updates.documentBankStatementStatus;
+    if (updates.documentDvlaCheckCodeUrl !== undefined)
+      snakeData.document_dvla_check_code_url = updates.documentDvlaCheckCodeUrl;
+    if (updates.documentDvlaCheckCodeStatus !== undefined)
+      snakeData.document_dvla_check_code_status =
+        updates.documentDvlaCheckCodeStatus;
+    if (updates.documentNationalInsuranceUrl !== undefined)
+      snakeData.document_national_insurance_url =
+        updates.documentNationalInsuranceUrl;
+    if (updates.documentNationalInsuranceStatus !== undefined)
+      snakeData.document_national_insurance_status =
+        updates.documentNationalInsuranceStatus;
+    if (updates.documentPhdlUrl !== undefined)
+      snakeData.document_phdl_url = updates.documentPhdlUrl;
+    if (updates.documentPhdlStatus !== undefined)
+      snakeData.document_phdl_status = updates.documentPhdlStatus;
+    if (updates.documentProfilePhotoUrl !== undefined)
+      snakeData.document_profile_photo_url = updates.documentProfilePhotoUrl;
+    if (updates.documentProfilePhotoStatus !== undefined)
+      snakeData.document_profile_photo_status =
+        updates.documentProfilePhotoStatus;
 
     let data: any = null;
     let error: any = null;
@@ -600,7 +645,8 @@ export class SupabaseStorage implements IStorage {
             (ride as any).driverName = driverUser.fullName;
             (ride as any).driverPhone = driverUser.phone;
             (ride as any).driverRating = driverUser.rating;
-            (ride as any).vehicleInfo = `${driver.vehicleMake} ${driver.vehicleModel}`.trim();
+            (ride as any).vehicleInfo =
+              `${driver.vehicleMake} ${driver.vehicleModel}`.trim();
             (ride as any).licensePlate = driver.licensePlate;
           }
         }
@@ -648,7 +694,10 @@ export class SupabaseStorage implements IStorage {
     if (ride.driverId) insertData.driver_id = ride.driverId;
     // Note: otp column doesn't exist in the Supabase rides table yet
     // OTP is managed client-side for now
-    if (ride.estimatedDuration !== undefined && ride.estimatedDuration !== null) {
+    if (
+      ride.estimatedDuration !== undefined &&
+      ride.estimatedDuration !== null
+    ) {
       const estimatedDuration = Number(ride.estimatedDuration);
       if (Number.isFinite(estimatedDuration)) {
         insertData.estimated_duration = Math.round(estimatedDuration);
@@ -656,17 +705,17 @@ export class SupabaseStorage implements IStorage {
     }
     if (ride.distance) insertData.distance = ride.distance;
 
-    console.log('📊 Storage createRide inserting:', JSON.stringify(insertData));
+    console.log("📊 Storage createRide inserting:", JSON.stringify(insertData));
     const { data, error } = await supabase
       .from("rides")
       .insert(insertData)
       .select()
       .single();
     if (error) {
-      console.error('📊 Storage createRide error:', error.code, error.message);
+      console.error("📊 Storage createRide error:", error.code, error.message);
       throw new Error(`Failed to create ride: ${error.message}`);
     }
-    console.log('📊 Storage createRide success:', data?.id);
+    console.log("📊 Storage createRide success:", data?.id);
     return toCamelRide(data as Ride);
   }
 
@@ -674,16 +723,26 @@ export class SupabaseStorage implements IStorage {
     const snakeData: any = {};
     if (updates.status !== undefined) snakeData.status = updates.status;
     if (updates.driverId !== undefined) snakeData.driver_id = updates.driverId;
-    if (updates.finalPrice !== undefined) snakeData.final_price = updates.finalPrice;
-    if (updates.paymentStatus !== undefined) snakeData.payment_status = updates.paymentStatus;
-    if (updates.riderRating !== undefined) snakeData.rider_rating = updates.riderRating;
-    if (updates.driverRating !== undefined) snakeData.driver_rating = updates.driverRating;
-    if (updates.acceptedAt !== undefined) snakeData.accepted_at = updates.acceptedAt;
-    if (updates.startedAt !== undefined) snakeData.started_at = updates.startedAt;
-    if (updates.completedAt !== undefined) snakeData.completed_at = updates.completedAt;
-    if (updates.cancelledAt !== undefined) snakeData.cancelled_at = updates.cancelledAt;
-    if (updates.cancellationReason !== undefined) snakeData.cancellation_reason = updates.cancellationReason;
-    if (updates.paymentMethod !== undefined) snakeData.payment_method = updates.paymentMethod;
+    if (updates.finalPrice !== undefined)
+      snakeData.final_price = updates.finalPrice;
+    if (updates.paymentStatus !== undefined)
+      snakeData.payment_status = updates.paymentStatus;
+    if (updates.riderRating !== undefined)
+      snakeData.rider_rating = updates.riderRating;
+    if (updates.driverRating !== undefined)
+      snakeData.driver_rating = updates.driverRating;
+    if (updates.acceptedAt !== undefined)
+      snakeData.accepted_at = updates.acceptedAt;
+    if (updates.startedAt !== undefined)
+      snakeData.started_at = updates.startedAt;
+    if (updates.completedAt !== undefined)
+      snakeData.completed_at = updates.completedAt;
+    if (updates.cancelledAt !== undefined)
+      snakeData.cancelled_at = updates.cancelledAt;
+    if (updates.cancellationReason !== undefined)
+      snakeData.cancellation_reason = updates.cancellationReason;
+    if (updates.paymentMethod !== undefined)
+      snakeData.payment_method = updates.paymentMethod;
 
     const { data, error } = await supabase
       .from("rides")
@@ -705,33 +764,40 @@ export class SupabaseStorage implements IStorage {
       dropoff_address: ride.dropoffAddress,
       dropoff_latitude: ride.dropoffLatitude || null,
       dropoff_longitude: ride.dropoffLongitude || null,
-      vehicle_type: ride.vehicleType || 'economy',
+      vehicle_type: ride.vehicleType || "economy",
       scheduled_at: ride.scheduledAt,
       estimated_price: ride.estimatedPrice || null,
-      status: 'scheduled',
+      status: "scheduled",
     };
     if (ride.id) insertData.id = ride.id;
 
-    console.log('📅 Storage createScheduledRide inserting:', JSON.stringify(insertData));
+    console.log(
+      "📅 Storage createScheduledRide inserting:",
+      JSON.stringify(insertData),
+    );
     const { data, error } = await supabase
-      .from('scheduled_rides')
+      .from("scheduled_rides")
       .insert(insertData)
       .select()
       .single();
     if (error) {
-      console.error('📅 Storage createScheduledRide error:', error.code, error.message);
+      console.error(
+        "📅 Storage createScheduledRide error:",
+        error.code,
+        error.message,
+      );
       throw new Error(`Failed to create scheduled ride: ${error.message}`);
     }
-    console.log('📅 Storage createScheduledRide success:', data?.id);
+    console.log("📅 Storage createScheduledRide success:", data?.id);
     return data;
   }
 
   async getScheduledRidesByRider(riderId: string) {
     const { data, error } = await supabase
-      .from('scheduled_rides')
-      .select('*')
-      .eq('rider_id', riderId)
-      .order('scheduled_at', { ascending: true });
+      .from("scheduled_rides")
+      .select("*")
+      .eq("rider_id", riderId)
+      .order("scheduled_at", { ascending: true });
     if (error || !data) return [];
     return data;
   }
@@ -763,7 +829,11 @@ export class SupabaseStorage implements IStorage {
 
     // Auto-fetch user details if not provided by caller
     if (!userName || !userEmail) {
-      const { data: userRow } = await supabase.from("users").select("full_name, email").eq("id", payment.userId).single();
+      const { data: userRow } = await supabase
+        .from("users")
+        .select("full_name, email")
+        .eq("id", payment.userId)
+        .single();
       if (userRow) {
         userName = userName || userRow.full_name;
         userEmail = userEmail || userRow.email;
@@ -781,8 +851,10 @@ export class SupabaseStorage implements IStorage {
     if (userEmail) insertData.user_email = userEmail;
 
     if (payment.id) insertData.id = payment.id;
-    if (payment.stripePaymentIntentId) insertData.stripe_payment_intent_id = payment.stripePaymentIntentId;
-    if (payment.paymentMethod) insertData.payment_method = payment.paymentMethod;
+    if (payment.stripePaymentIntentId)
+      insertData.stripe_payment_intent_id = payment.stripePaymentIntentId;
+    if (payment.paymentMethod)
+      insertData.payment_method = payment.paymentMethod;
 
     const { data, error } = await supabase
       .from("payments")
@@ -796,8 +868,10 @@ export class SupabaseStorage implements IStorage {
   async updatePayment(id: string, updates: any) {
     const snakeData: any = {};
     if (updates.status !== undefined) snakeData.status = updates.status;
-    if (updates.stripeChargeId !== undefined) snakeData.stripe_charge_id = updates.stripeChargeId;
-    if (updates.completedAt !== undefined) snakeData.completed_at = updates.completedAt;
+    if (updates.stripeChargeId !== undefined)
+      snakeData.stripe_charge_id = updates.stripeChargeId;
+    if (updates.completedAt !== undefined)
+      snakeData.completed_at = updates.completedAt;
 
     const { data, error } = await supabase
       .from("payments")
@@ -834,16 +908,15 @@ export class SupabaseStorage implements IStorage {
       .insert(insertData)
       .select()
       .single();
-    if (error) throw new Error(`Failed to create saved place: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to create saved place: ${error.message}`);
     return toCamelPlace(data as SavedPlace);
   }
 
   async deleteSavedPlace(id: string) {
-    const { error } = await supabase
-      .from("saved_places")
-      .delete()
-      .eq("id", id);
-    if (error) throw new Error(`Failed to delete saved place: ${error.message}`);
+    const { error } = await supabase.from("saved_places").delete().eq("id", id);
+    if (error)
+      throw new Error(`Failed to delete saved place: ${error.message}`);
   }
 }
 

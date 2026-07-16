@@ -1,6 +1,6 @@
 //client/lib/socket.ts
 
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus } from "react-native";
 import { io, Socket } from "socket.io-client";
 import { getApiUrl } from "@/lib/query-client";
 
@@ -29,13 +29,28 @@ export function getSocket(): Socket {
     // talks to one backend for HTTP and a different backend for realtime events.
     const serverUrl = getApiUrl();
 
-    console.log('🔌 Connecting to socket server:', serverUrl);
+    console.log("🔌 Connecting to socket server:", serverUrl);
     // #region agent log
-    fetch('http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'25c155'},body:JSON.stringify({sessionId:'25c155',runId:'post-fix',hypothesisId:'D',location:'client/lib/socket.ts:getSocket',message:'Socket target selected',data:{serverUrl},timestamp:Date.now()})}).catch(()=>{});
+    fetch("http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "25c155",
+      },
+      body: JSON.stringify({
+        sessionId: "25c155",
+        runId: "post-fix",
+        hypothesisId: "D",
+        location: "client/lib/socket.ts:getSocket",
+        message: "Socket target selected",
+        data: { serverUrl },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
     // #endregion
 
     socket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -47,35 +62,35 @@ export function getSocket(): Socket {
       // pingTimeout: 60000,  // Match server ping timeout
     });
 
-    socket.on('connect', () => {
-      console.log('✅ Socket connected:', socket?.id);
+    socket.on("connect", () => {
+      console.log("✅ Socket connected:", socket?.id);
       if (currentDriverId) {
-        socket?.emit('driver:connect', currentDriverId);
+        socket?.emit("driver:connect", currentDriverId);
       }
       if (currentRiderId) {
-        socket?.emit('rider:connect', currentRiderId);
+        socket?.emit("rider:connect", currentRiderId);
       }
     });
 
-    socket.on('disconnect', (reason) => {
-      console.log('❌ Socket disconnected:', reason);
+    socket.on("disconnect", (reason) => {
+      console.log("❌ Socket disconnected:", reason);
     });
 
-    socket.on('connect_error', (error) => {
-      console.error('🔴 Socket connection error:', error.message);
+    socket.on("connect_error", (error) => {
+      console.error("🔴 Socket connection error:", error.message);
     });
 
-    socket.on('reconnect_attempt', () => {
-      console.log('🔄 Socket reconnect attempt...');
+    socket.on("reconnect_attempt", () => {
+      console.log("🔄 Socket reconnect attempt...");
     });
 
-    socket.on('reconnect', () => {
-      console.log('✅ Socket reconnected after disconnect');
+    socket.on("reconnect", () => {
+      console.log("✅ Socket reconnected after disconnect");
       if (currentDriverId) {
-        socket?.emit('driver:connect', currentDriverId);
+        socket?.emit("driver:connect", currentDriverId);
       }
       if (currentRiderId) {
-        socket?.emit('rider:connect', currentRiderId);
+        socket?.emit("rider:connect", currentRiderId);
       }
     });
   }
@@ -96,30 +111,32 @@ export function disconnectSocket() {
 export function onNewRide(callback: (ride: any) => void): () => void {
   const socket = getSocket();
 
-  socket.on('ride:new', callback);
+  socket.on("ride:new", callback);
 
   // Return cleanup function
   return () => {
-    socket.off('ride:new', callback);
+    socket.off("ride:new", callback);
   };
 }
 
 // Listen for expired dispatch requests (for drivers)
-export function onRideExpired(callback: (data: { rideId: string }) => void): () => void {
+export function onRideExpired(
+  callback: (data: { rideId: string }) => void,
+): () => void {
   const socket = getSocket();
-  socket.on('ride:expired', callback);
-  return () => socket.off('ride:expired', callback);
+  socket.on("ride:expired", callback);
+  return () => socket.off("ride:expired", callback);
 }
 
 // Listen for ride updates (for riders)
 export function onRideUpdate(callback: (update: any) => void): () => void {
   const socket = getSocket();
 
-  socket.on('ride:update', callback);
+  socket.on("ride:update", callback);
 
   // Return cleanup function
   return () => {
-    socket.off('ride:update', callback);
+    socket.off("ride:update", callback);
   };
 }
 
@@ -127,23 +144,25 @@ export function onRideUpdate(callback: (update: any) => void): () => void {
 export function onRideAccepted(callback: (data: any) => void): () => void {
   const socket = getSocket();
 
-  socket.on('ride:accepted', callback);
+  socket.on("ride:accepted", callback);
 
   // Return cleanup function
   return () => {
-    socket.off('ride:accepted', callback);
+    socket.off("ride:accepted", callback);
   };
 }
 
 // Listen for driver location updates (for riders)
-export function onDriverLocation(callback: (location: any) => void): () => void {
+export function onDriverLocation(
+  callback: (location: any) => void,
+): () => void {
   const socket = getSocket();
 
-  socket.on('driver:location', callback);
+  socket.on("driver:location", callback);
 
   // Return cleanup function
   return () => {
-    socket.off('driver:location', callback);
+    socket.off("driver:location", callback);
   };
 }
 
@@ -151,8 +170,8 @@ export function onDriverLocation(callback: (location: any) => void): () => void 
 export function connectAsDriver(driverId: string) {
   const socket = getSocket();
   currentDriverId = driverId;
-  socket.emit('driver:connect', driverId);
-  console.log('🚗 Connected as driver:', driverId);
+  socket.emit("driver:connect", driverId);
+  console.log("🚗 Connected as driver:", driverId);
 }
 
 // Explicitly go offline (driver toggled off or logged out). This is the only
@@ -160,22 +179,22 @@ export function connectAsDriver(driverId: string) {
 // the app keeps them online so they still receive ride requests via push.
 export function goOffline(driverId: string) {
   const socket = getSocket();
-  socket.emit('driver:go_offline', driverId);
+  socket.emit("driver:go_offline", driverId);
   currentDriverId = null;
-  console.log('🔴 Driver going offline:', driverId);
+  console.log("🔴 Driver going offline:", driverId);
 }
 
 // Connect as rider
 export function connectAsRider(riderId: string) {
   const socket = getSocket();
   currentRiderId = riderId;
-  socket.emit('rider:connect', riderId);
-  console.log('🙋 Connected as rider:', riderId);
+  socket.emit("rider:connect", riderId);
+  console.log("🙋 Connected as rider:", riderId);
 }
 
 export function requestRideDriverLocation(riderId: string, rideId: string) {
   const socket = getSocket();
-  socket.emit('rider:request_driver_location', { riderId, rideId });
+  socket.emit("rider:request_driver_location", { riderId, rideId });
 }
 
 // Send driver location update
@@ -187,21 +206,25 @@ export function sendDriverLocation(location: {
   speed?: number;
 }) {
   const socket = getSocket();
-  socket.emit('driver:location', location);
+  socket.emit("driver:location", location);
 }
 
 // Accept ride (driver)
 export function acceptRide(rideId: string, driverId: string) {
   const socket = getSocket();
-  socket.emit('ride:accept', { rideId, driverId });
-  console.log('✅ Accepting ride:', rideId);
+  socket.emit("ride:accept", { rideId, driverId });
+  console.log("✅ Accepting ride:", rideId);
 }
 
 // Update drive status
-export function updateRideStatus(rideId: string, status: string, driverLocation?: any) {
+export function updateRideStatus(
+  rideId: string,
+  status: string,
+  driverLocation?: any,
+) {
   const socket = getSocket();
-  socket.emit('ride:status', { rideId, status, driverLocation });
-  console.log('📊 Updating ride status:', rideId, status);
+  socket.emit("ride:status", { rideId, status, driverLocation });
+  console.log("📊 Updating ride status:", rideId, status);
 }
 
 // Alias for sendDriverLocation (used by useRealTimeTracking)
@@ -209,43 +232,46 @@ export function updateDriverLocation(location: DriverLocation) {
   sendDriverLocation(location);
 }
 
-
 export function setupAppStateListener() {
   let appStateSubscription: any = null;
-  
+
   const handleAppStateChange = async (nextAppState: AppStateStatus) => {
     const socket = getSocket();
-    
+
     console.log(`📱 App state changed to: ${nextAppState}`);
-    
-    if (nextAppState === 'active') {
+
+    if (nextAppState === "active") {
       // App came to foreground
-      console.log('✅ App active - reconnecting socket and resuming foreground tracking');
-      
+      console.log(
+        "✅ App active - reconnecting socket and resuming foreground tracking",
+      );
+
       if (!socket.connected) {
         socket.connect();
       }
-      
+
       // Re-register current driver/rider
       if (currentDriverId) {
-        socket.emit('driver:connect', currentDriverId);
-        console.log('🚗 Driver re-registered');
+        socket.emit("driver:connect", currentDriverId);
+        console.log("🚗 Driver re-registered");
       }
       if (currentRiderId) {
-        socket.emit('rider:connect', currentRiderId);
-        console.log('🙋 Rider re-registered');
+        socket.emit("rider:connect", currentRiderId);
+        console.log("🙋 Rider re-registered");
       }
-    } else if (nextAppState === 'background') {
-      console.log('⏻️ App backgrounded - keeping socket alive, background task running');
+    } else if (nextAppState === "background") {
+      console.log(
+        "⏻️ App backgrounded - keeping socket alive, background task running",
+      );
       // Don't disconnect - let background task handle location
       // Socket should remain connected
     }
   };
-  
+
   appStateSubscription = AppState.addEventListener(
-    'change',
-    handleAppStateChange
+    "change",
+    handleAppStateChange,
   );
-  
+
   return () => appStateSubscription?.remove();
 }

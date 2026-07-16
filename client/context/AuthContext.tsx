@@ -1,6 +1,12 @@
 //client/context/AuthContext.tsx
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 
@@ -27,8 +33,20 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signIn: (email: string, password: string, isGoogle?: boolean, googleFullName?: string, requestedRole?: string) => Promise<User | null>;
-  signUp: (fullName: string, email: string, password: string, role?: string, driverDetails?: DriverDetails) => Promise<User>;
+  signIn: (
+    email: string,
+    password: string,
+    isGoogle?: boolean,
+    googleFullName?: string,
+    requestedRole?: string,
+  ) => Promise<User | null>;
+  signUp: (
+    fullName: string,
+    email: string,
+    password: string,
+    role?: string,
+    driverDetails?: DriverDetails,
+  ) => Promise<User>;
   signOut: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
 }
@@ -40,10 +58,15 @@ const AUTH_STORAGE_KEY = "@uto_auth";
 
 import { api } from "@/lib/api";
 
-async function resolveAccountRole(userId: string, role?: string, requestedRole?: string): Promise<string> {
+async function resolveAccountRole(
+  userId: string,
+  role?: string,
+  requestedRole?: string,
+): Promise<string> {
   const normalizedRole = String(role || "rider").toLowerCase();
   const normalizedRequestedRole = String(requestedRole || "").toLowerCase();
-  if (normalizedRole === "driver" || normalizedRole === "both") return normalizedRole;
+  if (normalizedRole === "driver" || normalizedRole === "both")
+    return normalizedRole;
 
   try {
     const driver = await api.drivers.getByUserId(userId);
@@ -78,19 +101,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             const userData = await api.users.get(parsed.id);
             if (userData) {
-              const resolvedRole = await resolveAccountRole(userData.id, userData.role || parsed.role);
+              const resolvedRole = await resolveAccountRole(
+                userData.id,
+                userData.role || parsed.role,
+              );
               const refreshed: User = {
                 ...parsed,
                 fullName: userData.fullName || parsed.fullName,
                 phone: userData.phone || parsed.phone,
                 profileImage: userData.profileImage || parsed.profileImage,
                 role: resolvedRole,
-                walletBalance: typeof userData.walletBalance === 'number' ? userData.walletBalance : (parsed.walletBalance || 0),
-                rating: typeof userData.rating === 'number' ? userData.rating : parsed.rating,
-                totalRides: typeof userData.totalRides === 'number' ? userData.totalRides : parsed.totalRides,
+                walletBalance:
+                  typeof userData.walletBalance === "number"
+                    ? userData.walletBalance
+                    : parsed.walletBalance || 0,
+                rating:
+                  typeof userData.rating === "number"
+                    ? userData.rating
+                    : parsed.rating,
+                totalRides:
+                  typeof userData.totalRides === "number"
+                    ? userData.totalRides
+                    : parsed.totalRides,
               };
               setUser(refreshed);
-              await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(refreshed));
+              await AsyncStorage.setItem(
+                USER_STORAGE_KEY,
+                JSON.stringify(refreshed),
+              );
             }
           } catch (_) {
             // Non-critical — use cached values
@@ -104,23 +142,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signIn = async (email: string, password: string, isGoogle: boolean = false, googleFullName?: string, requestedRole?: string): Promise<User | null> => {
+  const signIn = async (
+    email: string,
+    password: string,
+    isGoogle: boolean = false,
+    googleFullName?: string,
+    requestedRole?: string,
+  ): Promise<User | null> => {
     try {
       // Use API to login (pass fullName if we have it from google, otherwise undefined)
       // We pass the email name part as a fallback fullName since google doesn't always provide it on just signIn
-      const nameFallback = googleFullName || email.split('@')[0];
-      const userData = await api.auth.login(email, password || "default", isGoogle, nameFallback);
-      const resolvedRole = await resolveAccountRole(userData.id, userData.role, requestedRole);
+      const nameFallback = googleFullName || email.split("@")[0];
+      const userData = await api.auth.login(
+        email,
+        password || "default",
+        isGoogle,
+        nameFallback,
+      );
+      const resolvedRole = await resolveAccountRole(
+        userData.id,
+        userData.role,
+        requestedRole,
+      );
       const mappedUser: User = {
         id: userData.id,
         fullName: userData.fullName,
         email: userData.email,
         phone: userData.phone || "",
-        rating: typeof userData.rating === 'number' ? userData.rating : 0.0,
-        totalRides: typeof userData.totalRides === 'number' ? userData.totalRides : 0,
+        rating: typeof userData.rating === "number" ? userData.rating : 0.0,
+        totalRides:
+          typeof userData.totalRides === "number" ? userData.totalRides : 0,
         isGoogleUser: isGoogle,
         role: resolvedRole,
-        walletBalance: typeof userData.walletBalance === 'number' ? userData.walletBalance : 0,
+        walletBalance:
+          typeof userData.walletBalance === "number"
+            ? userData.walletBalance
+            : 0,
       };
 
       setUser(mappedUser);
@@ -133,7 +190,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp = async (fullName: string, email: string, password: string, role: string = "rider", driverDetails?: DriverDetails): Promise<User> => {
+  const signUp = async (
+    fullName: string,
+    email: string,
+    password: string,
+    role: string = "rider",
+    driverDetails?: DriverDetails,
+  ): Promise<User> => {
     // NOTE: No local fallback here — sign-up MUST persist to Supabase.
     // If the API call fails, we throw so the UI can show the error to the user.
 
@@ -155,31 +218,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           vehicleType: "standard", // default fallback since it's required by schema
           councilLicence: driverDetails.councilLicence,
           badgeNo: driverDetails.badgeNo,
-          vehicleMake: "Pending",  // placeholder — collected later during onboarding
+          vehicleMake: "Pending", // placeholder — collected later during onboarding
           vehicleModel: "Pending",
           licensePlate: "PENDING",
           isOnline: false,
           isAvailable: true,
         });
-        console.log("✅ Driver record created in Supabase for user:", userData.id);
+        console.log(
+          "✅ Driver record created in Supabase for user:",
+          userData.id,
+        );
       } catch (driverError: any) {
         console.error("⚠️ User created but driver record failed:", driverError);
         // Re-throw so the UI knows driver profile wasn't saved
-        throw new Error("Account created but failed to save driver details. Please contact support.");
+        throw new Error(
+          "Account created but failed to save driver details. Please contact support.",
+        );
       }
     }
 
     // Step 3: Store user locally and mark as authenticated
-    const resolvedRole = await resolveAccountRole(userData.id, userData.role || role);
+    const resolvedRole = await resolveAccountRole(
+      userData.id,
+      userData.role || role,
+    );
     const mappedUser: User = {
       id: userData.id,
       fullName: userData.fullName,
       email: userData.email,
       phone: userData.phone || "",
-      rating: typeof userData.rating === 'number' ? userData.rating : 0.0,
-      totalRides: typeof userData.totalRides === 'number' ? userData.totalRides : 0,
+      rating: typeof userData.rating === "number" ? userData.rating : 0.0,
+      totalRides:
+        typeof userData.totalRides === "number" ? userData.totalRides : 0,
       role: resolvedRole,
-      walletBalance: typeof userData.walletBalance === 'number' ? userData.walletBalance : 0,
+      walletBalance:
+        typeof userData.walletBalance === "number" ? userData.walletBalance : 0,
     };
 
     setUser(mappedUser);
@@ -200,7 +273,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Step 2: Clear credentials while loading spinner is showing
       await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
-      try { await supabase.auth.signOut(); } catch (_) { /* non-critical */ }
+      try {
+        await supabase.auth.signOut();
+      } catch (_) {
+        /* non-critical */
+      }
 
       // Step 3: Now safely clear the user — screens are already gone
       setUser(null);
@@ -222,10 +299,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Persist wallet balance changes to the server so it's always in sync
     if (data.walletBalance !== undefined) {
       try {
-        await api.users.update(user.id, { walletBalance: data.walletBalance } as any);
-        console.log(`✅ [AuthContext] Wallet balance synced to server: £${data.walletBalance}`);
+        await api.users.update(user.id, {
+          walletBalance: data.walletBalance,
+        } as any);
+        console.log(
+          `✅ [AuthContext] Wallet balance synced to server: £${data.walletBalance}`,
+        );
       } catch (err) {
-        console.warn('⚠️ [AuthContext] Failed to sync wallet balance to server:', err);
+        console.warn(
+          "⚠️ [AuthContext] Failed to sync wallet balance to server:",
+          err,
+        );
       }
     }
   };

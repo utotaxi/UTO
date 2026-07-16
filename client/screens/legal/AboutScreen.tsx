@@ -1,10 +1,10 @@
 import React, { useRef } from "react";
 import {
-    StyleSheet,
-    View,
-    ScrollView,
-    Pressable,
-    StatusBar,
+  StyleSheet,
+  View,
+  ScrollView,
+  Pressable,
+  StatusBar,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -18,9 +18,9 @@ import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
 // ─────────────────────────────────────────────────────────
 
 const UTO_ABOUT_SECTIONS = [
-    {
-        heading: "UTO – ROLE AS PRIVATE HIRE OPERATOR",
-        body: `Operator Status
+  {
+    heading: "UTO – ROLE AS PRIVATE HIRE OPERATOR",
+    body: `Operator Status
 UTO operates as a Private Hire Operator, acting as an intermediary platform that facilitates bookings between passengers and licensed drivers.
 UTO is not a transport provider and does not directly provide driving services. All journeys are carried out by independent, licensed drivers who are responsible for delivering the transport service.
 
@@ -80,21 +80,21 @@ To the fullest extent permitted by law:
   o Conduct of drivers or passengers 
   o Loss or damage occurring during a journey 
 • Liability for the journey rests with the licensed driver providing the service`,
-    },
+  },
 ];
 
 interface SectionProps {
-    heading: string;
-    body: string;
+  heading: string;
+  body: string;
 }
 
 function Section({ heading, body }: SectionProps) {
-    return (
-        <View style={s.section}>
-            <ThemedText style={s.sectionHeading}>{heading}</ThemedText>
-            <ThemedText style={s.sectionBody}>{body}</ThemedText>
-        </View>
-    );
+  return (
+    <View style={s.section}>
+      <ThemedText style={s.sectionHeading}>{heading}</ThemedText>
+      <ThemedText style={s.sectionBody}>{body}</ThemedText>
+    </View>
+  );
 }
 
 // ─────────────────────────────────────────────────────────
@@ -102,111 +102,114 @@ function Section({ heading, body }: SectionProps) {
 // ─────────────────────────────────────────────────────────
 
 export default function AboutScreen({ navigation }: any) {
-    const insets = useSafeAreaInsets();
-    const scrollRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
 
-    return (
-        <View style={[s.container, { paddingTop: insets.top }]}>
-            <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
+  return (
+    <View style={[s.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
 
-            {/* Content */}
-            <Animated.View entering={FadeIn.duration(300)} style={{ flex: 1 }}>
-                <ScrollView
-                    ref={scrollRef}
-                    style={s.scroll}
-                    contentContainerStyle={[
-                        s.scrollContent,
-                        { paddingBottom: insets.bottom + 32 },
-                    ]}
-                    showsVerticalScrollIndicator={false}
-                >
+      {/* Content */}
+      <Animated.View entering={FadeIn.duration(300)} style={{ flex: 1 }}>
+        <ScrollView
+          ref={scrollRef}
+          style={s.scroll}
+          contentContainerStyle={[
+            s.scrollContent,
+            { paddingBottom: insets.bottom + 32 },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          {UTO_ABOUT_SECTIONS.map((sec, i) => (
+            <Section key={i} heading={sec.heading} body={sec.body} />
+          ))}
 
-                    {UTO_ABOUT_SECTIONS.map((sec, i) => (
-                        <Section key={i} heading={sec.heading} body={sec.body} />
-                    ))}
-
-                    {/* Contact footer */}
-                    <View style={s.contactBox}>
-                        <MaterialIcons name="mail-outline" size={18} color={UTOColors.primary} />
-                        <ThemedText style={s.contactText}>fixat4u@gmail.com</ThemedText>
-                    </View>
-                    <View style={s.contactBox}>
-                        <MaterialIcons name="phone" size={18} color={UTOColors.primary} />
-                        <ThemedText style={s.contactText}>07596 266901</ThemedText>
-                    </View>
-                </ScrollView>
-            </Animated.View>
-        </View>
-    );
+          {/* Contact footer */}
+          <View style={s.contactBox}>
+            <MaterialIcons
+              name="mail-outline"
+              size={18}
+              color={UTOColors.primary}
+            />
+            <ThemedText style={s.contactText}>fixat4u@gmail.com</ThemedText>
+          </View>
+          <View style={s.contactBox}>
+            <MaterialIcons name="phone" size={18} color={UTOColors.primary} />
+            <ThemedText style={s.contactText}>07596 266901</ThemedText>
+          </View>
+        </ScrollView>
+      </Animated.View>
+    </View>
+  );
 }
 
 // ─────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#0A0A0A",
-    },
-    header: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: "#1F1F1F",
-    },
-    backBtn: {
-        width: 40,
-        height: 40,
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: 20,
-        backgroundColor: "#1A1A1A",
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: "700",
-        color: "#FFFFFF",
-    },
-    scroll: {
-        flex: 1,
-    },
-    scrollContent: {
-        paddingHorizontal: Spacing.xl,
-        paddingTop: Spacing.xl,
-        gap: Spacing.sm,
-    },
-    section: {
-        marginBottom: Spacing.xl,
-    },
-    sectionHeading: {
-        fontSize: 15,
-        fontWeight: "700",
-        color: UTOColors.primary,
-        marginBottom: Spacing.sm,
-        letterSpacing: 0.3,
-    },
-    sectionBody: {
-        fontSize: 14,
-        color: "#D1D5DB",
-        lineHeight: 22,
-    },
-    contactBox: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: Spacing.sm,
-        marginTop: Spacing.sm,
-        backgroundColor: "#1A1A1A",
-        borderRadius: BorderRadius.md,
-        padding: Spacing.md,
-        borderWidth: 1,
-        borderColor: "#2A2A2A",
-    },
-    contactText: {
-        fontSize: 14,
-        color: "#E5E7EB",
-        fontWeight: "500",
-    },
+  container: {
+    flex: 1,
+    backgroundColor: "#0A0A0A",
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1F1F1F",
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+    backgroundColor: "#1A1A1A",
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.xl,
+    gap: Spacing.sm,
+  },
+  section: {
+    marginBottom: Spacing.xl,
+  },
+  sectionHeading: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: UTOColors.primary,
+    marginBottom: Spacing.sm,
+    letterSpacing: 0.3,
+  },
+  sectionBody: {
+    fontSize: 14,
+    color: "#D1D5DB",
+    lineHeight: 22,
+  },
+  contactBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: "#2A2A2A",
+  },
+  contactText: {
+    fontSize: 14,
+    color: "#E5E7EB",
+    fontWeight: "500",
+  },
 });

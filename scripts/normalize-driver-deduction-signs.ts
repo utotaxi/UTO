@@ -21,11 +21,17 @@ function getArg(name: string): string | undefined {
   return undefined;
 }
 
-function resolvePenaltyDetails(id: string, type: string, reason?: string | null): {
+function resolvePenaltyDetails(
+  id: string,
+  type: string,
+  reason?: string | null,
+): {
   type: string;
   reason: string;
 } | null {
-  const liveRideMatch = id.match(/^ride_(.+?)_(?:cancel_at_pickup|cancellation)$/);
+  const liveRideMatch = id.match(
+    /^ride_(.+?)_(?:cancel_at_pickup|cancellation)$/,
+  );
   if (liveRideMatch?.[1]) {
     return {
       type: DRIVER_DEDUCTION_TYPE.PENALTY,
@@ -77,7 +83,9 @@ function resolvePenaltyDetails(id: string, type: string, reason?: string | null)
 function isCreditRow(type: string): boolean {
   return (
     type === DRIVER_DEDUCTION_TYPE.COMMISSION ||
-    LEGACY_CANCELLATION_CREDIT_TYPES.includes(type as typeof LEGACY_CANCELLATION_CREDIT_TYPES[number])
+    LEGACY_CANCELLATION_CREDIT_TYPES.includes(
+      type as (typeof LEGACY_CANCELLATION_CREDIT_TYPES)[number],
+    )
   );
 }
 
@@ -90,7 +98,9 @@ async function normalizeDriverDeductionSigns() {
 
   if (manualRideId || manualDriverId || manualAmount) {
     if (!manualRideId || !manualDriverId || manualAmount <= 0) {
-      throw new Error("Manual repair requires --ride-id, --driver-id and positive --amount");
+      throw new Error(
+        "Manual repair requires --ride-id, --driver-id and positive --amount",
+      );
     }
 
     const penaltyLabel = formatLiveRideCancellationPenalty(manualRideId);
@@ -118,13 +128,17 @@ async function normalizeDriverDeductionSigns() {
 
   for (const row of data || []) {
     const amount = Number(row.amount || 0);
-    const nextAmount = isCreditRow(row.type) ? Math.abs(amount) : -Math.abs(amount);
+    const nextAmount = isCreditRow(row.type)
+      ? Math.abs(amount)
+      : -Math.abs(amount);
     const nextDetails = resolvePenaltyDetails(row.id, row.type, row.reason);
     const shouldFixAmount = !Object.is(amount, nextAmount);
     const shouldFixLabel =
       !!nextDetails &&
       !isCreditRow(row.type) &&
-      (LEGACY_DRIVER_PENALTY_TYPES.includes(row.type as typeof LEGACY_DRIVER_PENALTY_TYPES[number]) ||
+      (LEGACY_DRIVER_PENALTY_TYPES.includes(
+        row.type as (typeof LEGACY_DRIVER_PENALTY_TYPES)[number],
+      ) ||
         row.type !== nextDetails.type ||
         row.reason !== nextDetails.reason);
 
@@ -143,7 +157,9 @@ async function normalizeDriverDeductionSigns() {
       .eq("id", row.id);
 
     if (updateError) {
-      throw new Error(`Failed to update deduction ${row.id}: ${updateError.message}`);
+      throw new Error(
+        `Failed to update deduction ${row.id}: ${updateError.message}`,
+      );
     }
 
     if (shouldFixAmount) updatedAmounts += 1;
@@ -151,9 +167,7 @@ async function normalizeDriverDeductionSigns() {
   }
 
   const existingReasons = new Set(
-    (data || [])
-      .map((row) => row.reason)
-      .filter(Boolean),
+    (data || []).map((row) => row.reason).filter(Boolean),
   );
 
   const { data: driverCancelledRides, error: ridesError } = await supabase
@@ -191,10 +205,14 @@ async function normalizeDriverDeductionSigns() {
     .not("driver_id", "is", null);
 
   if (bookingsError) {
-    console.warn(`Could not backfill scheduled booking deductions: ${bookingsError.message}`);
+    console.warn(
+      `Could not backfill scheduled booking deductions: ${bookingsError.message}`,
+    );
   } else {
     for (const booking of driverCancelledBookings || []) {
-      const penaltyLabel = formatScheduledBookingCancellationPenalty(booking.id);
+      const penaltyLabel = formatScheduledBookingCancellationPenalty(
+        booking.id,
+      );
       if (existingReasons.has(penaltyLabel)) continue;
 
       const fee = Number(Number(booking.estimated_fare || 0) * 0.5);

@@ -61,8 +61,6 @@
 // const RIDE_HISTORY_KEY = "@uto_ride_history";
 // const ACTIVE_RIDE_KEY = "@uto_active_ride";
 
-
-
 // export function RideProvider({ children }: { children: ReactNode }) {
 //   const { user, updateProfile } = useAuth();
 //   const [activeRide, setActiveRide] = useState<Ride | null>(null);
@@ -855,18 +853,43 @@
 // }
 
 //client/context/RideContext.tsx
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 import { Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getSocket, connectAsRider, onRideAccepted, onRideUpdate } from "@/lib/socket";
+import {
+  getSocket,
+  connectAsRider,
+  onRideAccepted,
+  onRideUpdate,
+} from "@/lib/socket";
 import { getApiUrl } from "@/lib/query-client";
 import { normalizeBackendTimestamp } from "@/lib/dateTime";
 import { useAuth } from "./AuthContext";
 import { sendLocalNotification } from "@/hooks/useNotifications";
-import { normalizeVias, viasToWaypointsParam, sumDirectionsLegs, MAX_RIDE_VIAS, type RideVia } from "@shared/vias";
+import {
+  normalizeVias,
+  viasToWaypointsParam,
+  sumDirectionsLegs,
+  MAX_RIDE_VIAS,
+  type RideVia,
+} from "@shared/vias";
 
 export type RideType = "saloon" | "people_carrier" | "minibus";
-export type RideStatus = "pending" | "accepted" | "arrived" | "in_progress" | "completed" | "cancelled" | "cancelled_no_drivers" | "cancelled_no_show";
+export type RideStatus =
+  | "pending"
+  | "accepted"
+  | "arrived"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "cancelled_no_drivers"
+  | "cancelled_no_show";
 
 export interface Location {
   address: string;
@@ -926,7 +949,11 @@ interface RideContextType {
   cancelRide: (rideId: string, withPenalty?: boolean) => Promise<void>;
   completeRide: (rideId: string) => Promise<void>;
   updateRidePaymentMethod: (rideId: string, method: string) => Promise<void>;
-  calculateDynamicFare: (distanceMiles: number, durationMin: number, rideType: string) => number;
+  calculateDynamicFare: (
+    distanceMiles: number,
+    durationMin: number,
+    rideType: string,
+  ) => number;
   refreshRideHistory: () => Promise<void>;
   pendingRating: { rideId: string; driverName: string } | null;
   submitRiderRating: (rideId: string, rating: number, comment?: string) => void;
@@ -939,25 +966,30 @@ const RideContext = createContext<RideContextType | undefined>(undefined);
 const RIDE_HISTORY_KEY = "@uto_ride_history";
 const ACTIVE_RIDE_KEY = "@uto_active_ride";
 
-
-
 export function RideProvider({ children }: { children: ReactNode }) {
   const { user, updateProfile } = useAuth();
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
   const [rideHistory, setRideHistory] = useState<Ride[]>([]);
   const [pricingRules, setPricingRules] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [pendingRating, setPendingRating] = useState<{ rideId: string; driverName: string } | null>(null);
+  const [pendingRating, setPendingRating] = useState<{
+    rideId: string;
+    driverName: string;
+  } | null>(null);
 
   // Keep a ref to the latest user so socket callbacks always see current wallet balance
   const userRef = React.useRef(user);
-  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Keep a ref to the latest activeRide so socket callbacks always see the current ride
   // This prevents the race condition where the functional updater in setActiveRide
   // finds current === null because a prior handler already cleared it
   const activeRideRef = React.useRef(activeRide);
-  useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
+  useEffect(() => {
+    activeRideRef.current = activeRide;
+  }, [activeRide]);
   const pendingCancelledRideRef = React.useRef<Ride | null>(null);
   const lastDriverCancellationNoticeRef = React.useRef<string | null>(null);
 
@@ -968,7 +1000,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
   const loadPricingRules = async () => {
     try {
-      const { api } = await import('@/lib/api');
+      const { api } = await import("@/lib/api");
       const rules = await api.pricingRules.getActive();
       if (rules) {
         setPricingRules(rules);
@@ -984,9 +1016,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
     if (!user?.id) return;
     try {
       connectAsRider(user.id);
-      console.log('🙋 RideContext: connectAsRider called for', user.id);
+      console.log("🙋 RideContext: connectAsRider called for", user.id);
     } catch (err) {
-      console.warn('⚠️ RideContext: connectAsRider failed:', err);
+      console.warn("⚠️ RideContext: connectAsRider failed:", err);
     }
   }, [user?.id]);
 
@@ -1002,18 +1034,21 @@ export function RideProvider({ children }: { children: ReactNode }) {
           const updated: Ride = {
             ...current,
             status: "accepted",
-            acceptedAt: data.acceptedAt || current.acceptedAt || new Date().toISOString(),
+            acceptedAt:
+              data.acceptedAt || current.acceptedAt || new Date().toISOString(),
             ...((data as any).driverInfo
               ? {
-                driverName: (data as any).driverInfo.driverName,
-                driverPhone: (data as any).driverInfo.driverPhone,
-                vehicleInfo: (data as any).driverInfo.vehicleInfo,
-                licensePlate: (data as any).driverInfo.licensePlate,
-                driverRating: (data as any).driverInfo.driverRating,
-              }
+                  driverName: (data as any).driverInfo.driverName,
+                  driverPhone: (data as any).driverInfo.driverPhone,
+                  vehicleInfo: (data as any).driverInfo.vehicleInfo,
+                  licensePlate: (data as any).driverInfo.licensePlate,
+                  driverRating: (data as any).driverInfo.driverRating,
+                }
               : {}),
           };
-          AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(console.error);
+          AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(
+            console.error,
+          );
           return updated;
         });
       });
@@ -1036,15 +1071,30 @@ export function RideProvider({ children }: { children: ReactNode }) {
       if (!rideData?.id) return;
 
       const current = activeRideRef.current;
-      if (current && current.id !== rideData.id && ["accepted", "arrived", "in_progress"].includes(current.status)) {
-        console.warn("⚠️ Scheduled ride activated while another ride is active — keeping current ride", current.id);
+      if (
+        current &&
+        current.id !== rideData.id &&
+        ["accepted", "arrived", "in_progress"].includes(current.status)
+      ) {
+        console.warn(
+          "⚠️ Scheduled ride activated while another ride is active — keeping current ride",
+          current.id,
+        );
         return;
       }
 
       const activatedRide: Ride = {
         id: rideData.id,
-        pickupLocation: rideData.pickupLocation || { address: "Unknown", latitude: 0, longitude: 0 },
-        dropoffLocation: rideData.dropoffLocation || { address: "Unknown", latitude: 0, longitude: 0 },
+        pickupLocation: rideData.pickupLocation || {
+          address: "Unknown",
+          latitude: 0,
+          longitude: 0,
+        },
+        dropoffLocation: rideData.dropoffLocation || {
+          address: "Unknown",
+          latitude: 0,
+          longitude: 0,
+        },
         rideType: (rideData.rideType as RideType) || "saloon",
         status: data.status === "accepted" ? "accepted" : "pending",
         farePrice: rideData.farePrice || 0,
@@ -1056,25 +1106,37 @@ export function RideProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
         ...(data.driverInfo
           ? {
-            driverName: data.driverInfo.driverName,
-            driverPhone: data.driverInfo.driverPhone,
-            vehicleInfo: data.driverInfo.vehicleInfo,
-            licensePlate: data.driverInfo.licensePlate,
-            driverRating: data.driverInfo.driverRating,
-          }
+              driverName: data.driverInfo.driverName,
+              driverPhone: data.driverInfo.driverPhone,
+              vehicleInfo: data.driverInfo.vehicleInfo,
+              licensePlate: data.driverInfo.licensePlate,
+              driverRating: data.driverInfo.driverRating,
+            }
           : {}),
       };
 
-      console.log("🗓 Scheduled ride went live:", activatedRide.id, "status:", activatedRide.status);
+      console.log(
+        "🗓 Scheduled ride went live:",
+        activatedRide.id,
+        "status:",
+        activatedRide.status,
+      );
       setActiveRide(activatedRide);
-      AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(activatedRide)).catch(console.error);
+      AsyncStorage.setItem(
+        ACTIVE_RIDE_KEY,
+        JSON.stringify(activatedRide),
+      ).catch(console.error);
 
       sendLocalNotification(
         "🗓 Your Scheduled Ride Is Starting",
         data.status === "accepted"
           ? `${data.driverInfo?.driverName || "Your driver"} is getting ready for your pickup at ${activatedRide.pickupLocation.address}.`
           : `We're finding a driver for your pickup at ${activatedRide.pickupLocation.address}.`,
-        { type: "scheduled_ride_live", rideId: activatedRide.id, audience: "rider" }
+        {
+          type: "scheduled_ride_live",
+          rideId: activatedRide.id,
+          audience: "rider",
+        },
       );
     };
 
@@ -1082,11 +1144,15 @@ export function RideProvider({ children }: { children: ReactNode }) {
       socket = getSocket();
       socket.on("ride:scheduled_activated", handleScheduledActivated);
     } catch (err) {
-      console.warn("Socket not available for scheduled activation listener:", err);
+      console.warn(
+        "Socket not available for scheduled activation listener:",
+        err,
+      );
     }
 
     return () => {
-      if (socket) socket.off("ride:scheduled_activated", handleScheduledActivated);
+      if (socket)
+        socket.off("ride:scheduled_activated", handleScheduledActivated);
     };
   }, []);
 
@@ -1096,18 +1162,31 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
     try {
       cleanup = onRideUpdate((update) => {
-        if (update.status === "completed" || update.status === "payment_collected" || update.status === "cancelled" || update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") {
-
+        if (
+          update.status === "completed" ||
+          update.status === "payment_collected" ||
+          update.status === "cancelled" ||
+          update.status === "cancelled_no_drivers" ||
+          update.status === "cancelled_no_show"
+        ) {
           // ✅ Handle wallet update for payment_collected BEFORE touching activeRide
           // The server already updated the DB wallet balance; we refresh from server to stay in sync
-          if (update.status === "payment_collected" && (update as any).extraAmount) {
+          if (
+            update.status === "payment_collected" &&
+            (update as any).extraAmount
+          ) {
             const extra = parseFloat((update as any).extraAmount);
             if (extra > 0) {
               // 1. Optimistic local update so UI updates immediately
               const currentBalance = userRef.current?.walletBalance || 0;
               updateProfile({ walletBalance: currentBalance + extra });
-              Alert.alert("Wallet Updated", `£${extra.toFixed(2)} has been added to your wallet by the driver.`);
-              console.log(`✅ [RideContext] Wallet updated (optimistic): £${currentBalance} + £${extra} = £${currentBalance + extra}`);
+              Alert.alert(
+                "Wallet Updated",
+                `£${extra.toFixed(2)} has been added to your wallet by the driver.`,
+              );
+              console.log(
+                `✅ [RideContext] Wallet updated (optimistic): £${currentBalance} + £${extra} = £${currentBalance + extra}`,
+              );
 
               // 2. Fetch the confirmed balance from server to guarantee accuracy
               // (runs async, doesn't block the UI)
@@ -1119,14 +1198,20 @@ export function RideProvider({ children }: { children: ReactNode }) {
                   const res = await fetch(`${baseUrl}/api/users/${userId}`);
                   if (res.ok) {
                     const data = await res.json();
-                    const serverBalance = data?.user?.wallet_balance ?? data?.user?.walletBalance;
-                    if (typeof serverBalance === 'number') {
+                    const serverBalance =
+                      data?.user?.wallet_balance ?? data?.user?.walletBalance;
+                    if (typeof serverBalance === "number") {
                       updateProfile({ walletBalance: serverBalance });
-                      console.log(`✅ [RideContext] Wallet synced from server: £${serverBalance}`);
+                      console.log(
+                        `✅ [RideContext] Wallet synced from server: £${serverBalance}`,
+                      );
                     }
                   }
                 } catch (syncErr) {
-                  console.warn('⚠️ [RideContext] Could not sync wallet from server:', syncErr);
+                  console.warn(
+                    "⚠️ [RideContext] Could not sync wallet from server:",
+                    syncErr,
+                  );
                 }
               })();
             }
@@ -1139,8 +1224,12 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
             if (chargedVia === "wallet" && noShowFare > 0) {
               const currentBalance = userRef.current?.walletBalance || 0;
-              updateProfile({ walletBalance: Math.max(0, currentBalance - noShowFare) });
-              console.log(`❌ [RideContext] No-show penalty: £${noShowFare} debited from wallet (clamped to £0 min)`);
+              updateProfile({
+                walletBalance: Math.max(0, currentBalance - noShowFare),
+              });
+              console.log(
+                `❌ [RideContext] No-show penalty: £${noShowFare} debited from wallet (clamped to £0 min)`,
+              );
             }
 
             // Show alert to rider about no-show policy
@@ -1149,22 +1238,24 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 Alert.alert(
                   "Ride Cancelled — No Show",
                   `Your driver waited 10 minutes at pickup. A cancellation fee of £${noShowFare.toFixed(2)} has been charged to your saved card as per our No Show Policy.`,
-                  [{ text: "OK" }]
+                  [{ text: "OK" }],
                 );
               } else {
                 Alert.alert(
                   "Ride Cancelled — No Show",
                   `Your driver waited 10 minutes at pickup. A cancellation fee of £${noShowFare.toFixed(2)} has been deducted from your wallet as per our No Show Policy.`,
-                  [{ text: "OK" }]
+                  [{ text: "OK" }],
                 );
               }
             }, 300);
-            console.log(`❌ [RideContext] No-show cancellation: £${noShowFare} charged via ${chargedVia}`);
+            console.log(
+              `❌ [RideContext] No-show cancellation: £${noShowFare} charged via ${chargedVia}`,
+            );
 
             sendLocalNotification(
               "❌ No Show — Fare Charged",
-              `Your driver waited at the pickup but you did not arrive. The full fare amount of £${noShowFare > 0 ? noShowFare.toFixed(2) : '0.00'} will be deducted from your account as per our No Show Policy.`,
-              { type: "no_show", rideId: update.rideId, audience: "rider" }
+              `Your driver waited at the pickup but you did not arrive. The full fare amount of £${noShowFare > 0 ? noShowFare.toFixed(2) : "0.00"} will be deducted from your account as per our No Show Policy.`,
+              { type: "no_show", rideId: update.rideId, audience: "rider" },
             );
           }
 
@@ -1174,7 +1265,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
           // when React batches updates or another handler already cleared it.
           const capturedRide: Ride | null =
             activeRideRef.current ||
-            (pendingCancelledRideRef.current?.id === update.rideId ? pendingCancelledRideRef.current : null);
+            (pendingCancelledRideRef.current?.id === update.rideId
+              ? pendingCancelledRideRef.current
+              : null);
 
           // Clear activeRide state
           setActiveRide(null);
@@ -1191,10 +1284,14 @@ export function RideProvider({ children }: { children: ReactNode }) {
             const serverTotalFare = Number((update as any).totalFare || 0);
             const waitingCharge = Number((update as any).waitingCharge || 0);
             const discountAmt = Math.max(0, Number(ride.discountAmount || 0));
-            const discountedBase = Math.max(0, Number(ride.farePrice || 0) - discountAmt);
-            const finalFarePrice = serverTotalFare > 0
-              ? serverTotalFare
-              : Number((discountedBase + waitingCharge).toFixed(2));
+            const discountedBase = Math.max(
+              0,
+              Number(ride.farePrice || 0) - discountAmt,
+            );
+            const finalFarePrice =
+              serverTotalFare > 0
+                ? serverTotalFare
+                : Number((discountedBase + waitingCharge).toFixed(2));
 
             // Persist final ride to history
             const finalRide: Ride = {
@@ -1202,37 +1299,65 @@ export function RideProvider({ children }: { children: ReactNode }) {
               farePrice: finalFarePrice,
               discountAmount: discountAmt,
               discountedFare: finalFarePrice,
-              status: (update.status === "cancelled_no_drivers" || update.status === "cancelled_no_show") ? "cancelled"
-                : update.status === "payment_collected" ? "completed"
-                  : (update.status as RideStatus),
+              status:
+                update.status === "cancelled_no_drivers" ||
+                update.status === "cancelled_no_show"
+                  ? "cancelled"
+                  : update.status === "payment_collected"
+                    ? "completed"
+                    : (update.status as RideStatus),
               completedAt: new Date().toISOString(),
             };
             setRideHistory((prev) => {
               const newHistory = [finalRide, ...prev];
-              AsyncStorage.setItem(RIDE_HISTORY_KEY, JSON.stringify(newHistory)).catch(console.error);
+              AsyncStorage.setItem(
+                RIDE_HISTORY_KEY,
+                JSON.stringify(newHistory),
+              ).catch(console.error);
               return newHistory;
             });
             AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
             setActiveRide(null);
 
-            const cancellationFee = Number((update as any).cancellationFee || 0);
+            const cancellationFee = Number(
+              (update as any).cancellationFee || 0,
+            );
             const chargedAmount = Number((update as any).chargedAmount || 0);
             const chargedVia = (update as any).chargedVia;
 
             // Refund wallet deduction only for free cancellations / no-driver cancellations.
-            if ((update.status === "cancelled" || update.status === "cancelled_no_drivers") && cancellationFee <= 0 && ride.walletDeduction && ride.walletDeduction > 0) {
+            if (
+              (update.status === "cancelled" ||
+                update.status === "cancelled_no_drivers") &&
+              cancellationFee <= 0 &&
+              ride.walletDeduction &&
+              ride.walletDeduction > 0
+            ) {
               const currentBalance = userRef.current?.walletBalance || 0;
-              updateProfile({ walletBalance: currentBalance + ride.walletDeduction });
-              console.log(`✅ [RideContext] Refunded £${ride.walletDeduction} for cancelled ride ${ride.id}`);
+              updateProfile({
+                walletBalance: currentBalance + ride.walletDeduction,
+              });
+              console.log(
+                `✅ [RideContext] Refunded £${ride.walletDeduction} for cancelled ride ${ride.id}`,
+              );
             }
 
-            if (update.status === "cancelled" && cancellationFee > 0 && (update as any).cancelledBy !== "driver") {
+            if (
+              update.status === "cancelled" &&
+              cancellationFee > 0 &&
+              (update as any).cancelledBy !== "driver"
+            ) {
               const serverWalletBalance = (update as any).walletBalance;
-              if (chargedVia === "wallet" && typeof serverWalletBalance === "number") {
+              if (
+                chargedVia === "wallet" &&
+                typeof serverWalletBalance === "number"
+              ) {
                 updateProfile({ walletBalance: serverWalletBalance });
               } else if (chargedVia === "wallet" && chargedAmount > 0) {
                 const currentBalance = userRef.current?.walletBalance || 0;
-                const newBalance = Number((currentBalance - chargedAmount).toFixed(2));
+                const newBalance = Number(
+                  (currentBalance - chargedAmount).toFixed(2),
+                );
                 updateProfile({ walletBalance: newBalance });
               }
 
@@ -1240,44 +1365,56 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 Alert.alert(
                   "Cancellation Fee Charged",
                   `Your free cancellation period has ended. A cancellation fee of £${cancellationFee.toFixed(2)} has been applied.`,
-                  [{ text: "OK" }]
+                  [{ text: "OK" }],
                 );
               }, 300);
             }
 
-            if (update.status === "completed" || update.status === "payment_collected") {
+            if (
+              update.status === "completed" ||
+              update.status === "payment_collected"
+            ) {
               // ✅ Use Number() to safely call toFixed — farePrice can be a string after AsyncStorage round-trip
               const fareStr = `£${Number(finalFarePrice || 0).toFixed(2)}`;
               sendLocalNotification(
                 "✅ Trip Completed",
                 `Your ride has been completed. Fare: ${fareStr}`,
-                { type: "ride_completed", rideId: ride.id, audience: "rider" }
+                { type: "ride_completed", rideId: ride.id, audience: "rider" },
               );
               // Trigger rating prompt — set immediately so it's ready when
               // RideTrackingScreen navigates to Home (1.5s delay gives us time)
               const dName = ride.driverName || "Your Driver";
               const rId = ride.id;
               setPendingRating({ rideId: rId, driverName: dName });
-            } else if (update.status === "cancelled" || update.status === "cancelled_no_drivers") {
+            } else if (
+              update.status === "cancelled" ||
+              update.status === "cancelled_no_drivers"
+            ) {
               sendLocalNotification(
                 "❌ Ride Cancelled",
                 update.status === "cancelled_no_drivers"
                   ? "No drivers available right now. Please try again later."
                   : "Your ride has been cancelled.",
-                { type: "ride_cancelled", rideId: ride.id, audience: "rider" }
+                { type: "ride_cancelled", rideId: ride.id, audience: "rider" },
               );
             }
           } else {
-            console.warn(`⚠️ [RideContext] ride:update ${update.status} received but no active ride found in ref — possible duplicate event`);
+            console.warn(
+              `⚠️ [RideContext] ride:update ${update.status} received but no active ride found in ref — possible duplicate event`,
+            );
           }
           return;
         }
-        if (update.status === "pending" && (update as any).driverCancelled && lastDriverCancellationNoticeRef.current !== update.rideId) {
+        if (
+          update.status === "pending" &&
+          (update as any).driverCancelled &&
+          lastDriverCancellationNoticeRef.current !== update.rideId
+        ) {
           lastDriverCancellationNoticeRef.current = update.rideId;
           Alert.alert(
             "Driver Cancelled",
             "Your driver cancelled this ride. We're finding another available driver for you.",
-            [{ text: "OK" }]
+            [{ text: "OK" }],
           );
         }
 
@@ -1288,24 +1425,24 @@ export function RideProvider({ children }: { children: ReactNode }) {
               status: update.status as RideStatus,
               ...(update.status === "pending" && (update as any).driverCancelled
                 ? {
-                  driverName: undefined,
-                  driverPhone: undefined,
-                  driverRating: undefined,
-                  vehicleInfo: undefined,
-                  licensePlate: undefined,
-                  acceptedAt: undefined,
-                  driverArrivedAt: undefined,
-                }
+                    driverName: undefined,
+                    driverPhone: undefined,
+                    driverRating: undefined,
+                    vehicleInfo: undefined,
+                    licensePlate: undefined,
+                    acceptedAt: undefined,
+                    driverArrivedAt: undefined,
+                  }
                 : {}),
               // If the driver sent their real info on accept, use it
               ...(update.status === "accepted" && (update as any).driverInfo
                 ? {
-                  driverName: (update as any).driverInfo.driverName,
-                  driverPhone: (update as any).driverInfo.driverPhone,
-                  vehicleInfo: (update as any).driverInfo.vehicleInfo,
-                  licensePlate: (update as any).driverInfo.licensePlate,
-                  driverRating: (update as any).driverInfo.driverRating,
-                }
+                    driverName: (update as any).driverInfo.driverName,
+                    driverPhone: (update as any).driverInfo.driverPhone,
+                    vehicleInfo: (update as any).driverInfo.vehicleInfo,
+                    licensePlate: (update as any).driverInfo.licensePlate,
+                    driverRating: (update as any).driverInfo.driverRating,
+                  }
                 : {}),
               ...(update.status === "accepted"
                 ? {
@@ -1321,27 +1458,39 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 ? { driverArrivedAt: (update as any).driverArrivedAt }
                 : {}),
             };
-            AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(console.error);
+            AsyncStorage.setItem(
+              ACTIVE_RIDE_KEY,
+              JSON.stringify(updated),
+            ).catch(console.error);
 
             // 🔔 Notify rider when driver accepts
             if (update.status === "accepted") {
-              const driverName = (update as any).driverInfo?.driverName || "Your driver";
+              const driverName =
+                (update as any).driverInfo?.driverName || "Your driver";
               sendLocalNotification(
                 "🚗 Driver Accepted!",
                 `${driverName} is on the way to pick you up.`,
-                { type: "ride_accepted", rideId: current.id, audience: "rider" }
+                {
+                  type: "ride_accepted",
+                  rideId: current.id,
+                  audience: "rider",
+                },
               );
             } else if (update.status === "arrived") {
               sendLocalNotification(
                 "📍 Driver Has Arrived",
                 "Your driver has arrived. Please provide your PIN to start the ride.",
-                { type: "driver_arriving", rideId: current.id, audience: "rider" }
+                {
+                  type: "driver_arriving",
+                  rideId: current.id,
+                  audience: "rider",
+                },
               );
             } else if (update.status === "in_progress") {
               sendLocalNotification(
                 "🚀 Ride Started",
                 "Your ride is now in progress. Enjoy the trip!",
-                { type: "ride_started", rideId: current.id, audience: "rider" }
+                { type: "ride_started", rideId: current.id, audience: "rider" },
               );
             }
 
@@ -1370,8 +1519,12 @@ export function RideProvider({ children }: { children: ReactNode }) {
         const parsedHistory = JSON.parse(storedHistory);
         const normalizedHistory = (parsedHistory as Ride[]).map((ride) => ({
           ...ride,
-          createdAt: normalizeBackendTimestamp(ride.createdAt || new Date().toISOString()),
-          completedAt: ride.completedAt ? normalizeBackendTimestamp(ride.completedAt) : undefined,
+          createdAt: normalizeBackendTimestamp(
+            ride.createdAt || new Date().toISOString(),
+          ),
+          completedAt: ride.completedAt
+            ? normalizeBackendTimestamp(ride.completedAt)
+            : undefined,
         }));
         setRideHistory(normalizedHistory);
       }
@@ -1382,28 +1535,45 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
         // Verify with server if ride actually completed while app was closed
         try {
-          const { api } = await import('@/lib/api');
+          const { api } = await import("@/lib/api");
           const serverRide = await api.rides.get(localActive.id);
 
           if (serverRide) {
             const serverRideAny = serverRide as any;
-            const isCompleted = serverRide.status === 'completed' || serverRide.status === 'cancelled' || serverRideAny.paymentStatus === 'paid' || serverRideAny.paymentStatus === 'completed';
+            const isCompleted =
+              serverRide.status === "completed" ||
+              serverRide.status === "cancelled" ||
+              serverRideAny.paymentStatus === "paid" ||
+              serverRideAny.paymentStatus === "completed";
             if (isCompleted) {
               setActiveRide(null);
               await AsyncStorage.removeItem(ACTIVE_RIDE_KEY);
 
               const history = storedHistory ? JSON.parse(storedHistory) : [];
               if (!history.find((r: Ride) => r.id === localActive.id)) {
-                const finalRide = { ...localActive, status: serverRide.status as RideStatus, completedAt: new Date().toISOString() };
+                const finalRide = {
+                  ...localActive,
+                  status: serverRide.status as RideStatus,
+                  completedAt: new Date().toISOString(),
+                };
                 const newHistory = [finalRide, ...history];
                 setRideHistory(newHistory);
-                await AsyncStorage.setItem(RIDE_HISTORY_KEY, JSON.stringify(newHistory));
+                await AsyncStorage.setItem(
+                  RIDE_HISTORY_KEY,
+                  JSON.stringify(newHistory),
+                );
               }
 
               // Trigger rating prompt if it was successfully completed and not yet rated
-              const isSuccessfulComplete = serverRide.status === 'completed' || serverRideAny.paymentStatus === 'paid' || serverRideAny.paymentStatus === 'completed';
+              const isSuccessfulComplete =
+                serverRide.status === "completed" ||
+                serverRideAny.paymentStatus === "paid" ||
+                serverRideAny.paymentStatus === "completed";
               if (isSuccessfulComplete && serverRideAny.driverRating === null) {
-                const dName = serverRideAny.driverName || localActive.driverName || "Your Driver";
+                const dName =
+                  serverRideAny.driverName ||
+                  localActive.driverName ||
+                  "Your Driver";
                 const rId = serverRide.id;
                 setTimeout(() => {
                   setPendingRating({ rideId: rId, driverName: dName });
@@ -1413,12 +1583,19 @@ export function RideProvider({ children }: { children: ReactNode }) {
               setActiveRide({
                 ...localActive,
                 status: serverRide.status as RideStatus,
-                acceptedAt: serverRideAny.acceptedAt || serverRideAny.accepted_at || localActive.acceptedAt,
+                acceptedAt:
+                  serverRideAny.acceptedAt ||
+                  serverRideAny.accepted_at ||
+                  localActive.acceptedAt,
                 driverName: serverRideAny.driverName || localActive.driverName,
-                driverPhone: serverRideAny.driverPhone || localActive.driverPhone,
-                vehicleInfo: serverRideAny.vehicleInfo || localActive.vehicleInfo,
-                licensePlate: serverRideAny.licensePlate || localActive.licensePlate,
-                driverRating: serverRideAny.driverRating || localActive.driverRating,
+                driverPhone:
+                  serverRideAny.driverPhone || localActive.driverPhone,
+                vehicleInfo:
+                  serverRideAny.vehicleInfo || localActive.vehicleInfo,
+                licensePlate:
+                  serverRideAny.licensePlate || localActive.licensePlate,
+                driverRating:
+                  serverRideAny.driverRating || localActive.driverRating,
               });
             }
           }
@@ -1437,34 +1614,46 @@ export function RideProvider({ children }: { children: ReactNode }) {
   const refreshRideHistory = async () => {
     if (!user?.id) return;
     try {
-      const { api } = await import('@/lib/api');
+      const { api } = await import("@/lib/api");
       const serverRides = await api.rides.getByRider(user.id);
-      console.log(`📋 [RideContext] Fetched ${serverRides.length} rides from server for rider ${user.id}`);
+      console.log(
+        `📋 [RideContext] Fetched ${serverRides.length} rides from server for rider ${user.id}`,
+      );
 
       // Convert server rides (camelCase API format) into our local Ride shape
       const serverHistory: Ride[] = serverRides
-        .filter((r: any) => r.status === 'completed' || r.status === 'cancelled')
+        .filter(
+          (r: any) => r.status === "completed" || r.status === "cancelled",
+        )
         .map((r: any) => ({
           id: r.id,
           pickupLocation: {
-            address: r.pickupAddress || 'Unknown pickup',
+            address: r.pickupAddress || "Unknown pickup",
             latitude: r.pickupLatitude || 0,
             longitude: r.pickupLongitude || 0,
           },
           dropoffLocation: {
-            address: r.dropoffAddress || 'Unknown dropoff',
+            address: r.dropoffAddress || "Unknown dropoff",
             latitude: r.dropoffLatitude || 0,
             longitude: r.dropoffLongitude || 0,
           },
-          rideType: (r.vehicleType || 'saloon') as RideType,
+          rideType: (r.vehicleType || "saloon") as RideType,
           status: r.status as RideStatus,
-          farePrice: typeof r.finalPrice === 'number' && r.finalPrice > 0
-            ? r.finalPrice
-            : Math.max(0, Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0)),
+          farePrice:
+            typeof r.finalPrice === "number" && r.finalPrice > 0
+              ? r.finalPrice
+              : Math.max(
+                  0,
+                  Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0),
+                ),
           discountAmount: Number(r.discountAmount || 0),
-          discountedFare: typeof r.finalPrice === 'number' && r.finalPrice > 0
-            ? r.finalPrice
-            : Math.max(0, Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0)),
+          discountedFare:
+            typeof r.finalPrice === "number" && r.finalPrice > 0
+              ? r.finalPrice
+              : Math.max(
+                  0,
+                  Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0),
+                ),
           distanceKm: r.distance || 0,
           durationMinutes: r.estimatedDuration || 0,
           driverName: r.driverName || undefined,
@@ -1473,14 +1662,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
           paymentMethod: r.paymentMethod || undefined,
           paymentStatus: r.paymentStatus || undefined,
           paymentIntentId: r.paymentIntentId || undefined,
-          createdAt: normalizeBackendTimestamp(r.requestedAt || new Date().toISOString()),
-          completedAt: normalizeBackendTimestamp(r.completedAt || r.cancelledAt || new Date().toISOString()),
+          createdAt: normalizeBackendTimestamp(
+            r.requestedAt || new Date().toISOString(),
+          ),
+          completedAt: normalizeBackendTimestamp(
+            r.completedAt || r.cancelledAt || new Date().toISOString(),
+          ),
         }));
 
       // Merge: server rides take priority (they have ground-truth status)
       setRideHistory((prevLocal) => {
-        const localMap = new Map(prevLocal.map(r => [r.id, r]));
-        const serverMap = new Map(serverHistory.map(r => [r.id, r]));
+        const localMap = new Map(prevLocal.map((r) => [r.id, r]));
+        const serverMap = new Map(serverHistory.map((r) => [r.id, r]));
 
         // Start with server rides, then add any local-only rides
         const merged = new Map<string, Ride>();
@@ -1496,7 +1689,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
                   driverName: ride.driverName || local.driverName,
                   driverPhone: ride.driverPhone || local.driverPhone,
                 }
-              : ride
+              : ride,
           );
         }
         // Add local-only entries (e.g. rides from a different device session)
@@ -1506,16 +1699,26 @@ export function RideProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        const mergedArray = Array.from(merged.values())
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const mergedArray = Array.from(merged.values()).sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
 
         // Persist merged history
-        AsyncStorage.setItem(RIDE_HISTORY_KEY, JSON.stringify(mergedArray)).catch(console.error);
-        console.log(`✅ [RideContext] Merged ride history: ${mergedArray.length} rides (${serverHistory.length} from server, ${prevLocal.length} local)`);
+        AsyncStorage.setItem(
+          RIDE_HISTORY_KEY,
+          JSON.stringify(mergedArray),
+        ).catch(console.error);
+        console.log(
+          `✅ [RideContext] Merged ride history: ${mergedArray.length} rides (${serverHistory.length} from server, ${prevLocal.length} local)`,
+        );
         return mergedArray;
       });
     } catch (err) {
-      console.warn('⚠️ [RideContext] Failed to refresh ride history from server:', err);
+      console.warn(
+        "⚠️ [RideContext] Failed to refresh ride history from server:",
+        err,
+      );
     }
   };
 
@@ -1559,7 +1762,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
             licensePlate: serverRideAny.licensePlate || current.licensePlate,
             driverRating: serverRideAny.driverRating || current.driverRating,
           };
-          AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(console.error);
+          AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(
+            console.error,
+          );
           return updated;
         });
       } catch (err) {
@@ -1570,11 +1775,23 @@ export function RideProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [activeRide?.id, activeRide?.status, activeRide?.driverName, activeRide?.driverPhone]);
+  }, [
+    activeRide?.id,
+    activeRide?.status,
+    activeRide?.driverName,
+    activeRide?.driverPhone,
+  ]);
 
-  const calculateDynamicFare = (distanceMiles: number, durationMin: number, rideType: string): number => {
+  const calculateDynamicFare = (
+    distanceMiles: number,
+    durationMin: number,
+    rideType: string,
+  ): number => {
     const normalizePricingKey = (value: string) =>
-      value.toLowerCase().trim().replace(/[\s-]+/g, "_");
+      value
+        .toLowerCase()
+        .trim()
+        .replace(/[\s-]+/g, "_");
 
     const resolveVehiclePricing = (pricingMap: any, requestedType: string) => {
       if (!pricingMap || typeof pricingMap !== "object") return null;
@@ -1602,42 +1819,44 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
       return null;
     };
-    
+
     // Supabase stores pricing under "vehicles" key, not "pricing"
     const vehiclePricing = pricingRules?.vehicles || pricingRules?.pricing;
     const p = resolveVehiclePricing(vehiclePricing, rideType);
-    
+
     if (!pricingRules || !vehiclePricing || !p || p.enabled === false) {
       // Fallback
       const baseFares: any = { saloon: 4.0, people_carrier: 5.0, minibus: 6.0 };
       const perKm: any = { saloon: 1.5, people_carrier: 1.85, minibus: 2.2 };
       const perMin: any = { saloon: 0.35, people_carrier: 0.42, minibus: 0.5 };
-  
+
       const distanceKm = distanceMiles / 0.621371;
       const base = baseFares[rideType] || 4.0;
       const distanceCost = distanceKm * (perKm[rideType] || 1.5);
       const timeCost = durationMin * (perMin[rideType] || 0.35);
-  
+
       return Math.round((base + distanceCost + timeCost) * 100) / 100;
     }
-  
+
     const mileTiers = pricingRules.mile_tiers || [];
-    
+
     let cost = parseFloat(p.start_price || "0");
-    
+
     let currentMileRate = parseFloat(p.base_mile_price || "1.00");
     let milesRemaining = distanceMiles;
     let previousTierMiles = 0;
-  
-    const sortedTiers = [...mileTiers].map((t: any) => ({
-      id: t.id,
-      after_miles: parseFloat(t.after_miles || "0")
-    })).sort((a, b) => a.after_miles - b.after_miles);
-  
+
+    const sortedTiers = [...mileTiers]
+      .map((t: any) => ({
+        id: t.id,
+        after_miles: parseFloat(t.after_miles || "0"),
+      }))
+      .sort((a, b) => a.after_miles - b.after_miles);
+
     for (const tier of sortedTiers) {
       const milesInThisTier = tier.after_miles - previousTierMiles;
       if (milesRemaining <= 0) break;
-      
+
       if (milesRemaining > milesInThisTier) {
         cost += milesInThisTier * currentMileRate;
         milesRemaining -= milesInThisTier;
@@ -1648,24 +1867,24 @@ export function RideProvider({ children }: { children: ReactNode }) {
       previousTierMiles = tier.after_miles;
       currentMileRate = parseFloat(p.mile_tier_prices?.[tier.id] || "0");
     }
-  
+
     if (milesRemaining > 0) {
       cost += milesRemaining * currentMileRate;
     }
-  
+
     const waitingPrice = parseFloat(p.waiting_price || "0");
     const baseMinutePrice = parseFloat(p.base_minute_price || "0");
     // Use base minute price if specified, otherwise maybe waiting price applies if it strictly refers to journey
     // The prompt requested 'aiting time etc' to be considered. We'll add base_minute_price to duration.
-    const minuteRate = baseMinutePrice > 0 ? baseMinutePrice : 0; 
+    const minuteRate = baseMinutePrice > 0 ? baseMinutePrice : 0;
     const timeCost = durationMin * minuteRate;
     cost += timeCost;
-  
+
     const minPrice = parseFloat(p.min_price || "0");
     if (cost < minPrice) {
       cost = minPrice;
     }
-  
+
     return Math.round(cost * 100) / 100;
   };
 
@@ -1695,17 +1914,30 @@ export function RideProvider({ children }: { children: ReactNode }) {
         url += `&waypoints=${encodeURIComponent(waypoints)}`;
       }
 
-      console.log('📍 Fetching directions for ride request:', url, vias.length ? `(${vias.length} via(s))` : "");
+      console.log(
+        "📍 Fetching directions for ride request:",
+        url,
+        vias.length ? `(${vias.length} via(s))` : "",
+      );
       const res = await fetch(url);
       const data = await res.json();
 
       if (data.status === "OK" && data.routes?.[0]?.legs?.length) {
-        const { distanceMeters, durationSeconds } = sumDirectionsLegs(data.routes[0]);
+        const { distanceMeters, durationSeconds } = sumDirectionsLegs(
+          data.routes[0],
+        );
         distanceKm = distanceMeters / 1000;
         durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
-        console.log(`✅ Directions API success (with vias): ${distanceMeters}m = ${distanceKm.toFixed(1)}km, duration=${durationMinutes}min, legs=${data.routes[0].legs.length}`);
+        console.log(
+          `✅ Directions API success (with vias): ${distanceMeters}m = ${distanceKm.toFixed(1)}km, duration=${durationMinutes}min, legs=${data.routes[0].legs.length}`,
+        );
       } else {
-        console.warn('⚠️ Directions API returned non-OK status:', data.status, 'error_message:', data.error_message);
+        console.warn(
+          "⚠️ Directions API returned non-OK status:",
+          data.status,
+          "error_message:",
+          data.error_message,
+        );
         distanceKm = Math.round((5 + Math.random() * 15) * 10) / 10;
         durationMinutes = Math.round(distanceKm * 3 + Math.random() * 10);
       }
@@ -1718,11 +1950,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
     // Convert km to miles for storage and display (UK app)
     const distanceMiles = Math.round(distanceKm * 0.621371 * 10) / 10;
 
-    const fullFare = calculateDynamicFare(distanceMiles, durationMinutes, rideType);
+    const fullFare = calculateDynamicFare(
+      distanceMiles,
+      durationMinutes,
+      rideType,
+    );
     const couponDiscount = Math.max(0, discountAmount || 0);
     const discountedFare = Math.max(0, fullFare - couponDiscount);
     const walletBalance = userRef.current?.walletBalance || 0;
-    const walletDeduction = (useWalletBalance && walletBalance > 0) ? Math.min(walletBalance, discountedFare) : 0;
+    const walletDeduction =
+      useWalletBalance && walletBalance > 0
+        ? Math.min(walletBalance, discountedFare)
+        : 0;
     const expectedCollectAmount = discountedFare - walletDeduction;
     const normalizedPaymentMethod = paymentMethod || "card";
 
@@ -1760,7 +1999,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
       newRide.paymentStatus = "pending";
     }
 
-    console.log(`🚕 Ride created: distance=${distanceMiles}mi, duration=${durationMinutes}min, fare=${fullFare}, vias=${vias.length}`);
+    console.log(
+      `🚕 Ride created: distance=${distanceMiles}mi, duration=${durationMinutes}min, fare=${fullFare}, vias=${vias.length}`,
+    );
 
     setActiveRide(newRide);
     await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(newRide));
@@ -1787,7 +2028,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
   const startRide = async (rideId: string, otp: string): Promise<boolean> => {
     if (activeRide?.id === rideId && activeRide.otp === otp) {
-      const startedRide = { ...activeRide, status: "in_progress" as RideStatus };
+      const startedRide = {
+        ...activeRide,
+        status: "in_progress" as RideStatus,
+      };
       setActiveRide(startedRide);
       await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(startedRide));
       return true;
@@ -1835,7 +2079,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
         setRideHistory(newHistory);
 
         await AsyncStorage.removeItem(ACTIVE_RIDE_KEY);
-        await AsyncStorage.setItem(RIDE_HISTORY_KEY, JSON.stringify(newHistory));
+        await AsyncStorage.setItem(
+          RIDE_HISTORY_KEY,
+          JSON.stringify(newHistory),
+        );
       }
     } catch (e) {
       console.error("Failed to mark ride completed", e);
@@ -1852,8 +2099,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
       await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated));
 
       // 2. Call backend
-      const { api } = await import('@/lib/api');
-      await api.rides.update(rideId, { paymentMethod: nextMethod } as Partial<Ride>);
+      const { api } = await import("@/lib/api");
+      await api.rides.update(rideId, {
+        paymentMethod: nextMethod,
+      } as Partial<Ride>);
 
       // 3. Emit local socket update to immediately notify driver without relying solely on backend sync
       try {
@@ -1868,7 +2117,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const submitRiderRating = async (rideId: string, rating: number, comment?: string) => {
+  const submitRiderRating = async (
+    rideId: string,
+    rating: number,
+    comment?: string,
+  ) => {
     try {
       const baseUrl = getApiUrl();
       await fetch(`${baseUrl}/api/rides/${rideId}/rating`, {

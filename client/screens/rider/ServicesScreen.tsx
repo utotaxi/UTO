@@ -20,9 +20,24 @@ import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
 const { width } = Dimensions.get("window");
 
 const RIDE_SERVICES = [
-  { id: "trip", name: "Trip", icon: "directions-car", description: "Everyday rides" },
-  { id: "reserve", name: "Reserve", icon: "event", description: "Reserve your ride at least 4 hours in advance" },
-  { id: "airport", name: "Airport", icon: "flight", description: "Airport transfers" },
+  {
+    id: "trip",
+    name: "Trip",
+    icon: "directions-car",
+    description: "Everyday rides",
+  },
+  {
+    id: "reserve",
+    name: "Reserve",
+    icon: "event",
+    description: "Reserve your ride at least 4 hours in advance",
+  },
+  {
+    id: "airport",
+    name: "Airport",
+    icon: "flight",
+    description: "Airport transfers",
+  },
 ];
 
 interface ServiceItemProps {
@@ -34,7 +49,14 @@ interface ServiceItemProps {
   index: number;
 }
 
-function ServiceItem({ id, name, icon, description, onPress, index }: ServiceItemProps) {
+function ServiceItem({
+  id,
+  name,
+  icon,
+  description,
+  onPress,
+  index,
+}: ServiceItemProps) {
   return (
     <Animated.View entering={FadeInDown.delay(index * 50).duration(400)}>
       <Pressable
@@ -49,7 +71,9 @@ function ServiceItem({ id, name, icon, description, onPress, index }: ServiceIte
         </View>
         <View style={styles.serviceInfo}>
           <ThemedText style={styles.serviceName}>{name}</ThemedText>
-          <ThemedText style={styles.serviceDescription}>{description}</ThemedText>
+          <ThemedText style={styles.serviceDescription}>
+            {description}
+          </ThemedText>
         </View>
         <MaterialIcons name="chevron-right" size={24} color="#6B7280" />
       </Pressable>
@@ -77,7 +101,10 @@ export default function ServicesScreen({ navigation }: any) {
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + Spacing.lg, paddingBottom: tabBarHeight + Spacing.xl },
+          {
+            paddingTop: insets.top + Spacing.lg,
+            paddingBottom: tabBarHeight + Spacing.xl,
+          },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -99,8 +126,6 @@ export default function ServicesScreen({ navigation }: any) {
             ))}
           </View>
         </View>
-
-
       </ScrollView>
     </View>
   );

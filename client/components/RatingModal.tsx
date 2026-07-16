@@ -64,14 +64,27 @@ export function RatingModal({
       statusBarTranslucent
     >
       <View style={styles.overlay}>
-        <View style={[styles.card, { backgroundColor: theme.backgroundDefault }]}>
+        <View
+          style={[styles.card, { backgroundColor: theme.backgroundDefault }]}
+        >
           {/* Header */}
           <View style={styles.header}>
-            <View style={[styles.iconCircle, { backgroundColor: UTOColors.primary + "15" }]}>
-              <MaterialIcons name={roleIcon} size={32} color={UTOColors.primary} />
+            <View
+              style={[
+                styles.iconCircle,
+                { backgroundColor: UTOColors.primary + "15" },
+              ]}
+            >
+              <MaterialIcons
+                name={roleIcon}
+                size={32}
+                color={UTOColors.primary}
+              />
             </View>
             <ThemedText style={styles.title}>Rate Your Trip</ThemedText>
-            <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
+            <ThemedText
+              style={[styles.subtitle, { color: theme.textSecondary }]}
+            >
               How was your experience with {roleLabel}?
             </ThemedText>
             <ThemedText style={[styles.name, { color: theme.text }]}>
@@ -90,7 +103,9 @@ export function RatingModal({
                 <MaterialIcons
                   name={star <= rating ? "star" : "star-border"}
                   size={44}
-                  color={star <= rating ? "#F7C948" : theme.textSecondary + "60"}
+                  color={
+                    star <= rating ? "#F7C948" : theme.textSecondary + "60"
+                  }
                 />
               </Pressable>
             ))}
@@ -98,7 +113,9 @@ export function RatingModal({
 
           {/* Rating Label */}
           {rating > 0 && (
-            <ThemedText style={[styles.ratingLabel, { color: UTOColors.primary }]}>
+            <ThemedText
+              style={[styles.ratingLabel, { color: UTOColors.primary }]}
+            >
               {rating === 1 && "Poor"}
               {rating === 2 && "Fair"}
               {rating === 3 && "Good"}
@@ -148,7 +165,9 @@ export function RatingModal({
           </Pressable>
 
           <Pressable onPress={handleSkip} style={styles.skipBtn}>
-            <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>
+            <ThemedText
+              style={[styles.skipText, { color: theme.textSecondary }]}
+            >
               Skip
             </ThemedText>
           </Pressable>

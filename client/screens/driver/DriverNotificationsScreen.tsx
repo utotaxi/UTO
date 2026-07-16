@@ -17,18 +17,32 @@ interface NotificationToggleProps {
   isLast?: boolean;
 }
 
-function NotificationToggle({ icon, title, subtitle, value, onValueChange, isLast }: NotificationToggleProps) {
+function NotificationToggle({
+  icon,
+  title,
+  subtitle,
+  value,
+  onValueChange,
+  isLast,
+}: NotificationToggleProps) {
   const { theme } = useTheme();
 
   return (
     <>
       <View style={styles.settingItem}>
-        <View style={[styles.iconContainer, { backgroundColor: theme.backgroundDefault }]}>
+        <View
+          style={[
+            styles.iconContainer,
+            { backgroundColor: theme.backgroundDefault },
+          ]}
+        >
           <Feather name={icon} size={20} color={theme.text} />
         </View>
         <View style={styles.textContainer}>
           <ThemedText style={styles.title}>{title}</ThemedText>
-          <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>{subtitle}</ThemedText>
+          <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
+            {subtitle}
+          </ThemedText>
         </View>
         <Switch
           value={value}
@@ -40,7 +54,9 @@ function NotificationToggle({ icon, title, subtitle, value, onValueChange, isLas
           thumbColor="#FFFFFF"
         />
       </View>
-      {!isLast && <View style={[styles.divider, { backgroundColor: theme.border }]} />}
+      {!isLast && (
+        <View style={[styles.divider, { backgroundColor: theme.border }]} />
+      )}
     </>
   );
 }
@@ -66,10 +82,17 @@ export default function DriverNotificationsScreen() {
         ]}
       >
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             RIDE ALERTS
           </ThemedText>
-          <View style={[styles.sectionContent, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.sectionContent,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             <NotificationToggle
               icon="smartphone"
               title="Push Notifications"
@@ -96,10 +119,17 @@ export default function DriverNotificationsScreen() {
         </View>
 
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             MARKETING
           </ThemedText>
-          <View style={[styles.sectionContent, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.sectionContent,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             <NotificationToggle
               icon="star"
               title="Promotions & Offers"

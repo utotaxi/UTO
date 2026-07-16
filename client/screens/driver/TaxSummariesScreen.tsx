@@ -19,13 +19,14 @@ export default function TaxSummariesScreen() {
           styles.content,
           {
             paddingTop: Math.max(headerHeight, 56) + insets.top + Spacing.xl,
-            paddingBottom: insets.bottom + Spacing.lg
+            paddingBottom: insets.bottom + Spacing.lg,
           },
         ]}
       >
         <ThemedText style={styles.title}>Tax Summaries</ThemedText>
         <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
-          Your annual tax summaries and earnings reports will be visible here at the end of the tax year.
+          Your annual tax summaries and earnings reports will be visible here at
+          the end of the tax year.
         </ThemedText>
       </View>
     </View>

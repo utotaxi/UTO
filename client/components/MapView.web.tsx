@@ -37,20 +37,36 @@ export function MapViewWrapper({
   const { theme, isDark } = useTheme();
 
   return (
-    <View style={[styles.webMapContainer, style, { backgroundColor: isDark ? "#1a1a2e" : "#e8f4f8" }]}>
+    <View
+      style={[
+        styles.webMapContainer,
+        style,
+        { backgroundColor: isDark ? "#1a1a2e" : "#e8f4f8" },
+      ]}
+    >
       <View style={styles.webMapContent}>
-        <View style={[styles.webMapIcon, { backgroundColor: theme.backgroundDefault }]}>
+        <View
+          style={[
+            styles.webMapIcon,
+            { backgroundColor: theme.backgroundDefault },
+          ]}
+        >
           <Feather name="map" size={48} color={UTOColors.rider.primary} />
         </View>
         <ThemedText style={styles.webMapTitle}>Map View</ThemedText>
-        <ThemedText style={[styles.webMapSubtitle, { color: theme.textSecondary }]}>
+        <ThemedText
+          style={[styles.webMapSubtitle, { color: theme.textSecondary }]}
+        >
           For the best experience, use the Expo Go app on your mobile device
         </ThemedText>
       </View>
       {initialRegion ? (
         <View style={styles.webMapCoords}>
-          <ThemedText style={[styles.coordText, { color: theme.textSecondary }]}>
-            {initialRegion.latitude.toFixed(4)}, {initialRegion.longitude.toFixed(4)}
+          <ThemedText
+            style={[styles.coordText, { color: theme.textSecondary }]}
+          >
+            {initialRegion.latitude.toFixed(4)},{" "}
+            {initialRegion.longitude.toFixed(4)}
           </ThemedText>
         </View>
       ) : null}
@@ -58,7 +74,11 @@ export function MapViewWrapper({
   );
 }
 
-export function MarkerWrapper({ coordinate, title, children }: MarkerWrapperProps) {
+export function MarkerWrapper({
+  coordinate,
+  title,
+  children,
+}: MarkerWrapperProps) {
   return null;
 }
 
@@ -69,7 +89,12 @@ interface PolylineWrapperProps {
   lineDashPattern?: number[];
 }
 
-export function PolylineWrapper({ coordinates, strokeColor, strokeWidth, lineDashPattern }: PolylineWrapperProps) {
+export function PolylineWrapper({
+  coordinates,
+  strokeColor,
+  strokeWidth,
+  lineDashPattern,
+}: PolylineWrapperProps) {
   return null;
 }
 

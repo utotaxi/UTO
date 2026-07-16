@@ -12,9 +12,9 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function setupTables() {
-    console.log("🔧 Setting up database tables in Supabase...\n");
+  console.log("🔧 Setting up database tables in Supabase...\n");
 
-    const createUsersTable = `
+  const createUsersTable = `
     CREATE TABLE IF NOT EXISTS users (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
       email TEXT NOT NULL UNIQUE,
@@ -33,7 +33,7 @@ async function setupTables() {
     );
   `;
 
-    const createDriversTable = `
+  const createDriversTable = `
     CREATE TABLE IF NOT EXISTS drivers (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
       user_id VARCHAR NOT NULL REFERENCES users(id),
@@ -52,7 +52,7 @@ async function setupTables() {
     );
   `;
 
-    const createRidesTable = `
+  const createRidesTable = `
     CREATE TABLE IF NOT EXISTS rides (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
       rider_id VARCHAR NOT NULL REFERENCES users(id),
@@ -83,7 +83,7 @@ async function setupTables() {
     );
   `;
 
-    const createPaymentsTable = `
+  const createPaymentsTable = `
     CREATE TABLE IF NOT EXISTS payments (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
       ride_id VARCHAR NOT NULL REFERENCES rides(id),
@@ -99,7 +99,7 @@ async function setupTables() {
     );
   `;
 
-    const createSavedPlacesTable = `
+  const createSavedPlacesTable = `
     CREATE TABLE IF NOT EXISTS saved_places (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
       user_id VARCHAR NOT NULL REFERENCES users(id),
@@ -111,7 +111,7 @@ async function setupTables() {
     );
   `;
 
-    const createDriverLocationsTable = `
+  const createDriverLocationsTable = `
     CREATE TABLE IF NOT EXISTS driver_locations (
       id SERIAL PRIMARY KEY,
       driver_id VARCHAR NOT NULL REFERENCES drivers(id),
@@ -123,30 +123,32 @@ async function setupTables() {
     );
   `;
 
-    const tables = [
-        { name: "users", sql: createUsersTable },
-        { name: "drivers", sql: createDriversTable },
-        { name: "rides", sql: createRidesTable },
-        { name: "payments", sql: createPaymentsTable },
-        { name: "saved_places", sql: createSavedPlacesTable },
-        { name: "driver_locations", sql: createDriverLocationsTable },
-    ];
+  const tables = [
+    { name: "users", sql: createUsersTable },
+    { name: "drivers", sql: createDriversTable },
+    { name: "rides", sql: createRidesTable },
+    { name: "payments", sql: createPaymentsTable },
+    { name: "saved_places", sql: createSavedPlacesTable },
+    { name: "driver_locations", sql: createDriverLocationsTable },
+  ];
 
-    for (const table of tables) {
-        const { error } = await supabase.rpc("exec_sql", { query: table.sql });
-        if (error) {
-            // Try direct approach if RPC doesn't exist
-            console.log(`⚠️  RPC not available. Please run the SQL manually in Supabase SQL Editor.`);
-            console.log(`\n── SQL for all tables ──\n`);
-            for (const t of tables) {
-                console.log(t.sql);
-            }
-            return;
-        }
-        console.log(`✅ Table "${table.name}" ready`);
+  for (const table of tables) {
+    const { error } = await supabase.rpc("exec_sql", { query: table.sql });
+    if (error) {
+      // Try direct approach if RPC doesn't exist
+      console.log(
+        `⚠️  RPC not available. Please run the SQL manually in Supabase SQL Editor.`,
+      );
+      console.log(`\n── SQL for all tables ──\n`);
+      for (const t of tables) {
+        console.log(t.sql);
+      }
+      return;
     }
+    console.log(`✅ Table "${table.name}" ready`);
+  }
 
-    console.log("\n🎉 All tables created successfully!");
+  console.log("\n🎉 All tables created successfully!");
 }
 
 setupTables().catch(console.error);

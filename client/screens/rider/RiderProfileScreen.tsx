@@ -39,7 +39,12 @@ export default function RiderProfileScreen({ navigation }: any) {
   const [profileBase64, setProfileBase64] = useState(""); // Track base64 data
 
   // Snapshot of last-saved state so Cancel restores properly
-  const savedRef = useRef({ fullName: "", phone: "", email: "", profileImage: "" });
+  const savedRef = useRef({
+    fullName: "",
+    phone: "",
+    email: "",
+    profileImage: "",
+  });
 
   // Load fresh data from server on mount
   useEffect(() => {
@@ -92,7 +97,10 @@ export default function RiderProfileScreen({ navigation }: any) {
     try {
       const permResult = await ImagePicker.requestCameraPermissionsAsync();
       if (!permResult.granted) {
-        Alert.alert("Permission Required", "Please allow camera access to take a selfie.");
+        Alert.alert(
+          "Permission Required",
+          "Please allow camera access to take a selfie.",
+        );
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -111,9 +119,13 @@ export default function RiderProfileScreen({ navigation }: any) {
 
   const handlePickLibrary = async () => {
     try {
-      const permResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permResult.granted) {
-        Alert.alert("Permission Required", "Please allow access to your photo library to change your profile picture.");
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library to change your profile picture.",
+        );
         return;
       }
 
@@ -139,8 +151,8 @@ export default function RiderProfileScreen({ navigation }: any) {
       [
         { text: "Take a Selfie", onPress: handleTakePhoto },
         { text: "Choose from Library", onPress: handlePickLibrary },
-        { text: "Cancel", style: "cancel" }
-      ]
+        { text: "Cancel", style: "cancel" },
+      ],
     );
   };
 
@@ -162,7 +174,7 @@ export default function RiderProfileScreen({ navigation }: any) {
           finalProfileImage = await api.users.uploadProfileImage(
             user.id,
             profileBase64,
-            "image/jpeg"
+            "image/jpeg",
           );
         }
       }
@@ -172,8 +184,11 @@ export default function RiderProfileScreen({ navigation }: any) {
         phone: phone.trim(),
         email: email.trim(),
       };
-      
-      if (finalProfileImage && finalProfileImage !== savedRef.current.profileImage) {
+
+      if (
+        finalProfileImage &&
+        finalProfileImage !== savedRef.current.profileImage
+      ) {
         updates.profileImage = finalProfileImage;
       }
 
@@ -197,10 +212,17 @@ export default function RiderProfileScreen({ navigation }: any) {
       setProfileImage(finalProfileImage);
       setProfileBase64(""); // Clear base64 after upload
       setIsEditing(false);
-      Alert.alert("Profile Updated", "Your profile has been saved successfully.");
+      Alert.alert(
+        "Profile Updated",
+        "Your profile has been saved successfully.",
+      );
     } catch (err: any) {
       console.error("Profile save error:", err);
-      Alert.alert("Error", err?.message || "Failed to save profile. Please check your connection and try again.");
+      Alert.alert(
+        "Error",
+        err?.message ||
+          "Failed to save profile. Please check your connection and try again.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -226,9 +248,16 @@ export default function RiderProfileScreen({ navigation }: any) {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top + 60, alignItems: "center" }]}>
+      <View
+        style={[
+          styles.container,
+          { paddingTop: insets.top + 60, alignItems: "center" },
+        ]}
+      >
         <ActivityIndicator size="large" color={UTOColors.primary} />
-        <ThemedText style={{ color: "#6B7280", marginTop: 12 }}>Loading profile…</ThemedText>
+        <ThemedText style={{ color: "#6B7280", marginTop: 12 }}>
+          Loading profile…
+        </ThemedText>
       </View>
     );
   }
@@ -279,7 +308,11 @@ export default function RiderProfileScreen({ navigation }: any) {
               if (isEditing && hasChanges()) {
                 Alert.alert("Discard Changes?", "You have unsaved changes.", [
                   { text: "Keep Editing", style: "cancel" },
-                  { text: "Discard", style: "destructive", onPress: handleCancel },
+                  {
+                    text: "Discard",
+                    style: "destructive",
+                    onPress: handleCancel,
+                  },
                 ]);
               } else if (isEditing) {
                 handleCancel();
@@ -300,7 +333,10 @@ export default function RiderProfileScreen({ navigation }: any) {
             <Pressable
               onPress={handleSave}
               disabled={isSaving || !hasChanges()}
-              style={[styles.saveButton, (isSaving || !hasChanges()) && { opacity: 0.5 }]}
+              style={[
+                styles.saveButton,
+                (isSaving || !hasChanges()) && { opacity: 0.5 },
+              ]}
             >
               {isSaving ? (
                 <ActivityIndicator size="small" color="#000000" />
@@ -334,10 +370,16 @@ export default function RiderProfileScreen({ navigation }: any) {
             entering={FadeInDown.delay(100).duration(400)}
             style={styles.avatarSection}
           >
-            <Pressable onPress={isEditing ? handlePickImage : undefined} style={styles.avatarWrapper}>
+            <Pressable
+              onPress={isEditing ? handlePickImage : undefined}
+              style={styles.avatarWrapper}
+            >
               <View style={styles.avatarContainer}>
                 {profileImage ? (
-                  <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+                  <Image
+                    source={{ uri: profileImage }}
+                    style={styles.avatarImage}
+                  />
                 ) : (
                   <View style={styles.avatarPlaceholder}>
                     <MaterialIcons name="person" size={48} color="#6B7280" />
@@ -350,11 +392,14 @@ export default function RiderProfileScreen({ navigation }: any) {
                 </View>
               )}
             </Pressable>
-            <ThemedText style={styles.avatarName}>{fullName || "User"}</ThemedText>
+            <ThemedText style={styles.avatarName}>
+              {fullName || "User"}
+            </ThemedText>
             <View style={styles.ratingRow}>
               <MaterialIcons name="star" size={16} color={UTOColors.primary} />
               <ThemedText style={styles.ratingText}>
-                {user?.rating?.toFixed(1) || "5.0"} • {user?.totalRides || 0} rides
+                {user?.rating?.toFixed(1) || "5.0"} • {user?.totalRides || 0}{" "}
+                rides
               </ThemedText>
             </View>
           </Animated.View>
@@ -364,7 +409,9 @@ export default function RiderProfileScreen({ navigation }: any) {
             entering={FadeInDown.delay(200).duration(400)}
             style={styles.fieldsSection}
           >
-            <ThemedText style={styles.sectionLabel}>PERSONAL INFORMATION</ThemedText>
+            <ThemedText style={styles.sectionLabel}>
+              PERSONAL INFORMATION
+            </ThemedText>
             <View style={styles.fieldsCard}>
               {fields.map((field, index) => (
                 <View
@@ -375,10 +422,16 @@ export default function RiderProfileScreen({ navigation }: any) {
                   ]}
                 >
                   <View style={styles.fieldIconContainer}>
-                    <MaterialIcons name={field.icon} size={20} color="#FFFFFF" />
+                    <MaterialIcons
+                      name={field.icon}
+                      size={20}
+                      color="#FFFFFF"
+                    />
                   </View>
                   <View style={styles.fieldContent}>
-                    <ThemedText style={styles.fieldLabel}>{field.label}</ThemedText>
+                    <ThemedText style={styles.fieldLabel}>
+                      {field.label}
+                    </ThemedText>
                     {isEditing && field.editable ? (
                       <TextInput
                         style={styles.fieldInput}
@@ -391,7 +444,9 @@ export default function RiderProfileScreen({ navigation }: any) {
                         placeholder={field.placeholder}
                         placeholderTextColor="#555555"
                         keyboardType={field.keyboardType || "default"}
-                        autoCapitalize={field.key === "fullName" ? "words" : "none"}
+                        autoCapitalize={
+                          field.key === "fullName" ? "words" : "none"
+                        }
                       />
                     ) : (
                       <ThemedText style={styles.fieldValue}>
@@ -426,20 +481,35 @@ export default function RiderProfileScreen({ navigation }: any) {
                 </View>
                 <View style={styles.fieldContent}>
                   <ThemedText style={styles.fieldLabel}>User ID</ThemedText>
-                  <ThemedText style={[styles.fieldValue, { fontSize: 12, color: "#6B7280" }]}>
+                  <ThemedText
+                    style={[
+                      styles.fieldValue,
+                      { fontSize: 12, color: "#6B7280" },
+                    ]}
+                  >
                     {user?.id || "—"}
                   </ThemedText>
                 </View>
               </View>
               <View style={styles.fieldRow}>
                 <View style={styles.fieldIconContainer}>
-                  <MaterialIcons name="verified-user" size={20} color="#FFFFFF" />
+                  <MaterialIcons
+                    name="verified-user"
+                    size={20}
+                    color="#FFFFFF"
+                  />
                 </View>
                 <View style={styles.fieldContent}>
-                  <ThemedText style={styles.fieldLabel}>Account Type</ThemedText>
+                  <ThemedText style={styles.fieldLabel}>
+                    Account Type
+                  </ThemedText>
                   <View style={styles.roleBadge}>
                     <ThemedText style={styles.roleBadgeText}>
-                      {user?.role === "both" ? "Rider & Driver" : user?.role === "driver" ? "Driver" : "Rider"}
+                      {user?.role === "both"
+                        ? "Rider & Driver"
+                        : user?.role === "driver"
+                          ? "Driver"
+                          : "Rider"}
                     </ThemedText>
                   </View>
                 </View>
@@ -475,20 +545,26 @@ export default function RiderProfileScreen({ navigation }: any) {
                                 text: "OK",
                                 onPress: () => signOut(),
                               },
-                            ]
+                            ],
                           );
                         } catch (err: any) {
-                          Alert.alert("Error", err?.message || "Failed to delete account. Please try again.");
+                          Alert.alert(
+                            "Error",
+                            err?.message ||
+                              "Failed to delete account. Please try again.",
+                          );
                         }
                       },
                     },
-                  ]
+                  ],
                 );
               }}
               style={styles.deleteButton}
             >
               <MaterialIcons name="delete-outline" size={20} color="#EF4444" />
-              <ThemedText style={styles.deleteButtonText}>Delete Account</ThemedText>
+              <ThemedText style={styles.deleteButtonText}>
+                Delete Account
+              </ThemedText>
             </Pressable>
           </Animated.View>
         </ScrollView>
@@ -500,87 +576,153 @@ export default function RiderProfileScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000000" },
   header: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: Spacing.lg, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: "#1A1A1A",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1A1A1A",
   },
   backButton: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#1A1A1A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "600" },
   saveButton: {
     backgroundColor: UTOColors.primary,
-    paddingHorizontal: 20, paddingVertical: 8, borderRadius: BorderRadius.full,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
   },
   saveButtonText: { color: "#000000", fontSize: 14, fontWeight: "700" },
   editButton: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: BorderRadius.full,
-    borderWidth: 1, borderColor: "#333333",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: "#333333",
   },
   editButtonText: { color: UTOColors.primary, fontSize: 14, fontWeight: "600" },
   scrollContent: { paddingTop: Spacing.xl },
   avatarSection: { alignItems: "center", marginBottom: Spacing["3xl"] },
   avatarWrapper: { position: "relative", marginBottom: Spacing.md },
   avatarContainer: {
-    width: 100, height: 100, borderRadius: 50, overflow: "hidden",
-    borderWidth: 3, borderColor: UTOColors.primary,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    overflow: "hidden",
+    borderWidth: 3,
+    borderColor: UTOColors.primary,
   },
   avatarImage: { width: "100%", height: "100%" },
   avatarPlaceholder: {
-    width: "100%", height: "100%", backgroundColor: "#1A1A1A",
-    alignItems: "center", justifyContent: "center",
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#1A1A1A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarEditBadge: {
-    position: "absolute", bottom: 2, right: 2,
-    width: 32, height: 32, borderRadius: 16,
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: UTOColors.primary,
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 3, borderColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#000000",
   },
-  avatarName: { color: "#FFFFFF", fontSize: 22, fontWeight: "700", marginBottom: 4 },
+  avatarName: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
   ratingRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   ratingText: { color: "#9CA3AF", fontSize: 14, fontWeight: "500" },
   fieldsSection: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.xl },
   sectionLabel: {
-    color: "#6B7280", fontSize: 13, fontWeight: "600",
-    letterSpacing: 1, marginBottom: Spacing.md,
+    color: "#6B7280",
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 1,
+    marginBottom: Spacing.md,
   },
-  fieldsCard: { backgroundColor: "#1A1A1A", borderRadius: BorderRadius.lg, overflow: "hidden" },
+  fieldsCard: {
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.lg,
+    overflow: "hidden",
+  },
   fieldRow: {
-    flexDirection: "row", alignItems: "center",
-    paddingVertical: 14, paddingHorizontal: Spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
   },
   fieldBorder: { borderBottomWidth: 1, borderBottomColor: "#2A2A2A" },
   fieldIconContainer: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "#333333", alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#333333",
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: Spacing.md,
   },
   fieldContent: { flex: 1 },
-  fieldLabel: { color: "#6B7280", fontSize: 12, fontWeight: "500", marginBottom: 2 },
+  fieldLabel: {
+    color: "#6B7280",
+    fontSize: 12,
+    fontWeight: "500",
+    marginBottom: 2,
+  },
   fieldValue: { color: "#FFFFFF", fontSize: 16, fontWeight: "500" },
   fieldPlaceholder: { color: "#555555", fontSize: 16, fontStyle: "italic" },
   fieldInput: {
-    color: "#FFFFFF", fontSize: 16, fontWeight: "500",
-    padding: 0, margin: 0,
-    borderBottomWidth: 1, borderBottomColor: UTOColors.primary + "60", paddingBottom: 4,
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "500",
+    padding: 0,
+    margin: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: UTOColors.primary + "60",
+    paddingBottom: 4,
   },
   lockedBadge: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: "#2A2A2A", alignItems: "center", justifyContent: "center",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#2A2A2A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   roleBadge: {
     backgroundColor: UTOColors.primary + "20",
-    paddingHorizontal: 10, paddingVertical: 3,
-    borderRadius: BorderRadius.full, alignSelf: "flex-start", marginTop: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    alignSelf: "flex-start",
+    marginTop: 2,
   },
   roleBadgeText: { color: UTOColors.primary, fontSize: 12, fontWeight: "600" },
   deleteButton: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    backgroundColor: "#1A1A1A", borderRadius: BorderRadius.lg,
-    paddingVertical: 14, gap: Spacing.sm,
-    borderWidth: 1, borderColor: "#EF444430",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1A1A1A",
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 14,
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: "#EF444430",
   },
   deleteButtonText: { color: "#EF4444", fontSize: 15, fontWeight: "500" },
 });

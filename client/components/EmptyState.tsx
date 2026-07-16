@@ -12,7 +12,12 @@ interface EmptyStateProps {
   description: string;
 }
 
-export function EmptyState({ image, icon, title, description }: EmptyStateProps) {
+export function EmptyState({
+  image,
+  icon,
+  title,
+  description,
+}: EmptyStateProps) {
   return (
     <View style={styles.container}>
       {image ? (

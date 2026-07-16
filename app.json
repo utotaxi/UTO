@@ -15,11 +15,7 @@
         "NSLocationWhenInUseUsageDescription": "UTO needs your location to show nearby drivers and provide ride services.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "UTO needs your location to track your ride and navigate to your destination.",
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": [
-          "location",
-          "fetch",
-          "remote-notification"
-        ]
+        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
       },
       "config": {
         "googleMapsApiKey": "AIzaSyCHpucmvtde0uRq3G_COT_Q5RMw3ceWMdE"

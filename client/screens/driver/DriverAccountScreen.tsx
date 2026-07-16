@@ -39,7 +39,15 @@ interface MenuItemProps {
   isDanger?: boolean;
 }
 
-function MenuItem({ icon, title, subtitle, onPress, showBadge, badgeColor, isDanger }: MenuItemProps) {
+function MenuItem({
+  icon,
+  title,
+  subtitle,
+  onPress,
+  showBadge,
+  badgeColor,
+  isDanger,
+}: MenuItemProps) {
   const { theme } = useTheme();
   return (
     <Pressable
@@ -52,26 +60,49 @@ function MenuItem({ icon, title, subtitle, onPress, showBadge, badgeColor, isDan
         { backgroundColor: pressed ? theme.backgroundDefault : "transparent" },
       ]}
     >
-      <View style={[
-        styles.menuIconContainer,
-        { backgroundColor: isDanger ? UTOColors.error + "20" : theme.backgroundDefault },
-      ]}>
-        <Feather name={icon} size={20} color={isDanger ? UTOColors.error : theme.text} />
+      <View
+        style={[
+          styles.menuIconContainer,
+          {
+            backgroundColor: isDanger
+              ? UTOColors.error + "20"
+              : theme.backgroundDefault,
+          },
+        ]}
+      >
+        <Feather
+          name={icon}
+          size={20}
+          color={isDanger ? UTOColors.error : theme.text}
+        />
       </View>
       <View style={styles.menuTextContainer}>
-        <ThemedText style={[styles.menuTitle, isDanger && { color: UTOColors.error }]}>
+        <ThemedText
+          style={[styles.menuTitle, isDanger && { color: UTOColors.error }]}
+        >
           {title}
         </ThemedText>
         {subtitle ? (
-          <ThemedText style={[styles.menuSubtitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.menuSubtitle, { color: theme.textSecondary }]}
+          >
             {subtitle}
           </ThemedText>
         ) : null}
       </View>
       {showBadge ? (
-        <View style={[styles.badge, { backgroundColor: badgeColor || UTOColors.driver.primary }]} />
+        <View
+          style={[
+            styles.badge,
+            { backgroundColor: badgeColor || UTOColors.driver.primary },
+          ]}
+        />
       ) : null}
-      <Feather name="chevron-right" size={20} color={isDanger ? UTOColors.error : theme.textSecondary} />
+      <Feather
+        name="chevron-right"
+        size={20}
+        color={isDanger ? UTOColors.error : theme.textSecondary}
+      />
     </Pressable>
   );
 }
@@ -90,15 +121,20 @@ function VehicleInfoModal({
 }) {
   const [make, setMake] = useState(currentProfile?.vehicleMake || "");
   const [model, setModel] = useState(currentProfile?.vehicleModel || "");
-  const [year, setYear] = useState(currentProfile?.vehicleYear?.toString() || "");
+  const [year, setYear] = useState(
+    currentProfile?.vehicleYear?.toString() || "",
+  );
   const [color, setColor] = useState(currentProfile?.vehicleColor || "");
   const [plate, setPlate] = useState(currentProfile?.licensePlate || "");
   const [vType, setVType] = useState<"saloon" | "people_carrier" | "minibus">(
-    currentProfile?.vehicleType || "saloon"
+    currentProfile?.vehicleType || "saloon",
   );
   const [saving, setSaving] = useState(false);
 
-  const vehicleTypes: Array<{ key: "saloon" | "people_carrier" | "minibus"; label: string }> = [
+  const vehicleTypes: Array<{
+    key: "saloon" | "people_carrier" | "minibus";
+    label: string;
+  }> = [
     { key: "saloon", label: "Saloon" },
     { key: "people_carrier", label: "People Carrier" },
     { key: "minibus", label: "Minibus" },
@@ -106,7 +142,10 @@ function VehicleInfoModal({
 
   const handleSave = async () => {
     if (!make.trim() || !model.trim() || !plate.trim()) {
-      Alert.alert("Missing Info", "Please enter vehicle make, model, and licence plate.");
+      Alert.alert(
+        "Missing Info",
+        "Please enter vehicle make, model, and licence plate.",
+      );
       return;
     }
     setSaving(true);
@@ -130,8 +169,16 @@ function VehicleInfoModal({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
         <View style={ms.container}>
           {/* Header */}
           <View style={ms.header}>
@@ -142,7 +189,10 @@ function VehicleInfoModal({
             <View style={{ width: 38 }} />
           </View>
 
-          <ScrollView contentContainerStyle={ms.body} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            contentContainerStyle={ms.body}
+            keyboardShouldPersistTaps="handled"
+          >
             <Text style={ms.label}>Vehicle Type</Text>
             <View style={ms.typeRow}>
               {vehicleTypes.map((t) => (
@@ -151,14 +201,21 @@ function VehicleInfoModal({
                   style={[ms.typeBtn, vType === t.key && ms.typeBtnActive]}
                   onPress={() => setVType(t.key)}
                 >
-                  <Text style={[ms.typeBtnText, vType === t.key && ms.typeBtnTextActive]}>
+                  <Text
+                    style={[
+                      ms.typeBtnText,
+                      vType === t.key && ms.typeBtnTextActive,
+                    ]}
+                  >
                     {t.label}
                   </Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={ms.label}>Make <Text style={ms.req}>*</Text></Text>
+            <Text style={ms.label}>
+              Make <Text style={ms.req}>*</Text>
+            </Text>
             <TextInput
               style={ms.input}
               value={make}
@@ -168,7 +225,9 @@ function VehicleInfoModal({
               autoCapitalize="words"
             />
 
-            <Text style={ms.label}>Model <Text style={ms.req}>*</Text></Text>
+            <Text style={ms.label}>
+              Model <Text style={ms.req}>*</Text>
+            </Text>
             <TextInput
               style={ms.input}
               value={model}
@@ -204,7 +263,9 @@ function VehicleInfoModal({
               </View>
             </View>
 
-            <Text style={ms.label}>Licence Plate <Text style={ms.req}>*</Text></Text>
+            <Text style={ms.label}>
+              Licence Plate <Text style={ms.req}>*</Text>
+            </Text>
             <TextInput
               style={[ms.input, { textTransform: "uppercase" }]}
               value={plate}
@@ -215,8 +276,16 @@ function VehicleInfoModal({
             />
           </ScrollView>
 
-          <Pressable style={[ms.saveBtn, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
-            {saving ? <ActivityIndicator color="#000" /> : <Text style={ms.saveBtnText}>Save Vehicle Info</Text>}
+          <Pressable
+            style={[ms.saveBtn, saving && { opacity: 0.6 }]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#000" />
+            ) : (
+              <Text style={ms.saveBtnText}>Save Vehicle Info</Text>
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -241,7 +310,11 @@ export default function DriverAccountScreen({ navigation }: any) {
         text: "Sign Out",
         style: "destructive",
         onPress: async () => {
-          try { await signOut(); } catch { Alert.alert("Error", "Failed to sign out."); }
+          try {
+            await signOut();
+          } catch {
+            Alert.alert("Error", "Failed to sign out.");
+          }
         },
       },
     ]);
@@ -253,34 +326,66 @@ export default function DriverAccountScreen({ navigation }: any) {
         style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
         contentContainerStyle={{
           paddingTop: Spacing.xl,
-          paddingBottom: tabBarHeight > 0 ? tabBarHeight + Spacing.xl : insets.bottom + 80,
+          paddingBottom:
+            tabBarHeight > 0 ? tabBarHeight + Spacing.xl : insets.bottom + 80,
         }}
       >
         {/* Profile Header */}
         <View style={styles.profileSection}>
-          <View style={[styles.avatar, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.avatar,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             {user?.profileImage ? (
-              <Image source={{ uri: user.profileImage }} style={styles.avatarImage} />
+              <Image
+                source={{ uri: user.profileImage }}
+                style={styles.avatarImage}
+              />
             ) : (
               <Feather name="user" size={32} color={theme.textSecondary} />
             )}
           </View>
-          <ThemedText style={styles.userName}>{user?.fullName || "Driver"}</ThemedText>
+          <ThemedText style={styles.userName}>
+            {user?.fullName || "Driver"}
+          </ThemedText>
           <View style={styles.statsRow}>
             <View style={styles.stat}>
               <Feather name="star" size={16} color={UTOColors.warning} />
-              <ThemedText style={styles.statValue}>{earnings.averageRating.toFixed(1)}</ThemedText>
+              <ThemedText style={styles.statValue}>
+                {earnings.averageRating.toFixed(1)}
+              </ThemedText>
             </View>
-            <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+            <View
+              style={[styles.statDivider, { backgroundColor: theme.border }]}
+            />
             <View style={styles.stat}>
-              <Feather name="navigation" size={16} color={UTOColors.driver.primary} />
-              <ThemedText style={styles.statValue}>{earnings.totalTrips} trips</ThemedText>
+              <Feather
+                name="navigation"
+                size={16}
+                color={UTOColors.driver.primary}
+              />
+              <ThemedText style={styles.statValue}>
+                {earnings.totalTrips} trips
+              </ThemedText>
             </View>
           </View>
           {driverProfile?.isVerified ? (
-            <View style={[styles.verifiedBadge, { backgroundColor: UTOColors.success + "20" }]}>
-              <Feather name="check-circle" size={14} color={UTOColors.success} />
-              <ThemedText style={[styles.verifiedText, { color: UTOColors.success }]}>
+            <View
+              style={[
+                styles.verifiedBadge,
+                { backgroundColor: UTOColors.success + "20" },
+              ]}
+            >
+              <Feather
+                name="check-circle"
+                size={14}
+                color={UTOColors.success}
+              />
+              <ThemedText
+                style={[styles.verifiedText, { color: UTOColors.success }]}
+              >
                 Verified Driver
               </ThemedText>
             </View>
@@ -289,7 +394,9 @@ export default function DriverAccountScreen({ navigation }: any) {
 
         {/* Account Info */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             Account
           </ThemedText>
           <MenuItem
@@ -302,7 +409,9 @@ export default function DriverAccountScreen({ navigation }: any) {
 
         {/* Opportunities */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             Opportunities
           </ThemedText>
           <MenuItem
@@ -325,7 +434,9 @@ export default function DriverAccountScreen({ navigation }: any) {
 
         {/* Vehicle */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             Vehicle
           </ThemedText>
           <MenuItem
@@ -348,19 +459,38 @@ export default function DriverAccountScreen({ navigation }: any) {
 
         {/* Earnings */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             Earnings
           </ThemedText>
-          <MenuItem icon="dollar-sign" title="Payout Methods" subtitle="Manage how you get paid" onPress={() => navigation.navigate("PayoutMethods")} />
-          <MenuItem icon="bar-chart-2" title="Tax Information" subtitle="View tax documents" onPress={() => navigation.navigate("TaxInformation")} />
+          <MenuItem
+            icon="dollar-sign"
+            title="Payout Methods"
+            subtitle="Manage how you get paid"
+            onPress={() => navigation.navigate("PayoutMethods")}
+          />
+          <MenuItem
+            icon="bar-chart-2"
+            title="Tax Information"
+            subtitle="View tax documents"
+            onPress={() => navigation.navigate("TaxInformation")}
+          />
         </View>
 
         {/* Preferences */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             Preferences
           </ThemedText>
-          <MenuItem icon="bell" title="Notifications" subtitle="Manage ride alerts" onPress={() => navigation.navigate("DriverNotifications")} />
+          <MenuItem
+            icon="bell"
+            title="Notifications"
+            subtitle="Manage ride alerts"
+            onPress={() => navigation.navigate("DriverNotifications")}
+          />
           {userRole === "both" ? (
             <MenuItem
               icon="repeat"
@@ -375,43 +505,61 @@ export default function DriverAccountScreen({ navigation }: any) {
 
         {/* Support */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             Support
           </ThemedText>
-          <MenuItem 
-            icon="help-circle" 
-            title="Driver Support" 
-            subtitle="Get help with driving" 
+          <MenuItem
+            icon="help-circle"
+            title="Driver Support"
+            subtitle="Get help with driving"
             onPress={() => {
               Alert.alert(
                 "Support",
                 "Feel free to call us at +44 07596 266 901",
                 [
                   { text: "Cancel", style: "cancel" },
-                  { 
-                    text: "Call", 
-                    onPress: () => Linking.openURL("tel:+4407596266901") 
-                  }
-                ]
+                  {
+                    text: "Call",
+                    onPress: () => Linking.openURL("tel:+4407596266901"),
+                  },
+                ],
               );
-            }} 
+            }}
           />
-          <MenuItem icon="shield" title="Safety" subtitle="Safety resources and tips" onPress={() => navigation.navigate("DriverSafety")} />
+          <MenuItem
+            icon="shield"
+            title="Safety"
+            subtitle="Safety resources and tips"
+            onPress={() => navigation.navigate("DriverSafety")}
+          />
           <MenuItem
             icon="info"
             title="About UTO"
             onPress={() => navigation.navigate("About")}
           />
-          <MenuItem icon="settings" title="Settings" onPress={() => navigation.navigate("Settings")} />
+          <MenuItem
+            icon="settings"
+            title="Settings"
+            onPress={() => navigation.navigate("Settings")}
+          />
         </View>
 
         {/* Sign Out */}
         <View style={styles.section}>
-          <MenuItem icon="log-out" title="Sign Out" onPress={handleSignOut} isDanger />
+          <MenuItem
+            icon="log-out"
+            title="Sign Out"
+            onPress={handleSignOut}
+            isDanger
+          />
         </View>
 
         <View style={styles.versionContainer}>
-          <ThemedText style={[styles.versionText, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.versionText, { color: theme.textSecondary }]}
+          >
             UTO Driver v1.0.0
           </ThemedText>
         </View>
@@ -440,32 +588,53 @@ const ms = StyleSheet.create({
     borderBottomColor: "#F3F4F6",
   },
   closeBtn: {
-    width: 38, height: 38, borderRadius: 19,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#F3F4F6",
-    alignItems: "center", justifyContent: "center",
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: { fontSize: 17, fontWeight: "700", color: "#111827" },
   body: { padding: 20, paddingBottom: 32 },
-  label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6, marginTop: 16 },
+  label: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#374151",
+    marginBottom: 6,
+    marginTop: 16,
+  },
   req: { color: "#EF4444" },
   input: {
-    borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 15, color: "#111827", backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#111827",
+    backgroundColor: "#F9FAFB",
   },
   row: { flexDirection: "row" },
   typeRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   typeBtn: {
-    flex: 1, paddingVertical: 10, borderRadius: 10,
-    borderWidth: 1.5, borderColor: "#D1D5DB",
-    alignItems: "center", backgroundColor: "#F9FAFB",
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#D1D5DB",
+    alignItems: "center",
+    backgroundColor: "#F9FAFB",
   },
   typeBtnActive: { borderColor: "#FFD000", backgroundColor: "#FFFBEB" },
   typeBtnText: { fontSize: 13, fontWeight: "600", color: "#6B7280" },
   typeBtnTextActive: { color: "#92610A" },
   saveBtn: {
-    margin: 20, backgroundColor: "#FFD000",
-    borderRadius: 14, paddingVertical: 16, alignItems: "center",
+    margin: 20,
+    backgroundColor: "#FFD000",
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: "center",
   },
   saveBtnText: { fontSize: 16, fontWeight: "800", color: "#000" },
 });
@@ -478,36 +647,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   avatar: {
-    width: 80, height: 80, borderRadius: 40,
-    alignItems: "center", justifyContent: "center",
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: Spacing.md,
   },
   avatarImage: { width: 80, height: 80, borderRadius: 40 },
   userName: { fontSize: 22, fontWeight: "600", marginBottom: Spacing.md },
-  statsRow: { flexDirection: "row", alignItems: "center", marginBottom: Spacing.md },
+  statsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: Spacing.md,
+  },
   stat: { flexDirection: "row", alignItems: "center", gap: Spacing.xs },
   statValue: { fontSize: 15, fontWeight: "500" },
   statDivider: { width: 1, height: 16, marginHorizontal: Spacing.lg },
   verifiedBadge: {
-    flexDirection: "row", alignItems: "center",
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.full, gap: Spacing.xs,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+    gap: Spacing.xs,
   },
   verifiedText: { fontSize: 13, fontWeight: "600" },
   section: { paddingHorizontal: Spacing.lg, marginBottom: Spacing["2xl"] },
   sectionTitle: {
-    fontSize: 13, fontWeight: "600",
-    textTransform: "uppercase", letterSpacing: 0.5,
+    fontSize: 13,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
     marginBottom: Spacing.md,
   },
   menuItem: {
-    flexDirection: "row", alignItems: "center",
-    paddingVertical: Spacing.md, borderRadius: BorderRadius.md,
-    marginHorizontal: -Spacing.md, paddingHorizontal: Spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginHorizontal: -Spacing.md,
+    paddingHorizontal: Spacing.md,
   },
   menuIconContainer: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: Spacing.md,
   },
   menuTextContainer: { flex: 1 },

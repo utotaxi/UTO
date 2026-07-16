@@ -1,6 +1,10 @@
-
-
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   StyleSheet,
   View,
@@ -20,22 +24,28 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Location from "expo-location";
 import { Feather, MaterialIcons } from "@expo/vector-icons";
-import Animated, {
-  FadeIn,
-  FadeOut,
-} from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 
 import { ThemedText } from "@/components/ThemedText";
 import { OnlineToggle } from "@/components/OnlineToggle";
 import { RideRequestCard } from "@/components/RideRequestCard";
-import { MapViewWrapper, MarkerWrapper, PolylineWrapper } from "@/components/MapView";
+import {
+  MapViewWrapper,
+  MarkerWrapper,
+  PolylineWrapper,
+} from "@/components/MapView";
 import { HeaderTitle } from "@/components/HeaderTitle";
 import { ModeBadge } from "@/components/ModeBadge";
 import { useTheme } from "@/hooks/useTheme";
 import { useDriver } from "@/context/DriverContext";
 import { useAuth } from "@/context/AuthContext";
 import { RatingModal } from "@/components/RatingModal";
-import { UTOColors, Spacing, BorderRadius, formatPrice } from "@/constants/theme";
+import {
+  UTOColors,
+  Spacing,
+  BorderRadius,
+  formatPrice,
+} from "@/constants/theme";
 import { getApiUrl } from "@/lib/query-client";
 import { sendDriverLocation, getSocket, connectAsDriver } from "@/lib/socket";
 import { startBackgroundLocationTracking } from "@/lib/backgroundLocation";
@@ -44,15 +54,27 @@ const darkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#38414e" }],
+  },
+  {
+    featureType: "road",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#212a37" }],
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#17263c" }],
+  },
 ];
 
 export default function DriverHomeScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
-  
+
   // Conditionally use the tab bar height. If outside tab context, default to 0.
   let rawTabBarHeight = 0;
   try {
@@ -85,34 +107,49 @@ export default function DriverHomeScreen({ navigation }: any) {
     submitDriverRating,
     dismissDriverRating,
   } = useDriver();
-  
+
   const { user } = useAuth();
 
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [location, setLocation] = useState<Location.LocationObject | null>(
+    null,
+  );
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
   const [otpValue, setOtpValue] = useState("");
   const [otpError, setOtpError] = useState(false);
   const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
-  const [routeDistanceText, setRouteDistanceText] = useState<string | null>(null);
-  const [routeDurationText, setRouteDurationText] = useState<string | null>(null);
+  const [routeDistanceText, setRouteDistanceText] = useState<string | null>(
+    null,
+  );
+  const [routeDurationText, setRouteDurationText] = useState<string | null>(
+    null,
+  );
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
   const [paidWaitingElapsedSec, setPaidWaitingElapsedSec] = useState(0);
   const [acceptedElapsedSec, setAcceptedElapsedSec] = useState(0);
 
   // Early completion modal state
   const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
-  const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(null);
+  const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(
+    null,
+  );
   const [earlyCompleteOtherText, setEarlyCompleteOtherText] = useState("");
 
   // Haversine distance calculation (returns meters)
-  const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const getDistanceMeters = (
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number => {
     const R = 6371000; // Earth's radius in meters
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLon = ((lon2 - lon1) * Math.PI) / 180;
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   };
@@ -126,12 +163,12 @@ export default function DriverHomeScreen({ navigation }: any) {
   // This ensures the driver stays online even after switching to Google Maps.
   useEffect(() => {
     const handleAppStateChange = (nextState: AppStateStatus) => {
-        const driverId = driverProfile?.id || user?.id;
-        if (!driverId) return;
+      const driverId = driverProfile?.id || user?.id;
+      if (!driverId) return;
 
-      if (nextState === 'active') {
+      if (nextState === "active") {
         // App came back to foreground
-        console.log('📱 App foregrounded — re-establishing connection');
+        console.log("📱 App foregrounded — re-establishing connection");
         try {
           const sock = getSocket();
           if (!sock.connected) {
@@ -149,23 +186,32 @@ export default function DriverHomeScreen({ navigation }: any) {
               speed: location.coords.speed || undefined,
             });
           }
-          console.log('📱 App foregrounded — socket reconnected and driver re-registered');
+          console.log(
+            "📱 App foregrounded — socket reconnected and driver re-registered",
+          );
         } catch (err) {
-          console.warn('⚠️ AppState reconnect error:', err);
+          console.warn("⚠️ AppState reconnect error:", err);
         }
-      } else if (nextState === 'background' || nextState === 'inactive') {
+      } else if (nextState === "background" || nextState === "inactive") {
         // App went to background - ensure we're still registered
         // The socket connection should remain alive due to our reconnection settings
-        console.log('📵 App backgrounded — socket should remain alive');
+        console.log("📵 App backgrounded — socket should remain alive");
         // Don't disconnect - just let the socket handle reconnection automatically
       }
     };
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    const subscription = AppState.addEventListener(
+      "change",
+      handleAppStateChange,
+    );
     return () => subscription.remove();
   }, [driverProfile?.id, user?.id, location]);
 
   useEffect(() => {
-    if (!activeRideRequest || !activeRideRequest.pickupLatitude || !activeRideRequest.dropoffLatitude) {
+    if (
+      !activeRideRequest ||
+      !activeRideRequest.pickupLatitude ||
+      !activeRideRequest.dropoffLatitude
+    ) {
       setRouteCoordinates([]);
       setRouteDistanceText(null);
       setRouteDurationText(null);
@@ -183,7 +229,10 @@ export default function DriverHomeScreen({ navigation }: any) {
         const destination = `${activeRideRequest.dropoffLatitude},${activeRideRequest.dropoffLongitude}`;
 
         const res = await fetch(
-          new URL(`/api/directions?origin=${origin}&destination=${destination}`, apiUrl).toString()
+          new URL(
+            `/api/directions?origin=${origin}&destination=${destination}`,
+            apiUrl,
+          ).toString(),
         );
         const data = await res.json();
 
@@ -196,10 +245,10 @@ export default function DriverHomeScreen({ navigation }: any) {
             const leg = route.legs[0];
             // Distance and duration reflect the booked trip (pickup → dropoff)
             setRouteDistanceText(
-              leg.distance?.text?.replace(/\bmi\b/, "miles") || null
+              leg.distance?.text?.replace(/\bmi\b/, "miles") || null,
             );
             setRouteDurationText(
-              leg.duration?.text?.replace(/\bmins\b/, "min") || null
+              leg.duration?.text?.replace(/\bmins\b/, "min") || null,
             );
           }
         }
@@ -209,7 +258,12 @@ export default function DriverHomeScreen({ navigation }: any) {
     };
 
     fetchRoute();
-  }, [activeRideRequest?.id, activeRideRequest?.pickupLatitude, activeRideRequest?.dropoffLatitude, rideState]);
+  }, [
+    activeRideRequest?.id,
+    activeRideRequest?.pickupLatitude,
+    activeRideRequest?.dropoffLatitude,
+    rideState,
+  ]);
 
   useEffect(() => {
     let subscription: Location.LocationSubscription | null = null;
@@ -224,18 +278,25 @@ export default function DriverHomeScreen({ navigation }: any) {
       }
 
       // For iOS, also request background location permissions
-      if (Platform.OS === 'ios') {
+      if (Platform.OS === "ios") {
         const bgStatus = await Location.requestBackgroundPermissionsAsync();
-        if (bgStatus.status === 'granted') {
-          console.log('✅ Background location permissions granted for iOS');
+        if (bgStatus.status === "granted") {
+          console.log("✅ Background location permissions granted for iOS");
         } else {
-          console.warn('⚠️ Background location permissions not granted for iOS');
+          console.warn(
+            "⚠️ Background location permissions not granted for iOS",
+          );
         }
       }
 
       const enforceUK = (loc: Location.LocationObject) => {
         // If outside UK bounds (roughly), default to the pickup location or Central London
-        if (loc.coords.latitude < 49 || loc.coords.latitude > 61 || loc.coords.longitude < -10 || loc.coords.longitude > 2) {
+        if (
+          loc.coords.latitude < 49 ||
+          loc.coords.latitude > 61 ||
+          loc.coords.longitude < -10 ||
+          loc.coords.longitude > 2
+        ) {
           const ride = activeRideRef.current;
           if (ride && ride.pickupLatitude && ride.pickupLongitude) {
             // Spoof driver to be near the pickup (e.g., ~1 mile away)
@@ -245,7 +306,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                 ...loc.coords,
                 latitude: ride.pickupLatitude - 0.012,
                 longitude: ride.pickupLongitude - 0.012,
-              }
+              },
             };
           }
           return {
@@ -254,7 +315,7 @@ export default function DriverHomeScreen({ navigation }: any) {
               ...loc.coords,
               latitude: 51.5074,
               longitude: -0.1278,
-            }
+            },
           };
         }
         return loc;
@@ -265,7 +326,7 @@ export default function DriverHomeScreen({ navigation }: any) {
         const enforcedLoc = enforceUK(currentLocation);
         setLocation(enforcedLoc);
         setIsLoadingLocation(false);
-        
+
         // Setup state refs for the watcher callback
         const getDriverId = () => driverProfile?.id || user?.id;
 
@@ -280,11 +341,15 @@ export default function DriverHomeScreen({ navigation }: any) {
         }
 
         subscription = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 5 },
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 3000,
+            distanceInterval: 5,
+          },
           (newLocation) => {
             const updatedLoc = enforceUK(newLocation);
             setLocation(updatedLoc);
-            
+
             // Immediately send location to socket to ensure real-time tracking
             // This is critical for background operation
             const driverId = driverProfile?.id || user?.id;
@@ -297,7 +362,7 @@ export default function DriverHomeScreen({ navigation }: any) {
                 speed: updatedLoc.coords.speed || undefined,
               });
             }
-          }
+          },
         );
       } catch (error) {
         console.log("Location error:", error);
@@ -318,7 +383,10 @@ export default function DriverHomeScreen({ navigation }: any) {
     const driverId = driverProfile?.id || user?.id;
     if (!isOnline || !driverId) return;
     startBackgroundLocationTracking(driverId).catch((err) =>
-      console.warn("⚠️ Failed to start background location from DriverHome:", err)
+      console.warn(
+        "⚠️ Failed to start background location from DriverHome:",
+        err,
+      ),
     );
   }, [isOnline, driverProfile?.id, user?.id]);
 
@@ -351,13 +419,13 @@ export default function DriverHomeScreen({ navigation }: any) {
         if (sock.connected) {
           // Re-register driver connection to refresh server-side status
           connectAsDriver(driverId);
-          console.log('Keep-alive: Driver re-registered');
+          console.log("Keep-alive: Driver re-registered");
         } else {
-          console.log('Keep-alive: Socket not connected, will reconnect...');
+          console.log("Keep-alive: Socket not connected, will reconnect...");
           sock.connect();
         }
       } catch (err) {
-        console.warn('Keep-alive error:', err);
+        console.warn("Keep-alive error:", err);
       }
     }, 10000); // Every 10 seconds
 
@@ -430,7 +498,10 @@ export default function DriverHomeScreen({ navigation }: any) {
     if (phone) {
       Linking.openURL(`tel:${phone}`);
     } else {
-      Alert.alert("No Phone Number", "The rider's phone number is not available.");
+      Alert.alert(
+        "No Phone Number",
+        "The rider's phone number is not available.",
+      );
     }
   };
 
@@ -445,7 +516,7 @@ export default function DriverHomeScreen({ navigation }: any) {
           style: "destructive",
           onPress: () => noShowRide(),
         },
-      ]
+      ],
     );
   };
 
@@ -459,7 +530,7 @@ export default function DriverHomeScreen({ navigation }: any) {
           text: "Start Paid Waiting",
           onPress: () => agreeToWait(),
         },
-      ]
+      ],
     );
   };
 
@@ -498,19 +569,28 @@ export default function DriverHomeScreen({ navigation }: any) {
     }
   }, [otpValue, activeRideRequest?.otp]);
 
-
   const hasActiveRide = activeRideRequest && rideState !== "none";
 
   const mapRegion = useMemo(() => {
-    if (hasActiveRide && activeRideRequest.pickupLatitude && activeRideRequest.dropoffLatitude) {
+    if (
+      hasActiveRide &&
+      activeRideRequest.pickupLatitude &&
+      activeRideRequest.dropoffLatitude
+    ) {
       // Always frame pickup → dropoff so the map matches the rider's view
       const points = [
-        { lat: activeRideRequest.pickupLatitude, lng: activeRideRequest.pickupLongitude },
-        { lat: activeRideRequest.dropoffLatitude, lng: activeRideRequest.dropoffLongitude },
+        {
+          lat: activeRideRequest.pickupLatitude,
+          lng: activeRideRequest.pickupLongitude,
+        },
+        {
+          lat: activeRideRequest.dropoffLatitude,
+          lng: activeRideRequest.dropoffLongitude,
+        },
       ];
 
-      const lats = points.map(p => p.lat);
-      const lngs = points.map(p => p.lng);
+      const lats = points.map((p) => p.lat);
+      const lngs = points.map((p) => p.lng);
       const minLat = Math.min(...lats);
       const maxLat = Math.max(...lats);
       const minLng = Math.min(...lngs);
@@ -537,7 +617,12 @@ export default function DriverHomeScreen({ navigation }: any) {
       latitudeDelta: 0.05,
       longitudeDelta: 0.05,
     };
-  }, [location, hasActiveRide, activeRideRequest?.pickupLatitude, activeRideRequest?.dropoffLatitude]);
+  }, [
+    location,
+    hasActiveRide,
+    activeRideRequest?.pickupLatitude,
+    activeRideRequest?.dropoffLatitude,
+  ]);
 
   const handleOpenNavigation = () => {
     if (!activeRideRequest) return;
@@ -553,7 +638,7 @@ export default function DriverHomeScreen({ navigation }: any) {
 
     const url = Platform.select({
       ios: `maps://app?daddr=${destLat},${destLng}`,
-      android: `google.navigation:q=${destLat},${destLng}`
+      android: `google.navigation:q=${destLat},${destLng}`,
     });
 
     if (url) {
@@ -565,7 +650,12 @@ export default function DriverHomeScreen({ navigation }: any) {
     <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
       <View style={styles.mapContainer}>
         {isLoadingLocation ? (
-          <View style={[styles.loadingContainer, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.loadingContainer,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             <ActivityIndicator size="large" color={UTOColors.driver.primary} />
           </View>
         ) : (
@@ -592,7 +682,16 @@ export default function DriverHomeScreen({ navigation }: any) {
                 }}
               >
                 <View style={styles.driverMarkerContainer}>
-                  <View style={[styles.driverMarker, { backgroundColor: isOnline ? UTOColors.driver.primary : theme.textSecondary }]}>
+                  <View
+                    style={[
+                      styles.driverMarker,
+                      {
+                        backgroundColor: isOnline
+                          ? UTOColors.driver.primary
+                          : theme.textSecondary,
+                      },
+                    ]}
+                  >
                     <Feather name="navigation" size={16} color="#FFFFFF" />
                   </View>
                 </View>
@@ -607,8 +706,17 @@ export default function DriverHomeScreen({ navigation }: any) {
                 }}
                 title="Pickup"
               >
-                <View style={[styles.rideMarker, { backgroundColor: UTOColors.success }]}>
-                  <MaterialIcons name="person-pin-circle" size={18} color="#FFFFFF" />
+                <View
+                  style={[
+                    styles.rideMarker,
+                    { backgroundColor: UTOColors.success },
+                  ]}
+                >
+                  <MaterialIcons
+                    name="person-pin-circle"
+                    size={18}
+                    color="#FFFFFF"
+                  />
                 </View>
               </MarkerWrapper>
             ) : null}
@@ -621,7 +729,12 @@ export default function DriverHomeScreen({ navigation }: any) {
                 }}
                 title="Dropoff"
               >
-                <View style={[styles.rideMarker, { backgroundColor: UTOColors.error }]}>
+                <View
+                  style={[
+                    styles.rideMarker,
+                    { backgroundColor: UTOColors.error },
+                  ]}
+                >
                   <MaterialIcons name="place" size={18} color="#FFFFFF" />
                 </View>
               </MarkerWrapper>
@@ -631,16 +744,26 @@ export default function DriverHomeScreen({ navigation }: any) {
       </View>
 
       {/* Custom Safe Area Header */}
-      <View style={[styles.customHeader, {
-        paddingTop: Math.max(insets.top, 16),
-        backgroundColor: theme.backgroundRoot,
-      }]}>
+      <View
+        style={[
+          styles.customHeader,
+          {
+            paddingTop: Math.max(insets.top, 16),
+            backgroundColor: theme.backgroundRoot,
+          },
+        ]}
+      >
         <HeaderTitle />
         <ModeBadge onPress={() => navigation?.navigate("Settings")} />
       </View>
 
       {/* Online toggle — directly below header */}
-      <View style={[styles.toggleContainer, { top: Math.max(insets.top, 16) + 48 + Spacing.sm }]}>
+      <View
+        style={[
+          styles.toggleContainer,
+          { top: Math.max(insets.top, 16) + 48 + Spacing.sm },
+        ]}
+      >
         <OnlineToggle isOnline={isOnline} onToggle={setIsOnline} />
       </View>
 
@@ -649,7 +772,10 @@ export default function DriverHomeScreen({ navigation }: any) {
         <Animated.View
           entering={FadeIn.duration(300)}
           exiting={FadeOut.duration(200)}
-          style={[styles.rideRequestContainer, { bottom: insets.bottom + Spacing.lg }]}
+          style={[
+            styles.rideRequestContainer,
+            { bottom: insets.bottom + Spacing.lg },
+          ]}
         >
           <RideRequestCard
             riderName={activeRideRequest.riderName}
@@ -672,79 +798,174 @@ export default function DriverHomeScreen({ navigation }: any) {
         <Animated.View
           entering={FadeIn.duration(300)}
           exiting={FadeOut.duration(200)}
-          style={[styles.rideRequestContainer, { bottom: insets.bottom + Spacing.lg }]}
+          style={[
+            styles.rideRequestContainer,
+            { bottom: insets.bottom + Spacing.lg },
+          ]}
         >
-          <View style={[styles.acceptedCard, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.acceptedCard,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             <View style={styles.acceptedHeader}>
-              <View style={[styles.acceptedIconCircle, { backgroundColor: UTOColors.success + "20" }]}>
-                <MaterialIcons name="directions-car" size={24} color={UTOColors.success} />
+              <View
+                style={[
+                  styles.acceptedIconCircle,
+                  { backgroundColor: UTOColors.success + "20" },
+                ]}
+              >
+                <MaterialIcons
+                  name="directions-car"
+                  size={24}
+                  color={UTOColors.success}
+                />
               </View>
               <View style={styles.acceptedHeaderText}>
-                <ThemedText style={styles.acceptedTitle}>Navigate to Pickup</ThemedText>
-                <ThemedText style={[styles.acceptedSubtitle, { color: theme.textSecondary }]}>
+                <ThemedText style={styles.acceptedTitle}>
+                  Navigate to Pickup
+                </ThemedText>
+                <ThemedText
+                  style={[
+                    styles.acceptedSubtitle,
+                    { color: theme.textSecondary },
+                  ]}
+                >
                   Head to the rider's location
                 </ThemedText>
               </View>
-              <ThemedText style={[styles.acceptedFare, { color: UTOColors.driver.primary }]}>
+              <ThemedText
+                style={[
+                  styles.acceptedFare,
+                  { color: UTOColors.driver.primary },
+                ]}
+              >
                 {formatPrice(activeRideRequest.estimatedFare)}
               </ThemedText>
             </View>
 
-            <View style={[styles.acceptedDivider, { backgroundColor: theme.border }]} />
+            <View
+              style={[
+                styles.acceptedDivider,
+                { backgroundColor: theme.border },
+              ]}
+            />
 
-            <View style={[styles.acceptedRider, { backgroundColor: theme.backgroundSecondary, borderRadius: 12, padding: 12 }]}>
-              <View style={[styles.acceptedAvatar, { backgroundColor: theme.backgroundDefault }]}>
+            <View
+              style={[
+                styles.acceptedRider,
+                {
+                  backgroundColor: theme.backgroundSecondary,
+                  borderRadius: 12,
+                  padding: 12,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.acceptedAvatar,
+                  { backgroundColor: theme.backgroundDefault },
+                ]}
+              >
                 <Feather name="user" size={18} color={theme.textSecondary} />
               </View>
               <View style={{ flex: 1 }}>
-                <ThemedText style={styles.acceptedRiderName}>{activeRideRequest.riderName}</ThemedText>
+                <ThemedText style={styles.acceptedRiderName}>
+                  {activeRideRequest.riderName}
+                </ThemedText>
                 {activeRideRequest.riderPhone ? (
-                  <ThemedText style={[styles.acceptedPickupLabel, { color: theme.textSecondary }]}>
+                  <ThemedText
+                    style={[
+                      styles.acceptedPickupLabel,
+                      { color: theme.textSecondary },
+                    ]}
+                  >
                     📞 {activeRideRequest.riderPhone}
                   </ThemedText>
                 ) : (
-                  <ThemedText style={[styles.acceptedPickupLabel, { color: theme.textSecondary }]}>
-                    {routeDistanceText ? `${routeDistanceText} away` : `${activeRideRequest.pickupDistance} miles away`}
+                  <ThemedText
+                    style={[
+                      styles.acceptedPickupLabel,
+                      { color: theme.textSecondary },
+                    ]}
+                  >
+                    {routeDistanceText
+                      ? `${routeDistanceText} away`
+                      : `${activeRideRequest.pickupDistance} miles away`}
                   </ThemedText>
                 )}
               </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
                 <Pressable
-                  onPress={() => activeRideRequest?.riderPhone ? Linking.openURL(`tel:${activeRideRequest.riderPhone}`) : Alert.alert('No Phone', 'Rider phone not available.')}
-                  style={[styles.circleBtn, { backgroundColor: UTOColors.success + '20' }]}
+                  onPress={() =>
+                    activeRideRequest?.riderPhone
+                      ? Linking.openURL(`tel:${activeRideRequest.riderPhone}`)
+                      : Alert.alert("No Phone", "Rider phone not available.")
+                  }
+                  style={[
+                    styles.circleBtn,
+                    { backgroundColor: UTOColors.success + "20" },
+                  ]}
                 >
                   <Feather name="phone" size={18} color={UTOColors.success} />
                 </Pressable>
                 <Pressable
                   onPress={handleOpenNavigation}
-                  style={[styles.circleBtn, { backgroundColor: theme.backgroundDefault }]}
+                  style={[
+                    styles.circleBtn,
+                    { backgroundColor: theme.backgroundDefault },
+                  ]}
                 >
-                  <MaterialIcons name="navigation" size={20} color={UTOColors.driver.primary} />
+                  <MaterialIcons
+                    name="navigation"
+                    size={20}
+                    color={UTOColors.driver.primary}
+                  />
                 </Pressable>
               </View>
             </View>
 
             <View style={styles.acceptedRoute}>
               <View style={styles.routeRow}>
-                <View style={[styles.routeDot, { backgroundColor: UTOColors.success }]} />
+                <View
+                  style={[
+                    styles.routeDot,
+                    { backgroundColor: UTOColors.success },
+                  ]}
+                />
                 <ThemedText style={styles.routeAddress} numberOfLines={1}>
                   {activeRideRequest.pickupAddress}
                 </ThemedText>
               </View>
               {(activeRideRequest.vias || []).map((via, index) => (
                 <React.Fragment key={`accepted-via-${index}`}>
-                  <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+                  <View
+                    style={[
+                      styles.routeLine,
+                      { backgroundColor: theme.border },
+                    ]}
+                  />
                   <View style={styles.routeRow}>
-                    <View style={[styles.routeDot, { backgroundColor: "#F59E0B" }]} />
+                    <View
+                      style={[styles.routeDot, { backgroundColor: "#F59E0B" }]}
+                    />
                     <ThemedText style={styles.routeAddress} numberOfLines={1}>
                       Via {index + 1}: {via.address}
                     </ThemedText>
                   </View>
                 </React.Fragment>
               ))}
-              <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+              <View
+                style={[styles.routeLine, { backgroundColor: theme.border }]}
+              />
               <View style={styles.routeRow}>
-                <View style={[styles.routeDot, { backgroundColor: UTOColors.error }]} />
+                <View
+                  style={[
+                    styles.routeDot,
+                    { backgroundColor: UTOColors.error },
+                  ]}
+                />
                 <ThemedText style={styles.routeAddress} numberOfLines={1}>
                   {activeRideRequest.dropoffAddress}
                 </ThemedText>
@@ -753,18 +974,45 @@ export default function DriverHomeScreen({ navigation }: any) {
 
             <Pressable
               onPress={handleArrivedAtPickup}
-              style={[styles.arrivedBtn, { backgroundColor: UTOColors.driver.primary }]}
+              style={[
+                styles.arrivedBtn,
+                { backgroundColor: UTOColors.driver.primary },
+              ]}
             >
               <MaterialIcons name="place" size={20} color="#000" />
-              <ThemedText style={styles.arrivedBtnText}>I've Arrived at Pickup</ThemedText>
+              <ThemedText style={styles.arrivedBtnText}>
+                I've Arrived at Pickup
+              </ThemedText>
             </Pressable>
 
             {/* 1-min cancel penalty warning badge */}
             {acceptedElapsedSec >= 60 && (
-              <View style={{ backgroundColor: UTOColors.error + '15', borderRadius: 8, padding: 10, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <MaterialIcons name="warning" size={16} color={UTOColors.error} />
-                <ThemedText style={{ color: UTOColors.error, fontSize: 12, flex: 1, fontWeight: '600' }}>
-                  Cancelling now will incur a 50% fare penalty (ASAP ride — over 1 min since acceptance)
+              <View
+                style={{
+                  backgroundColor: UTOColors.error + "15",
+                  borderRadius: 8,
+                  padding: 10,
+                  marginBottom: 8,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <MaterialIcons
+                  name="warning"
+                  size={16}
+                  color={UTOColors.error}
+                />
+                <ThemedText
+                  style={{
+                    color: UTOColors.error,
+                    fontSize: 12,
+                    flex: 1,
+                    fontWeight: "600",
+                  }}
+                >
+                  Cancelling now will incur a 50% fare penalty (ASAP ride — over
+                  1 min since acceptance)
                 </ThemedText>
               </View>
             )}
@@ -775,40 +1023,56 @@ export default function DriverHomeScreen({ navigation }: any) {
                 const over1Min = acceptedElapsedSec >= 60;
                 if (over1Min && fare > 0) {
                   Alert.alert(
-                    'Cancel with Penalty',
+                    "Cancel with Penalty",
                     `You accepted this ride over 1 minute ago. A 50% penalty of £${(fare * 0.5).toFixed(2)} will be deducted from your earnings.`,
                     [
-                      { text: 'Keep Ride', style: 'cancel' },
+                      { text: "Keep Ride", style: "cancel" },
                       {
-                        text: 'Cancel & Accept Penalty',
-                        style: 'destructive',
-                        onPress: () => { declineRide(true); setOtpValue(''); },
+                        text: "Cancel & Accept Penalty",
+                        style: "destructive",
+                        onPress: () => {
+                          declineRide(true);
+                          setOtpValue("");
+                        },
                       },
-                    ]
+                    ],
                   );
                 } else {
                   Alert.alert(
-                    'Cancel Ride',
-                    'Are you sure you want to cancel this ride? No penalty will be charged.',
+                    "Cancel Ride",
+                    "Are you sure you want to cancel this ride? No penalty will be charged.",
                     [
-                      { text: 'Keep Ride', style: 'cancel' },
+                      { text: "Keep Ride", style: "cancel" },
                       {
-                        text: 'Cancel Ride',
-                        style: 'destructive',
-                        onPress: () => { declineRide(); setOtpValue(''); },
+                        text: "Cancel Ride",
+                        style: "destructive",
+                        onPress: () => {
+                          declineRide();
+                          setOtpValue("");
+                        },
                       },
-                    ]
+                    ],
                   );
                 }
               }}
-              style={[styles.cancelTripBtn, {
-                backgroundColor: acceptedElapsedSec >= 60 ? UTOColors.error + '20' : UTOColors.error + '15',
-                borderWidth: acceptedElapsedSec >= 60 ? 1 : 0,
-                borderColor: UTOColors.error + '40',
-              }]}
+              style={[
+                styles.cancelTripBtn,
+                {
+                  backgroundColor:
+                    acceptedElapsedSec >= 60
+                      ? UTOColors.error + "20"
+                      : UTOColors.error + "15",
+                  borderWidth: acceptedElapsedSec >= 60 ? 1 : 0,
+                  borderColor: UTOColors.error + "40",
+                },
+              ]}
             >
-              <ThemedText style={[styles.cancelTripText, { color: UTOColors.error }]}>
-                {acceptedElapsedSec >= 60 ? '⚠️ Cancel Trip (50% Fee Applies)' : 'Cancel Trip'}
+              <ThemedText
+                style={[styles.cancelTripText, { color: UTOColors.error }]}
+              >
+                {acceptedElapsedSec >= 60
+                  ? "⚠️ Cancel Trip (50% Fee Applies)"
+                  : "Cancel Trip"}
               </ThemedText>
             </Pressable>
           </View>
@@ -820,19 +1084,41 @@ export default function DriverHomeScreen({ navigation }: any) {
         <Animated.View
           entering={FadeIn.duration(300)}
           exiting={FadeOut.duration(200)}
-          style={[styles.rideRequestContainer, { bottom: insets.bottom + Spacing.lg }]}
+          style={[
+            styles.rideRequestContainer,
+            { bottom: insets.bottom + Spacing.lg },
+          ]}
         >
-          <ScrollView 
-            style={[styles.otpInputContainer, { backgroundColor: theme.backgroundDefault, maxHeight: 560 }]} 
+          <ScrollView
+            style={[
+              styles.otpInputContainer,
+              { backgroundColor: theme.backgroundDefault, maxHeight: 560 },
+            ]}
             contentContainerStyle={{ padding: 24, alignItems: "center" }}
             showsVerticalScrollIndicator={false}
           >
             {/* ── Rider Contact Info ── */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, width: '100%' }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 12,
+                width: "100%",
+              }}
+            >
               <View style={{ flex: 1 }}>
-                <ThemedText style={styles.acceptedRiderName}>{activeRideRequest.riderName}</ThemedText>
+                <ThemedText style={styles.acceptedRiderName}>
+                  {activeRideRequest.riderName}
+                </ThemedText>
                 {activeRideRequest.riderPhone ? (
-                  <ThemedText style={{ color: theme.textSecondary, fontSize: 13, marginTop: 2 }}>
+                  <ThemedText
+                    style={{
+                      color: theme.textSecondary,
+                      fontSize: 13,
+                      marginTop: 2,
+                    }}
+                  >
                     📞 {activeRideRequest.riderPhone}
                   </ThemedText>
                 ) : null}
@@ -840,47 +1126,115 @@ export default function DriverHomeScreen({ navigation }: any) {
               <Pressable
                 onPress={handleCallRider}
                 style={{
-                  width: 44, height: 44, borderRadius: 22,
-                  backgroundColor: UTOColors.success + '20',
-                  alignItems: 'center', justifyContent: 'center',
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: UTOColors.success + "20",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                <MaterialIcons name="phone" size={22} color={UTOColors.success} />
+                <MaterialIcons
+                  name="phone"
+                  size={22}
+                  color={UTOColors.success}
+                />
               </Pressable>
             </View>
 
             {/* ── Waiting Timer ── */}
             {!paidWaitingStartedAt ? (
               // FREE WAITING PHASE
-              <View style={[styles.waitingBadge, {
-                backgroundColor: freeWaitingExpired ? UTOColors.error + '15' : UTOColors.warning + '15',
-                marginBottom: 12,
-              }]}>
+              <View
+                style={[
+                  styles.waitingBadge,
+                  {
+                    backgroundColor: freeWaitingExpired
+                      ? UTOColors.error + "15"
+                      : UTOColors.warning + "15",
+                    marginBottom: 12,
+                  },
+                ]}
+              >
                 <MaterialIcons
                   name={freeWaitingExpired ? "warning" : "timer"}
                   size={16}
-                  color={freeWaitingExpired ? UTOColors.error : UTOColors.warning}
-                />
-                <ThemedText style={{
-                  color: freeWaitingExpired ? UTOColors.error : UTOColors.warning,
-                  fontSize: 13, fontWeight: '600', flex: 1,
-                }}>
-                  {freeWaitingExpired
-                    ? `Free waiting expired – ${Math.floor(waitingElapsedSec / 60).toString().padStart(2, '0')}:${(waitingElapsedSec % 60).toString().padStart(2, '0')}`
-                    : `Waiting for rider – free waiting time ${Math.floor((FREE_WAITING_SECONDS - waitingElapsedSec) / 60).toString().padStart(2, '0')}:${((FREE_WAITING_SECONDS - waitingElapsedSec) % 60).toString().padStart(2, '0')}`
+                  color={
+                    freeWaitingExpired ? UTOColors.error : UTOColors.warning
                   }
+                />
+                <ThemedText
+                  style={{
+                    color: freeWaitingExpired
+                      ? UTOColors.error
+                      : UTOColors.warning,
+                    fontSize: 13,
+                    fontWeight: "600",
+                    flex: 1,
+                  }}
+                >
+                  {freeWaitingExpired
+                    ? `Free waiting expired – ${Math.floor(
+                        waitingElapsedSec / 60,
+                      )
+                        .toString()
+                        .padStart(
+                          2,
+                          "0",
+                        )}:${(waitingElapsedSec % 60).toString().padStart(2, "0")}`
+                    : `Waiting for rider – free waiting time ${Math.floor(
+                        (FREE_WAITING_SECONDS - waitingElapsedSec) / 60,
+                      )
+                        .toString()
+                        .padStart(
+                          2,
+                          "0",
+                        )}:${((FREE_WAITING_SECONDS - waitingElapsedSec) % 60).toString().padStart(2, "0")}`}
                 </ThemedText>
               </View>
             ) : (
               // PAID WAITING PHASE
-              <View style={[styles.waitingBadge, { backgroundColor: UTOColors.driver.primary + '15', marginBottom: 12 }]}>
-                <MaterialIcons name="attach-money" size={16} color={UTOColors.driver.primary} />
+              <View
+                style={[
+                  styles.waitingBadge,
+                  {
+                    backgroundColor: UTOColors.driver.primary + "15",
+                    marginBottom: 12,
+                  },
+                ]}
+              >
+                <MaterialIcons
+                  name="attach-money"
+                  size={16}
+                  color={UTOColors.driver.primary}
+                />
                 <View style={{ flex: 1 }}>
-                  <ThemedText style={{ color: UTOColors.driver.primary, fontSize: 13, fontWeight: '600' }}>
-                    Paid waiting: {Math.floor(paidWaitingElapsedSec / 60).toString().padStart(2, '0')}:{(paidWaitingElapsedSec % 60).toString().padStart(2, '0')}
+                  <ThemedText
+                    style={{
+                      color: UTOColors.driver.primary,
+                      fontSize: 13,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Paid waiting:{" "}
+                    {Math.floor(paidWaitingElapsedSec / 60)
+                      .toString()
+                      .padStart(2, "0")}
+                    :{(paidWaitingElapsedSec % 60).toString().padStart(2, "0")}
                   </ThemedText>
-                  <ThemedText style={{ color: UTOColors.driver.primary, fontSize: 12, marginTop: 2 }}>
-                    Charge: £{(Math.floor(paidWaitingElapsedSec / 60) * waitingChargePerMin).toFixed(2)} (£{waitingChargePerMin.toFixed(2)}/min)
+                  <ThemedText
+                    style={{
+                      color: UTOColors.driver.primary,
+                      fontSize: 12,
+                      marginTop: 2,
+                    }}
+                  >
+                    Charge: £
+                    {(
+                      Math.floor(paidWaitingElapsedSec / 60) *
+                      waitingChargePerMin
+                    ).toFixed(2)}{" "}
+                    (£{waitingChargePerMin.toFixed(2)}/min)
                   </ThemedText>
                 </View>
               </View>
@@ -888,38 +1242,81 @@ export default function DriverHomeScreen({ navigation }: any) {
 
             {/* ── No Show / Agree to Wait buttons (after 10 min free waiting) ── */}
             {freeWaitingExpired && !paidWaitingStartedAt ? (
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
                 <Pressable
                   onPress={handleNoShow}
                   style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    backgroundColor: UTOColors.error + '15',
-                    paddingVertical: 14, borderRadius: 12, gap: 6,
-                    borderWidth: 1, borderColor: UTOColors.error + '30',
+                    flex: 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: UTOColors.error + "15",
+                    paddingVertical: 14,
+                    borderRadius: 12,
+                    gap: 6,
+                    borderWidth: 1,
+                    borderColor: UTOColors.error + "30",
                   }}
                 >
-                  <MaterialIcons name="person-off" size={18} color={UTOColors.error} />
-                  <ThemedText style={{ color: UTOColors.error, fontWeight: '600', fontSize: 14 }}>No Show</ThemedText>
+                  <MaterialIcons
+                    name="person-off"
+                    size={18}
+                    color={UTOColors.error}
+                  />
+                  <ThemedText
+                    style={{
+                      color: UTOColors.error,
+                      fontWeight: "600",
+                      fontSize: 14,
+                    }}
+                  >
+                    No Show
+                  </ThemedText>
                 </Pressable>
                 <Pressable
                   onPress={handleAgreeToWait}
                   style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    backgroundColor: UTOColors.success + '15',
-                    paddingVertical: 14, borderRadius: 12, gap: 6,
-                    borderWidth: 1, borderColor: UTOColors.success + '30',
+                    flex: 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: UTOColors.success + "15",
+                    paddingVertical: 14,
+                    borderRadius: 12,
+                    gap: 6,
+                    borderWidth: 1,
+                    borderColor: UTOColors.success + "30",
                   }}
                 >
-                  <MaterialIcons name="timer" size={18} color={UTOColors.success} />
-                  <ThemedText style={{ color: UTOColors.success, fontWeight: '600', fontSize: 14 }}>Agree to Wait</ThemedText>
+                  <MaterialIcons
+                    name="timer"
+                    size={18}
+                    color={UTOColors.success}
+                  />
+                  <ThemedText
+                    style={{
+                      color: UTOColors.success,
+                      fontWeight: "600",
+                      fontSize: 14,
+                    }}
+                  >
+                    Agree to Wait
+                  </ThemedText>
                 </Pressable>
               </View>
             ) : null}
 
             {/* ── OTP Entry (always available when rider shows up) ── */}
-            <View style={{ width: '100%', alignItems: 'center', marginBottom: 16 }}>
+            <View
+              style={{ width: "100%", alignItems: "center", marginBottom: 16 }}
+            >
               <ThemedText style={styles.otpTitle}>Enter Rider PIN</ThemedText>
-              <ThemedText style={[styles.otpSubtitle, { color: theme.textSecondary, marginTop: 4 }]}>
+              <ThemedText
+                style={[
+                  styles.otpSubtitle,
+                  { color: theme.textSecondary, marginTop: 4 },
+                ]}
+              >
                 Ask the rider for their 4-digit PIN to start the ride
               </ThemedText>
             </View>
@@ -935,12 +1332,23 @@ export default function DriverHomeScreen({ navigation }: any) {
                   style={[
                     styles.otpBox,
                     {
-                      borderColor: otpValue[i] ? UTOColors.driver.primary : theme.border,
-                      backgroundColor: otpValue[i] ? UTOColors.driver.primary + "15" : theme.backgroundSecondary,
+                      borderColor: otpValue[i]
+                        ? UTOColors.driver.primary
+                        : theme.border,
+                      backgroundColor: otpValue[i]
+                        ? UTOColors.driver.primary + "15"
+                        : theme.backgroundSecondary,
                     },
                   ]}
                 >
-                  <ThemedText style={[styles.otpText, otpValue[i] ? { color: UTOColors.driver.primary } : { color: theme.textSecondary }]}>
+                  <ThemedText
+                    style={[
+                      styles.otpText,
+                      otpValue[i]
+                        ? { color: UTOColors.driver.primary }
+                        : { color: theme.textSecondary },
+                    ]}
+                  >
                     {otpValue[i] || "\u00B7"}
                   </ThemedText>
                 </View>
@@ -951,10 +1359,12 @@ export default function DriverHomeScreen({ navigation }: any) {
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <Pressable
                   key={num}
-                  onPress={() => otpValue.length < 4 && setOtpValue(prev => prev + num)}
+                  onPress={() =>
+                    otpValue.length < 4 && setOtpValue((prev) => prev + num)
+                  }
                   style={({ pressed }) => [
                     styles.numBtn,
-                    pressed && { backgroundColor: theme.text + "15" }
+                    pressed && { backgroundColor: theme.text + "15" },
                   ]}
                 >
                   <ThemedText style={styles.numBtnText}>{num}</ThemedText>
@@ -963,19 +1373,21 @@ export default function DriverHomeScreen({ navigation }: any) {
               {/* Empty placeholder to keep the grid aligned */}
               <View style={styles.numBtn} />
               <Pressable
-                onPress={() => otpValue.length < 4 && setOtpValue(prev => prev + "0")}
+                onPress={() =>
+                  otpValue.length < 4 && setOtpValue((prev) => prev + "0")
+                }
                 style={({ pressed }) => [
                   styles.numBtn,
-                  pressed && { backgroundColor: theme.text + "15" }
+                  pressed && { backgroundColor: theme.text + "15" },
                 ]}
               >
                 <ThemedText style={styles.numBtnText}>0</ThemedText>
               </Pressable>
               <Pressable
-                onPress={() => setOtpValue(prev => prev.slice(0, -1))}
+                onPress={() => setOtpValue((prev) => prev.slice(0, -1))}
                 style={({ pressed }) => [
                   styles.numBtn,
-                  pressed && { backgroundColor: theme.text + "15" }
+                  pressed && { backgroundColor: theme.text + "15" },
                 ]}
               >
                 <Feather name="delete" size={28} color={theme.text} />
@@ -986,11 +1398,23 @@ export default function DriverHomeScreen({ navigation }: any) {
               onPress={handleStartRide}
               style={[
                 styles.startBtn,
-                { backgroundColor: otpValue.length === 4 ? UTOColors.driver.primary : theme.backgroundSecondary },
+                {
+                  backgroundColor:
+                    otpValue.length === 4
+                      ? UTOColors.driver.primary
+                      : theme.backgroundSecondary,
+                },
               ]}
               disabled={otpValue.length < 4}
             >
-              <ThemedText style={[styles.startBtnText, { color: otpValue.length === 4 ? "#000" : theme.textSecondary }]}>
+              <ThemedText
+                style={[
+                  styles.startBtnText,
+                  {
+                    color: otpValue.length === 4 ? "#000" : theme.textSecondary,
+                  },
+                ]}
+              >
                 Start Ride
               </ThemedText>
             </Pressable>
@@ -1009,14 +1433,21 @@ export default function DriverHomeScreen({ navigation }: any) {
                       onPress: () => {
                         declineRide(true);
                         setOtpValue("");
-                      }
-                    }
-                  ]
+                      },
+                    },
+                  ],
                 );
               }}
-              style={[styles.cancelTripBtn, { backgroundColor: UTOColors.error + '10', marginTop: 8 }]}
+              style={[
+                styles.cancelTripBtn,
+                { backgroundColor: UTOColors.error + "10", marginTop: 8 },
+              ]}
             >
-              <ThemedText style={[styles.cancelTripText, { color: UTOColors.error }]}>Cancel Trip</ThemedText>
+              <ThemedText
+                style={[styles.cancelTripText, { color: UTOColors.error }]}
+              >
+                Cancel Trip
+              </ThemedText>
             </Pressable>
           </ScrollView>
         </Animated.View>
@@ -1027,42 +1458,114 @@ export default function DriverHomeScreen({ navigation }: any) {
         <Animated.View
           entering={FadeIn.duration(300)}
           exiting={FadeOut.duration(200)}
-          style={[styles.rideRequestContainer, { bottom: insets.bottom + Spacing.lg }]}
+          style={[
+            styles.rideRequestContainer,
+            { bottom: insets.bottom + Spacing.lg },
+          ]}
         >
-          <View style={[styles.acceptedCard, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.acceptedCard,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             <View style={styles.acceptedHeader}>
-              <View style={[styles.acceptedIconCircle, { backgroundColor: UTOColors.success + "20" }]}>
-                <MaterialIcons name="navigation" size={24} color={UTOColors.success} />
+              <View
+                style={[
+                  styles.acceptedIconCircle,
+                  { backgroundColor: UTOColors.success + "20" },
+                ]}
+              >
+                <MaterialIcons
+                  name="navigation"
+                  size={24}
+                  color={UTOColors.success}
+                />
               </View>
               <View style={styles.acceptedHeaderText}>
-                <ThemedText style={styles.acceptedTitle}>Ride in Progress</ThemedText>
-                <ThemedText style={[styles.acceptedSubtitle, { color: theme.textSecondary }]}>
+                <ThemedText style={styles.acceptedTitle}>
+                  Ride in Progress
+                </ThemedText>
+                <ThemedText
+                  style={[
+                    styles.acceptedSubtitle,
+                    { color: theme.textSecondary },
+                  ]}
+                >
                   Navigate to dropoff location
                 </ThemedText>
               </View>
             </View>
 
-            <View style={[styles.acceptedDivider, { backgroundColor: theme.border }]} />
+            <View
+              style={[
+                styles.acceptedDivider,
+                { backgroundColor: theme.border },
+              ]}
+            />
 
-            <View style={[styles.acceptedRider, { backgroundColor: theme.backgroundRoot }]}>
-              <View style={[styles.acceptedAvatar, { backgroundColor: theme.border }]}>
+            <View
+              style={[
+                styles.acceptedRider,
+                { backgroundColor: theme.backgroundRoot },
+              ]}
+            >
+              <View
+                style={[
+                  styles.acceptedAvatar,
+                  { backgroundColor: theme.border },
+                ]}
+              >
                 <Feather name="user" size={18} color={theme.textSecondary} />
               </View>
               <View style={{ flex: 1, paddingRight: Spacing.sm }}>
-                <ThemedText style={styles.acceptedRiderName}>{activeRideRequest.riderName}</ThemedText>
-                <ThemedText style={[styles.acceptedPickupLabel, { color: theme.textSecondary }]}>
-                  {routeDistanceText || `${activeRideRequest.distanceMiles} miles`} · ~{routeDurationText || `${activeRideRequest.durationMinutes} min`}
+                <ThemedText style={styles.acceptedRiderName}>
+                  {activeRideRequest.riderName}
+                </ThemedText>
+                <ThemedText
+                  style={[
+                    styles.acceptedPickupLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  {routeDistanceText ||
+                    `${activeRideRequest.distanceMiles} miles`}{" "}
+                  · ~
+                  {routeDurationText ||
+                    `${activeRideRequest.durationMinutes} min`}
                 </ThemedText>
               </View>
               <View style={styles.actionButtons}>
-                <Pressable onPress={handleOpenNavigation} style={styles.circleBtn}>
-                  <MaterialIcons name="navigation" size={18} color={UTOColors.driver.primary} />
+                <Pressable
+                  onPress={handleOpenNavigation}
+                  style={styles.circleBtn}
+                >
+                  <MaterialIcons
+                    name="navigation"
+                    size={18}
+                    color={UTOColors.driver.primary}
+                  />
                 </Pressable>
                 <Pressable onPress={handleCallRider} style={styles.circleBtn}>
-                  <Feather name="phone" size={18} color={UTOColors.driver.primary} />
+                  <Feather
+                    name="phone"
+                    size={18}
+                    color={UTOColors.driver.primary}
+                  />
                 </Pressable>
-                <Pressable onPress={() => activeRideRequest?.riderPhone ? Linking.openURL(`sms:${activeRideRequest.riderPhone}`) : Alert.alert("No Phone", "Rider phone not available.")} style={styles.circleBtn}>
-                  <Feather name="message-square" size={18} color={UTOColors.driver.primary} />
+                <Pressable
+                  onPress={() =>
+                    activeRideRequest?.riderPhone
+                      ? Linking.openURL(`sms:${activeRideRequest.riderPhone}`)
+                      : Alert.alert("No Phone", "Rider phone not available.")
+                  }
+                  style={styles.circleBtn}
+                >
+                  <Feather
+                    name="message-square"
+                    size={18}
+                    color={UTOColors.driver.primary}
+                  />
                 </Pressable>
               </View>
             </View>
@@ -1070,32 +1573,56 @@ export default function DriverHomeScreen({ navigation }: any) {
             <View style={styles.acceptedRouteContainer}>
               <View style={styles.acceptedRoute}>
                 <View style={styles.routeRow}>
-                  <View style={[styles.routeDot, { backgroundColor: UTOColors.success }]} />
+                  <View
+                    style={[
+                      styles.routeDot,
+                      { backgroundColor: UTOColors.success },
+                    ]}
+                  />
                   <ThemedText style={styles.routeAddress} numberOfLines={1}>
                     {activeRideRequest.pickupAddress}
                   </ThemedText>
                 </View>
                 {(activeRideRequest.vias || []).map((via, index) => (
                   <React.Fragment key={`progress-via-${index}`}>
-                    <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+                    <View
+                      style={[
+                        styles.routeLine,
+                        { backgroundColor: theme.border },
+                      ]}
+                    />
                     <View style={styles.routeRow}>
-                      <View style={[styles.routeDot, { backgroundColor: "#F59E0B" }]} />
+                      <View
+                        style={[
+                          styles.routeDot,
+                          { backgroundColor: "#F59E0B" },
+                        ]}
+                      />
                       <ThemedText style={styles.routeAddress} numberOfLines={1}>
                         Via {index + 1}: {via.address}
                       </ThemedText>
                     </View>
                   </React.Fragment>
                 ))}
-                <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+                <View
+                  style={[styles.routeLine, { backgroundColor: theme.border }]}
+                />
                 <View style={styles.routeRow}>
-                  <View style={[styles.routeDot, { backgroundColor: UTOColors.error }]} />
+                  <View
+                    style={[
+                      styles.routeDot,
+                      { backgroundColor: UTOColors.error },
+                    ]}
+                  />
                   <ThemedText style={styles.routeAddress} numberOfLines={1}>
                     {activeRideRequest.dropoffAddress}
                   </ThemedText>
                 </View>
               </View>
               <View style={styles.farePriceRightContainer}>
-                <ThemedText style={[styles.farePriceRight, { color: theme.text }]}>
+                <ThemedText
+                  style={[styles.farePriceRight, { color: theme.text }]}
+                >
                   {formatPrice(activeRideRequest.estimatedFare)}
                 </ThemedText>
               </View>
@@ -1104,12 +1631,16 @@ export default function DriverHomeScreen({ navigation }: any) {
             <Pressable
               onPress={() => {
                 // GPS validation: check if driver is near dropoff
-                if (location && activeRideRequest.dropoffLatitude && activeRideRequest.dropoffLongitude) {
+                if (
+                  location &&
+                  activeRideRequest.dropoffLatitude &&
+                  activeRideRequest.dropoffLongitude
+                ) {
                   const distToDropoff = getDistanceMeters(
                     location.coords.latitude,
                     location.coords.longitude,
                     activeRideRequest.dropoffLatitude,
-                    activeRideRequest.dropoffLongitude
+                    activeRideRequest.dropoffLongitude,
                   );
                   if (distToDropoff <= 200) {
                     // Within 200m of dropoff — allow completion
@@ -1123,10 +1654,15 @@ export default function DriverHomeScreen({ navigation }: any) {
                   completeTrip();
                 }
               }}
-              style={[styles.arrivedBtn, { backgroundColor: UTOColors.success }]}
+              style={[
+                styles.arrivedBtn,
+                { backgroundColor: UTOColors.success },
+              ]}
             >
               <MaterialIcons name="check-circle" size={20} color="#FFFFFF" />
-              <ThemedText style={[styles.arrivedBtnText, { color: "#FFFFFF" }]}>Complete Trip</ThemedText>
+              <ThemedText style={[styles.arrivedBtnText, { color: "#FFFFFF" }]}>
+                Complete Trip
+              </ThemedText>
             </Pressable>
           </View>
         </Animated.View>
@@ -1142,13 +1678,18 @@ export default function DriverHomeScreen({ navigation }: any) {
           ]}
         >
           <View style={styles.offlineContent}>
-            <View style={[styles.offlineIcon, { backgroundColor: theme.backgroundDefault }]}>
+            <View
+              style={[
+                styles.offlineIcon,
+                { backgroundColor: theme.backgroundDefault },
+              ]}
+            >
               <Feather name="power" size={32} color={theme.textSecondary} />
             </View>
-            <ThemedText style={styles.offlineTitle}>
-              You're Offline
-            </ThemedText>
-            <ThemedText style={[styles.offlineSubtitle, { color: theme.textSecondary }]}>
+            <ThemedText style={styles.offlineTitle}>You're Offline</ThemedText>
+            <ThemedText
+              style={[styles.offlineSubtitle, { color: theme.textSecondary }]}
+            >
               Go online to start receiving ride requests
             </ThemedText>
           </View>
@@ -1163,19 +1704,38 @@ export default function DriverHomeScreen({ navigation }: any) {
         statusBarTranslucent
       >
         <View style={styles.cancelModalOverlay}>
-          <View style={[styles.cancelModalCard, { backgroundColor: theme.backgroundDefault }]}>
-            <View style={[styles.cancelModalIconCircle, { backgroundColor: "#FEE2E2" }]}>
+          <View
+            style={[
+              styles.cancelModalCard,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
+            <View
+              style={[
+                styles.cancelModalIconCircle,
+                { backgroundColor: "#FEE2E2" },
+              ]}
+            >
               <MaterialIcons name="cancel" size={40} color="#EF4444" />
             </View>
-            <ThemedText style={styles.cancelModalTitle}>Ride Cancelled</ThemedText>
-            <ThemedText style={[styles.cancelModalMsg, { color: theme.textSecondary }]}>
+            <ThemedText style={styles.cancelModalTitle}>
+              Ride Cancelled
+            </ThemedText>
+            <ThemedText
+              style={[styles.cancelModalMsg, { color: theme.textSecondary }]}
+            >
               The rider has cancelled this ride request.
             </ThemedText>
             <Pressable
               onPress={dismissRiderCancellation}
-              style={[styles.cancelModalBtn, { backgroundColor: UTOColors.driver.primary }]}
+              style={[
+                styles.cancelModalBtn,
+                { backgroundColor: UTOColors.driver.primary },
+              ]}
             >
-              <ThemedText style={styles.cancelModalBtnText}>OK, Got It</ThemedText>
+              <ThemedText style={styles.cancelModalBtnText}>
+                OK, Got It
+              </ThemedText>
             </Pressable>
           </View>
         </View>
@@ -1188,7 +1748,9 @@ export default function DriverHomeScreen({ navigation }: any) {
         animationType="slide"
         statusBarTranslucent
       >
-        <View style={[styles.paymentFullScreen, { backgroundColor: "#111111" }]}>
+        <View
+          style={[styles.paymentFullScreen, { backgroundColor: "#111111" }]}
+        >
           <ScrollView
             contentContainerStyle={styles.paymentScrollContent}
             showsVerticalScrollIndicator={false}
@@ -1200,7 +1762,9 @@ export default function DriverHomeScreen({ navigation }: any) {
                 <MaterialIcons name="check" size={32} color="#FFFFFF" />
               </View>
               <Text style={styles.paymentTitle}>Trip Completed!</Text>
-              <Text style={styles.paymentSubtitle}>Payment handled by card</Text>
+              <Text style={styles.paymentSubtitle}>
+                Payment handled by card
+              </Text>
             </View>
 
             {/* Amount card — dark card, huge white price */}
@@ -1210,13 +1774,20 @@ export default function DriverHomeScreen({ navigation }: any) {
                 {formatPrice(completedRidePayment?.fareAmount || 0)}
               </Text>
 
-              <View style={[styles.paymentCashBadge, { backgroundColor: UTOColors.primary + "1A" }]}>
-                <MaterialIcons 
+              <View
+                style={[
+                  styles.paymentCashBadge,
+                  { backgroundColor: UTOColors.primary + "1A" },
+                ]}
+              >
+                <MaterialIcons
                   name="credit-card"
-                  size={16} 
+                  size={16}
                   color={UTOColors.primary}
                 />
-                <Text style={[styles.paymentCashText, { color: UTOColors.primary }]}>
+                <Text
+                  style={[styles.paymentCashText, { color: UTOColors.primary }]}
+                >
                   Card Payment
                 </Text>
               </View>
@@ -1225,7 +1796,12 @@ export default function DriverHomeScreen({ navigation }: any) {
             {/* Route info */}
             <View style={styles.paymentRouteCard}>
               <View style={styles.paymentRouteRow}>
-                <View style={[styles.paymentRouteDot, { backgroundColor: "#10B981" }]} />
+                <View
+                  style={[
+                    styles.paymentRouteDot,
+                    { backgroundColor: "#10B981" },
+                  ]}
+                />
                 <View style={styles.paymentRouteInfo}>
                   <Text style={styles.paymentRouteLabel}>PICKUP</Text>
                   <Text style={styles.paymentRouteAddr} numberOfLines={1}>
@@ -1235,7 +1811,12 @@ export default function DriverHomeScreen({ navigation }: any) {
               </View>
               <View style={styles.paymentRouteLine} />
               <View style={styles.paymentRouteRow}>
-                <View style={[styles.paymentRouteDot, { backgroundColor: "#EF4444" }]} />
+                <View
+                  style={[
+                    styles.paymentRouteDot,
+                    { backgroundColor: "#EF4444" },
+                  ]}
+                />
                 <View style={styles.paymentRouteInfo}>
                   <Text style={styles.paymentRouteLabel}>DROPOFF</Text>
                   <Text style={styles.paymentRouteAddr} numberOfLines={1}>
@@ -1271,11 +1852,20 @@ export default function DriverHomeScreen({ navigation }: any) {
                 <Text style={styles.paymentStatLbl}>Duration</Text>
               </View>
             </View>
-
           </ScrollView>
 
           {/* Sticky bottom buttons */}
-          <View style={[styles.paymentBottomBar, { paddingBottom: tabBarHeight > 0 ? tabBarHeight + 8 : Math.max(insets.bottom, 16) + 8 }]}>
+          <View
+            style={[
+              styles.paymentBottomBar,
+              {
+                paddingBottom:
+                  tabBarHeight > 0
+                    ? tabBarHeight + 8
+                    : Math.max(insets.bottom, 16) + 8,
+              },
+            ]}
+          >
             <Pressable
               onPress={() => dismissPaymentCollection()}
               style={styles.paymentCollectBtn}
@@ -1295,115 +1885,224 @@ export default function DriverHomeScreen({ navigation }: any) {
         statusBarTranslucent
       >
         <View style={styles.cancelModalOverlay}>
-          <ScrollView style={{ maxHeight: '80%', width: '100%' }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} showsVerticalScrollIndicator={false}>
-          <View style={[styles.cancelModalCard, { backgroundColor: theme.backgroundDefault }]}>
-            <View style={[styles.cancelModalIconCircle, { backgroundColor: '#FEF3C7' }]}>
-              <MaterialIcons name="warning" size={40} color="#F59E0B" />
-            </View>
-            <ThemedText style={styles.cancelModalTitle}>End Trip Early?</ThemedText>
-            <ThemedText style={[styles.cancelModalMsg, { color: theme.textSecondary }]}>
-              You are not near the drop-off location. Please select a reason for ending this trip early.
-            </ThemedText>
+          <ScrollView
+            style={{ maxHeight: "80%", width: "100%" }}
+            contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
+            showsVerticalScrollIndicator={false}
+          >
+            <View
+              style={[
+                styles.cancelModalCard,
+                { backgroundColor: theme.backgroundDefault },
+              ]}
+            >
+              <View
+                style={[
+                  styles.cancelModalIconCircle,
+                  { backgroundColor: "#FEF3C7" },
+                ]}
+              >
+                <MaterialIcons name="warning" size={40} color="#F59E0B" />
+              </View>
+              <ThemedText style={styles.cancelModalTitle}>
+                End Trip Early?
+              </ThemedText>
+              <ThemedText
+                style={[styles.cancelModalMsg, { color: theme.textSecondary }]}
+              >
+                You are not near the drop-off location. Please select a reason
+                for ending this trip early.
+              </ThemedText>
 
-            <View style={{ width: '100%', gap: 8, marginTop: 8 }}>
-              {[
-                'Passenger requested early drop-off',
-                'Wrong destination',
-                'Emergency situation',
-                'Other',
-              ].map((reason) => (
-                <Pressable
-                  key={reason}
-                  onPress={() => setEarlyCompleteReason(reason)}
+              <View style={{ width: "100%", gap: 8, marginTop: 8 }}>
+                {[
+                  "Passenger requested early drop-off",
+                  "Wrong destination",
+                  "Emergency situation",
+                  "Other",
+                ].map((reason) => (
+                  <Pressable
+                    key={reason}
+                    onPress={() => setEarlyCompleteReason(reason)}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: 14,
+                      borderRadius: 12,
+                      backgroundColor:
+                        earlyCompleteReason === reason
+                          ? UTOColors.driver.primary + "20"
+                          : theme.backgroundSecondary,
+                      borderWidth: 1.5,
+                      borderColor:
+                        earlyCompleteReason === reason
+                          ? UTOColors.driver.primary
+                          : "transparent",
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 10,
+                        borderWidth: 2,
+                        borderColor:
+                          earlyCompleteReason === reason
+                            ? UTOColors.driver.primary
+                            : theme.textSecondary,
+                        backgroundColor:
+                          earlyCompleteReason === reason
+                            ? UTOColors.driver.primary
+                            : "transparent",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {earlyCompleteReason === reason && (
+                        <View
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            backgroundColor: "#000",
+                          }}
+                        />
+                      )}
+                    </View>
+                    <ThemedText
+                      style={{
+                        fontSize: 14,
+                        fontWeight:
+                          earlyCompleteReason === reason ? "600" : "400",
+                      }}
+                    >
+                      {reason}
+                    </ThemedText>
+                  </Pressable>
+                ))}
+
+                {earlyCompleteReason === "Other" && (
+                  <TextInput
+                    placeholder="Please describe the reason..."
+                    placeholderTextColor={theme.textSecondary}
+                    value={earlyCompleteOtherText}
+                    onChangeText={setEarlyCompleteOtherText}
+                    multiline
+                    style={{
+                      backgroundColor: theme.backgroundSecondary,
+                      color: theme.text,
+                      padding: 14,
+                      borderRadius: 12,
+                      fontSize: 14,
+                      minHeight: 80,
+                      textAlignVertical: "top",
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                    }}
+                  />
+                )}
+              </View>
+
+              <View
+                style={{
+                  width: "100%",
+                  backgroundColor: "#FEF3C7",
+                  padding: 12,
+                  borderRadius: 10,
+                  marginTop: 8,
+                }}
+              >
+                <Text
                   style={{
-                    flexDirection: 'row', alignItems: 'center', gap: 10,
-                    padding: 14, borderRadius: 12,
-                    backgroundColor: earlyCompleteReason === reason ? UTOColors.driver.primary + '20' : theme.backgroundSecondary,
-                    borderWidth: 1.5,
-                    borderColor: earlyCompleteReason === reason ? UTOColors.driver.primary : 'transparent',
+                    color: "#92400E",
+                    fontSize: 12,
+                    lineHeight: 17,
+                    textAlign: "center",
                   }}
                 >
-                  <View style={{
-                    width: 20, height: 20, borderRadius: 10,
-                    borderWidth: 2,
-                    borderColor: earlyCompleteReason === reason ? UTOColors.driver.primary : theme.textSecondary,
-                    backgroundColor: earlyCompleteReason === reason ? UTOColors.driver.primary : 'transparent',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    {earlyCompleteReason === reason && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#000' }} />}
-                  </View>
-                  <ThemedText style={{ fontSize: 14, fontWeight: earlyCompleteReason === reason ? '600' : '400' }}>{reason}</ThemedText>
-                </Pressable>
-              ))}
+                  ⚠️ Ending a trip early may affect your account and may be
+                  reviewed by UTO. Please ensure this is correct.
+                </Text>
+              </View>
 
-              {earlyCompleteReason === 'Other' && (
-                <TextInput
-                  placeholder="Please describe the reason..."
-                  placeholderTextColor={theme.textSecondary}
-                  value={earlyCompleteOtherText}
-                  onChangeText={setEarlyCompleteOtherText}
-                  multiline
-                  style={{
-                    backgroundColor: theme.backgroundSecondary,
-                    color: theme.text,
-                    padding: 14, borderRadius: 12, fontSize: 14,
-                    minHeight: 80, textAlignVertical: 'top',
-                    borderWidth: 1, borderColor: theme.border,
+              <View
+                style={{
+                  flexDirection: "row",
+                  gap: 10,
+                  width: "100%",
+                  marginTop: 12,
+                }}
+              >
+                <Pressable
+                  onPress={() => {
+                    setShowEarlyCompleteModal(false);
+                    setEarlyCompleteReason(null);
+                    setEarlyCompleteOtherText("");
                   }}
-                />
-              )}
+                  style={{
+                    flex: 1,
+                    padding: 14,
+                    borderRadius: 12,
+                    backgroundColor: theme.backgroundSecondary,
+                    alignItems: "center",
+                  }}
+                >
+                  <ThemedText style={{ fontWeight: "600", fontSize: 14 }}>
+                    Go Back
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (!earlyCompleteReason) {
+                      Alert.alert(
+                        "Reason Required",
+                        "Please select a reason for ending the trip early.",
+                      );
+                      return;
+                    }
+                    if (
+                      earlyCompleteReason === "Other" &&
+                      !earlyCompleteOtherText.trim()
+                    ) {
+                      Alert.alert(
+                        "Details Required",
+                        "Please describe the reason for ending the trip early.",
+                      );
+                      return;
+                    }
+                    // Log the reason and complete the trip
+                    const reason =
+                      earlyCompleteReason === "Other"
+                        ? earlyCompleteOtherText.trim()
+                        : earlyCompleteReason;
+                    console.log("⚠️ Early trip completion reason:", reason);
+                    setShowEarlyCompleteModal(false);
+                    setEarlyCompleteReason(null);
+                    setEarlyCompleteOtherText("");
+                    completeTrip(reason);
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: 14,
+                    borderRadius: 12,
+                    backgroundColor: "#EF4444",
+                    alignItems: "center",
+                    opacity: earlyCompleteReason ? 1 : 0.5,
+                  }}
+                >
+                  <ThemedText
+                    style={{
+                      fontWeight: "700",
+                      fontSize: 14,
+                      color: "#FFFFFF",
+                    }}
+                  >
+                    End Trip
+                  </ThemedText>
+                </Pressable>
+              </View>
             </View>
-
-            <View style={{ width: '100%', backgroundColor: '#FEF3C7', padding: 12, borderRadius: 10, marginTop: 8 }}>
-              <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 17, textAlign: 'center' }}>
-                ⚠️ Ending a trip early may affect your account and may be reviewed by UTO. Please ensure this is correct.
-              </Text>
-            </View>
-
-            <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginTop: 12 }}>
-              <Pressable
-                onPress={() => {
-                  setShowEarlyCompleteModal(false);
-                  setEarlyCompleteReason(null);
-                  setEarlyCompleteOtherText("");
-                }}
-                style={{
-                  flex: 1, padding: 14, borderRadius: 12,
-                  backgroundColor: theme.backgroundSecondary,
-                  alignItems: 'center',
-                }}
-              >
-                <ThemedText style={{ fontWeight: '600', fontSize: 14 }}>Go Back</ThemedText>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  if (!earlyCompleteReason) {
-                    Alert.alert('Reason Required', 'Please select a reason for ending the trip early.');
-                    return;
-                  }
-                  if (earlyCompleteReason === 'Other' && !earlyCompleteOtherText.trim()) {
-                    Alert.alert('Details Required', 'Please describe the reason for ending the trip early.');
-                    return;
-                  }
-                  // Log the reason and complete the trip
-                  const reason = earlyCompleteReason === 'Other' ? earlyCompleteOtherText.trim() : earlyCompleteReason;
-                  console.log('⚠️ Early trip completion reason:', reason);
-                  setShowEarlyCompleteModal(false);
-                  setEarlyCompleteReason(null);
-                  setEarlyCompleteOtherText("");
-                  completeTrip(reason);
-                }}
-                style={{
-                  flex: 1, padding: 14, borderRadius: 12,
-                  backgroundColor: '#EF4444',
-                  alignItems: 'center',
-                  opacity: earlyCompleteReason ? 1 : 0.5,
-                }}
-              >
-                <ThemedText style={{ fontWeight: '700', fontSize: 14, color: '#FFFFFF' }}>End Trip</ThemedText>
-              </Pressable>
-            </View>
-          </View>
           </ScrollView>
         </View>
       </Modal>
@@ -1645,7 +2344,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   cancelTripText: {
-     fontSize: 15,
+    fontSize: 15,
     fontWeight: "600" as const,
   },
   otpInputContainer: {

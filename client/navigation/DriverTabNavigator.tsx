@@ -83,8 +83,6 @@ function EarningsStackNavigator() {
   );
 }
 
-
-
 function AccountStackNavigator({ navigation }: any) {
   const screenOptions = useScreenOptions({ transparent: false });
   const { isDark } = useTheme();

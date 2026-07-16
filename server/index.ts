@@ -1,5 +1,5 @@
 //server/index.ts
-import 'dotenv/config';
+import "dotenv/config";
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
@@ -250,7 +250,9 @@ function setupErrorHandler(app: express.Application) {
   try {
     configureExpoAndLanding(app);
   } catch (e) {
-    console.log("ℹ️ Landing page template not found — API-only mode (normal for production)");
+    console.log(
+      "ℹ️ Landing page template not found — API-only mode (normal for production)",
+    );
   }
 
   const server = await registerRoutes(app);

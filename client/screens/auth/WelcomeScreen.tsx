@@ -33,7 +33,13 @@ interface RoleCardProps {
   delay?: number;
 }
 
-function RoleCard({ title, description, icon, onPress, delay = 0 }: RoleCardProps) {
+function RoleCard({
+  title,
+  description,
+  icon,
+  onPress,
+  delay = 0,
+}: RoleCardProps) {
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -60,7 +66,11 @@ function RoleCard({ title, description, icon, onPress, delay = 0 }: RoleCardProp
           <ThemedText style={styles.roleTitle}>{title}</ThemedText>
           <ThemedText style={styles.roleDescription}>{description}</ThemedText>
         </View>
-        <MaterialIcons name="chevron-right" size={24} color={UTOColors.primary} />
+        <MaterialIcons
+          name="chevron-right"
+          size={24}
+          color={UTOColors.primary}
+        />
       </AnimatedPressable>
     </Animated.View>
   );
@@ -135,8 +145,8 @@ export default function WelcomeScreen({ navigation }: any) {
             onPress={() => navigation.navigate("Terms", { tab: "passenger" })}
           >
             Terms of Service
-          </ThemedText>
-          {" "}and{" "}
+          </ThemedText>{" "}
+          and{" "}
           <ThemedText
             style={styles.linkText}
             onPress={() => navigation.navigate("Terms", { tab: "privacy" })}

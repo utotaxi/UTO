@@ -83,18 +83,27 @@ export default function TaxSettingsScreen() {
   const handleSave = async () => {
     // Validate required fields
     if (!settings.address || !settings.postcode) {
-      Alert.alert("Required Fields", "Please provide your address and postcode.");
+      Alert.alert(
+        "Required Fields",
+        "Please provide your address and postcode.",
+      );
       return;
     }
 
     if (settings.status === "self_employed") {
       if (!settings.fullName || !settings.utrNumber) {
-        Alert.alert("Required Fields", "Please provide your full name and UTR number.");
+        Alert.alert(
+          "Required Fields",
+          "Please provide your full name and UTR number.",
+        );
         return;
       }
     } else {
       if (!settings.companyName || !settings.crn) {
-        Alert.alert("Required Fields", "Please provide your company name and CRN.");
+        Alert.alert(
+          "Required Fields",
+          "Please provide your company name and CRN.",
+        );
         return;
       }
     }
@@ -104,16 +113,27 @@ export default function TaxSettingsScreen() {
       if (driverProfile?.id) {
         try {
           // Attempt to save to Supabase
-          const updatedDriver = await api.drivers.update(driverProfile.id, { taxSettings: settings });
+          const updatedDriver = await api.drivers.update(driverProfile.id, {
+            taxSettings: settings,
+          });
           setDriverProfile({ ...driverProfile, taxSettings: settings });
         } catch (dbError: any) {
-          console.warn("Supabase schema missing tax_settings column, falling back to local storage:", dbError);
+          console.warn(
+            "Supabase schema missing tax_settings column, falling back to local storage:",
+            dbError,
+          );
           // Fallback if db schema isn't updated yet
-          await AsyncStorage.setItem(LOCAL_FALLBACK_KEY, JSON.stringify(settings));
+          await AsyncStorage.setItem(
+            LOCAL_FALLBACK_KEY,
+            JSON.stringify(settings),
+          );
           setDriverProfile({ ...driverProfile, taxSettings: settings });
         }
       } else {
-        await AsyncStorage.setItem(LOCAL_FALLBACK_KEY, JSON.stringify(settings));
+        await AsyncStorage.setItem(
+          LOCAL_FALLBACK_KEY,
+          JSON.stringify(settings),
+        );
       }
       Alert.alert("Saved", "Your tax information has been updated securely.");
     } catch (error) {
@@ -126,7 +146,12 @@ export default function TaxSettingsScreen() {
 
   if (isLoading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: theme.backgroundRoot }]}>
+      <View
+        style={[
+          styles.loadingContainer,
+          { backgroundColor: theme.backgroundRoot },
+        ]}
+      >
         <ActivityIndicator size="large" color={UTOColors.primary} />
       </View>
     );
@@ -135,8 +160,8 @@ export default function TaxSettingsScreen() {
   const isSelfEmployed = settings.status === "self_employed";
 
   return (
-    <KeyboardAvoidingView 
-      style={{ flex: 1, backgroundColor: theme.backgroundRoot }} 
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: theme.backgroundRoot }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
@@ -145,36 +170,69 @@ export default function TaxSettingsScreen() {
           styles.scrollContent,
           {
             paddingTop: Math.max(headerHeight, 56) + insets.top + Spacing.xl,
-            paddingBottom: insets.bottom + Spacing.xl + 80
+            paddingBottom: insets.bottom + Spacing.xl + 80,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.gdprNote}>
-          <Feather name="shield" size={20} color={UTOColors.primary} style={{ marginTop: 2 }} />
+          <Feather
+            name="shield"
+            size={20}
+            color={UTOColors.primary}
+            style={{ marginTop: 2 }}
+          />
           <ThemedText style={styles.gdprText}>
-            This information is required for payment, tax and compliance records. It will be stored securely and only used for UTO operational, accounting and legal compliance purposes.
+            This information is required for payment, tax and compliance
+            records. It will be stored securely and only used for UTO
+            operational, accounting and legal compliance purposes.
           </ThemedText>
         </View>
 
         <ThemedText style={styles.sectionHeading}>Tax Status</ThemedText>
         <View style={styles.statusContainer}>
-          <Pressable 
-            style={[styles.statusCard, settings.status === "self_employed" && styles.statusCardActive]}
-            onPress={() => setSettings({ ...settings, status: "self_employed" })}
+          <Pressable
+            style={[
+              styles.statusCard,
+              settings.status === "self_employed" && styles.statusCardActive,
+            ]}
+            onPress={() =>
+              setSettings({ ...settings, status: "self_employed" })
+            }
           >
-            <View style={[styles.radio, settings.status === "self_employed" && styles.radioActive]}>
-              {settings.status === "self_employed" && <View style={styles.radioInner} />}
+            <View
+              style={[
+                styles.radio,
+                settings.status === "self_employed" && styles.radioActive,
+              ]}
+            >
+              {settings.status === "self_employed" && (
+                <View style={styles.radioInner} />
+              )}
             </View>
-            <ThemedText style={styles.statusText}>Self-employed individual</ThemedText>
+            <ThemedText style={styles.statusText}>
+              Self-employed individual
+            </ThemedText>
           </Pressable>
 
-          <Pressable 
-            style={[styles.statusCard, settings.status === "limited_company" && styles.statusCardActive]}
-            onPress={() => setSettings({ ...settings, status: "limited_company" })}
+          <Pressable
+            style={[
+              styles.statusCard,
+              settings.status === "limited_company" && styles.statusCardActive,
+            ]}
+            onPress={() =>
+              setSettings({ ...settings, status: "limited_company" })
+            }
           >
-            <View style={[styles.radio, settings.status === "limited_company" && styles.radioActive]}>
-              {settings.status === "limited_company" && <View style={styles.radioInner} />}
+            <View
+              style={[
+                styles.radio,
+                settings.status === "limited_company" && styles.radioActive,
+              ]}
+            >
+              {settings.status === "limited_company" && (
+                <View style={styles.radioInner} />
+              )}
             </View>
             <ThemedText style={styles.statusText}>Limited company</ThemedText>
           </Pressable>
@@ -184,22 +242,45 @@ export default function TaxSettingsScreen() {
           {isSelfEmployed ? (
             <>
               <View style={styles.inputGroup}>
-                <ThemedText style={styles.label}>Full legal name <ThemedText style={styles.required}>*</ThemedText></ThemedText>
+                <ThemedText style={styles.label}>
+                  Full legal name{" "}
+                  <ThemedText style={styles.required}>*</ThemedText>
+                </ThemedText>
                 <TextInput
-                  style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: theme.backgroundDefault,
+                      color: theme.text,
+                      borderColor: theme.border,
+                    },
+                  ]}
                   value={settings.fullName}
-                  onChangeText={(text) => setSettings({ ...settings, fullName: text })}
+                  onChangeText={(text) =>
+                    setSettings({ ...settings, fullName: text })
+                  }
                   placeholder="e.g. John Doe"
                   placeholderTextColor={theme.textSecondary}
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <ThemedText style={styles.label}>UTR Number <ThemedText style={styles.required}>*</ThemedText></ThemedText>
+                <ThemedText style={styles.label}>
+                  UTR Number <ThemedText style={styles.required}>*</ThemedText>
+                </ThemedText>
                 <TextInput
-                  style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: theme.backgroundDefault,
+                      color: theme.text,
+                      borderColor: theme.border,
+                    },
+                  ]}
                   value={settings.utrNumber}
-                  onChangeText={(text) => setSettings({ ...settings, utrNumber: text })}
+                  onChangeText={(text) =>
+                    setSettings({ ...settings, utrNumber: text })
+                  }
                   placeholder="10-digit Unique Taxpayer Reference"
                   placeholderTextColor={theme.textSecondary}
                   keyboardType="number-pad"
@@ -207,11 +288,22 @@ export default function TaxSettingsScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <ThemedText style={styles.label}>National Insurance Number</ThemedText>
+                <ThemedText style={styles.label}>
+                  National Insurance Number
+                </ThemedText>
                 <TextInput
-                  style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: theme.backgroundDefault,
+                      color: theme.text,
+                      borderColor: theme.border,
+                    },
+                  ]}
                   value={settings.niNumber}
-                  onChangeText={(text) => setSettings({ ...settings, niNumber: text })}
+                  onChangeText={(text) =>
+                    setSettings({ ...settings, niNumber: text })
+                  }
                   placeholder="e.g. QQ 12 34 56 A"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="characters"
@@ -221,22 +313,46 @@ export default function TaxSettingsScreen() {
           ) : (
             <>
               <View style={styles.inputGroup}>
-                <ThemedText style={styles.label}>Company name <ThemedText style={styles.required}>*</ThemedText></ThemedText>
+                <ThemedText style={styles.label}>
+                  Company name{" "}
+                  <ThemedText style={styles.required}>*</ThemedText>
+                </ThemedText>
                 <TextInput
-                  style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: theme.backgroundDefault,
+                      color: theme.text,
+                      borderColor: theme.border,
+                    },
+                  ]}
                   value={settings.companyName}
-                  onChangeText={(text) => setSettings({ ...settings, companyName: text })}
+                  onChangeText={(text) =>
+                    setSettings({ ...settings, companyName: text })
+                  }
                   placeholder="e.g. UTO Transport Ltd"
                   placeholderTextColor={theme.textSecondary}
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <ThemedText style={styles.label}>Company Registration Number (CRN) <ThemedText style={styles.required}>*</ThemedText></ThemedText>
+                <ThemedText style={styles.label}>
+                  Company Registration Number (CRN){" "}
+                  <ThemedText style={styles.required}>*</ThemedText>
+                </ThemedText>
                 <TextInput
-                  style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: theme.backgroundDefault,
+                      color: theme.text,
+                      borderColor: theme.border,
+                    },
+                  ]}
                   value={settings.crn}
-                  onChangeText={(text) => setSettings({ ...settings, crn: text })}
+                  onChangeText={(text) =>
+                    setSettings({ ...settings, crn: text })
+                  }
                   placeholder="e.g. 14458837"
                   placeholderTextColor={theme.textSecondary}
                   keyboardType="default"
@@ -246,9 +362,18 @@ export default function TaxSettingsScreen() {
               <View style={styles.inputGroup}>
                 <ThemedText style={styles.label}>VAT Number</ThemedText>
                 <TextInput
-                  style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: theme.backgroundDefault,
+                      color: theme.text,
+                      borderColor: theme.border,
+                    },
+                  ]}
                   value={settings.vatNumber}
-                  onChangeText={(text) => setSettings({ ...settings, vatNumber: text })}
+                  onChangeText={(text) =>
+                    setSettings({ ...settings, vatNumber: text })
+                  }
                   placeholder="If applicable"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="characters"
@@ -258,22 +383,45 @@ export default function TaxSettingsScreen() {
           )}
 
           <View style={styles.inputGroup}>
-            <ThemedText style={styles.label}>{isSelfEmployed ? "Address" : "Company Address"} <ThemedText style={styles.required}>*</ThemedText></ThemedText>
+            <ThemedText style={styles.label}>
+              {isSelfEmployed ? "Address" : "Company Address"}{" "}
+              <ThemedText style={styles.required}>*</ThemedText>
+            </ThemedText>
             <TextInput
-              style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: theme.backgroundDefault,
+                  color: theme.text,
+                  borderColor: theme.border,
+                },
+              ]}
               value={settings.address}
-              onChangeText={(text) => setSettings({ ...settings, address: text })}
+              onChangeText={(text) =>
+                setSettings({ ...settings, address: text })
+              }
               placeholder="Street address and City"
               placeholderTextColor={theme.textSecondary}
             />
           </View>
 
           <View style={styles.inputGroup}>
-            <ThemedText style={styles.label}>Postcode <ThemedText style={styles.required}>*</ThemedText></ThemedText>
+            <ThemedText style={styles.label}>
+              Postcode <ThemedText style={styles.required}>*</ThemedText>
+            </ThemedText>
             <TextInput
-              style={[styles.input, { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border }]}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: theme.backgroundDefault,
+                  color: theme.text,
+                  borderColor: theme.border,
+                },
+              ]}
               value={settings.postcode}
-              onChangeText={(text) => setSettings({ ...settings, postcode: text })}
+              onChangeText={(text) =>
+                setSettings({ ...settings, postcode: text })
+              }
               placeholder="e.g. GL1 1JJ"
               placeholderTextColor={theme.textSecondary}
               autoCapitalize="characters"
@@ -286,7 +434,7 @@ export default function TaxSettingsScreen() {
           disabled={isSaving}
           style={({ pressed }) => [
             styles.saveButton,
-            { opacity: pressed || isSaving ? 0.7 : 1 }
+            { opacity: pressed || isSaving ? 0.7 : 1 },
           ]}
         >
           {isSaving ? (

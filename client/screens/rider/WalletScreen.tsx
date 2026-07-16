@@ -1,5 +1,13 @@
 import React, { useState, useCallback } from "react";
-import { StyleSheet, View, Text, FlatList, ActivityIndicator, Pressable, RefreshControl } from "react-native";
+import {
+  StyleSheet,
+  View,
+  Text,
+  FlatList,
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -21,7 +29,7 @@ export default function WalletScreen({ navigation }: any) {
       if (user?.id) {
         loadTransactions();
       }
-    }, [user?.id])
+    }, [user?.id]),
   );
 
   const loadTransactions = async () => {
@@ -29,13 +37,16 @@ export default function WalletScreen({ navigation }: any) {
       setIsLoading(true);
       const data = await api.payments.getWalletTransactions(user!.id);
       // Sort newest first
-      data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      data.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
       setTransactions(data);
 
       // Refresh wallet balance from server to guarantee accuracy
       try {
         const freshUser = await api.users.get(user!.id);
-        if (freshUser && typeof freshUser.walletBalance === 'number') {
+        if (freshUser && typeof freshUser.walletBalance === "number") {
           if (freshUser.walletBalance !== user?.walletBalance) {
             updateProfile({ walletBalance: freshUser.walletBalance });
           }
@@ -55,33 +66,47 @@ export default function WalletScreen({ navigation }: any) {
     await loadTransactions();
     setRefreshing(false);
   };
-  const walletBalance = typeof user?.walletBalance === "number" ? user.walletBalance : 0;
+  const walletBalance =
+    typeof user?.walletBalance === "number" ? user.walletBalance : 0;
 
   const renderTransaction = ({ item }: { item: WalletTransaction }) => {
     const isCredit = item.type === "credit";
     return (
       <View style={styles.transactionItem}>
-        <View style={[
-          styles.iconContainer, 
-          { backgroundColor: isCredit ? "rgba(16, 185, 129, 0.1)" : "rgba(239, 68, 68, 0.1)" }
-        ]}>
-          <MaterialIcons 
-            name={isCredit ? "add" : "remove"} 
-            size={20} 
-            color={isCredit ? "#10B981" : "#EF4444"} 
+        <View
+          style={[
+            styles.iconContainer,
+            {
+              backgroundColor: isCredit
+                ? "rgba(16, 185, 129, 0.1)"
+                : "rgba(239, 68, 68, 0.1)",
+            },
+          ]}
+        >
+          <MaterialIcons
+            name={isCredit ? "add" : "remove"}
+            size={20}
+            color={isCredit ? "#10B981" : "#EF4444"}
           />
         </View>
         <View style={styles.transactionDetails}>
           <ThemedText style={styles.description}>
-            {item.description || (isCredit ? "Credit Added" : "Amount Deducted")}
+            {item.description ||
+              (isCredit ? "Credit Added" : "Amount Deducted")}
           </ThemedText>
           <ThemedText style={styles.date}>
             {new Date(item.createdAt).toLocaleDateString("en-GB", {
-              day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London"
+              day: "numeric",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone: "Europe/London",
             })}
           </ThemedText>
         </View>
-        <ThemedText style={[styles.amount, { color: isCredit ? "#10B981" : "#EF4444" }]}>
+        <ThemedText
+          style={[styles.amount, { color: isCredit ? "#10B981" : "#EF4444" }]}
+        >
           {isCredit ? "+" : "-"}£{item.amount.toFixed(2)}
         </ThemedText>
       </View>
@@ -91,7 +116,10 @@ export default function WalletScreen({ navigation }: any) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
           <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
         </Pressable>
         <ThemedText style={styles.headerTitle}>My Wallet</ThemedText>
@@ -101,7 +129,12 @@ export default function WalletScreen({ navigation }: any) {
       <View style={styles.balanceContainer}>
         <View style={{ flex: 1 }}>
           <ThemedText style={styles.balanceLabel}>Current Balance</ThemedText>
-          <ThemedText style={[styles.balanceAmount, walletBalance < 0 && styles.negativeBalance]}>
+          <ThemedText
+            style={[
+              styles.balanceAmount,
+              walletBalance < 0 && styles.negativeBalance,
+            ]}
+          >
             {walletBalance < 0 ? "-" : ""}£{Math.abs(walletBalance).toFixed(2)}
           </ThemedText>
         </View>
@@ -116,7 +149,9 @@ export default function WalletScreen({ navigation }: any) {
               justifyContent: "center",
             }}
           >
-            <Text style={{ color: "#000", fontWeight: "600", fontSize: 12 }}>Withdraw</Text>
+            <Text style={{ color: "#000", fontWeight: "600", fontSize: 12 }}>
+              Withdraw
+            </Text>
           </Pressable>
         )}
       </View>
@@ -129,8 +164,14 @@ export default function WalletScreen({ navigation }: any) {
           </View>
         ) : transactions.length === 0 ? (
           <View style={styles.centerContainer}>
-            <MaterialIcons name="account-balance-wallet" size={48} color="#333" />
-            <ThemedText style={styles.emptyText}>No transactions yet</ThemedText>
+            <MaterialIcons
+              name="account-balance-wallet"
+              size={48}
+              color="#333"
+            />
+            <ThemedText style={styles.emptyText}>
+              No transactions yet
+            </ThemedText>
           </View>
         ) : (
           <FlatList

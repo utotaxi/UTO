@@ -35,7 +35,7 @@ export function OnlineToggle({ isOnline, onToggle }: OnlineToggleProps) {
     backgroundColor: interpolateColor(
       toggleProgress.value,
       [0, 1],
-      [theme.backgroundSecondary, UTOColors.driver.primary]
+      [theme.backgroundSecondary, UTOColors.driver.primary],
     ),
   }));
 
@@ -56,13 +56,23 @@ export function OnlineToggle({ isOnline, onToggle }: OnlineToggleProps) {
   };
 
   return (
-    <View style={[styles.container, Shadows.large, { backgroundColor: theme.backgroundDefault }]}>
+    <View
+      style={[
+        styles.container,
+        Shadows.large,
+        { backgroundColor: theme.backgroundDefault },
+      ]}
+    >
       <View style={styles.content}>
         <View style={styles.statusContainer}>
           <View
             style={[
               styles.statusDot,
-              { backgroundColor: isOnline ? UTOColors.success : theme.textSecondary },
+              {
+                backgroundColor: isOnline
+                  ? UTOColors.success
+                  : theme.textSecondary,
+              },
             ]}
           />
           <ThemedText style={styles.statusText}>

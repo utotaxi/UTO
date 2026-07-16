@@ -68,7 +68,9 @@ function RoleCard({
           </View>
           <View style={styles.roleTextContent}>
             <ThemedText style={styles.roleTitle}>{title}</ThemedText>
-            <ThemedText style={[styles.roleDescription, { color: theme.textSecondary }]}>
+            <ThemedText
+              style={[styles.roleDescription, { color: theme.textSecondary }]}
+            >
               {description}
             </ThemedText>
           </View>

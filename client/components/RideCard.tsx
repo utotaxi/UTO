@@ -11,7 +11,12 @@ import * as Haptics from "expo-haptics";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { UTOColors, Spacing, BorderRadius, formatPrice } from "@/constants/theme";
+import {
+  UTOColors,
+  Spacing,
+  BorderRadius,
+  formatPrice,
+} from "@/constants/theme";
 import { Ride } from "@/context/RideContext";
 
 interface RideCardProps {
@@ -98,10 +103,20 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
       ]}
     >
       <View style={styles.header}>
-        <ThemedText style={[styles.date, { color: isDark ? "#9CA3AF" : theme.textSecondary }]}>
+        <ThemedText
+          style={[
+            styles.date,
+            { color: isDark ? "#9CA3AF" : theme.textSecondary },
+          ]}
+        >
           {formatDate(ride.createdAt)}
         </ThemedText>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor() + "20" }]}>
+        <View
+          style={[
+            styles.statusBadge,
+            { backgroundColor: getStatusColor() + "20" },
+          ]}
+        >
           <ThemedText style={[styles.statusText, { color: getStatusColor() }]}>
             {getStatusText()}
           </ThemedText>
@@ -111,14 +126,25 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
       <View style={styles.routeContainer}>
         <View style={styles.routeIndicator}>
           <View style={[styles.dot, { backgroundColor: UTOColors.success }]} />
-          <View style={[styles.line, { backgroundColor: isDark ? "#333333" : theme.border }]} />
+          <View
+            style={[
+              styles.line,
+              { backgroundColor: isDark ? "#333333" : theme.border },
+            ]}
+          />
           <View style={[styles.dot, { backgroundColor: UTOColors.primary }]} />
         </View>
         <View style={styles.addresses}>
-          <ThemedText style={[styles.address, { color: isDark ? "#FFFFFF" : theme.text }]} numberOfLines={1}>
+          <ThemedText
+            style={[styles.address, { color: isDark ? "#FFFFFF" : theme.text }]}
+            numberOfLines={1}
+          >
             {ride.pickupLocation?.address}
           </ThemedText>
-          <ThemedText style={[styles.address, { color: isDark ? "#FFFFFF" : theme.text }]} numberOfLines={1}>
+          <ThemedText
+            style={[styles.address, { color: isDark ? "#FFFFFF" : theme.text }]}
+            numberOfLines={1}
+          >
             {ride.dropoffLocation?.address}
           </ThemedText>
         </View>
@@ -128,14 +154,28 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
         <View style={styles.footerLeft}>
           {ride.driverName ? (
             <View style={styles.driverInfo}>
-              <Feather name="user" size={14} color={isDark ? "#9CA3AF" : theme.textSecondary} />
-              <ThemedText style={[styles.driverName, { color: isDark ? "#9CA3AF" : theme.textSecondary }]}>
+              <Feather
+                name="user"
+                size={14}
+                color={isDark ? "#9CA3AF" : theme.textSecondary}
+              />
+              <ThemedText
+                style={[
+                  styles.driverName,
+                  { color: isDark ? "#9CA3AF" : theme.textSecondary },
+                ]}
+              >
                 {ride.driverName}
               </ThemedText>
               {ride.driverRating ? (
                 <>
                   <Feather name="star" size={12} color={UTOColors.warning} />
-                  <ThemedText style={[styles.rating, { color: isDark ? "#9CA3AF" : theme.textSecondary }]}>
+                  <ThemedText
+                    style={[
+                      styles.rating,
+                      { color: isDark ? "#9CA3AF" : theme.textSecondary },
+                    ]}
+                  >
                     {ride.driverRating.toFixed(1)}
                   </ThemedText>
                 </>
@@ -143,19 +183,35 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
             </View>
           ) : null}
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          {onRebook && (ride.status === "completed" || ride.status === "cancelled") && (
-            <Pressable 
-              onPress={(e) => {
-                e.stopPropagation();
-                onRebook();
-              }}
-              style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: UTOColors.primary + "20", borderRadius: 12 }}
-            >
-              <ThemedText style={{ color: UTOColors.primary, fontSize: 13, fontWeight: '600' }}>Rebook</ThemedText>
-            </Pressable>
-          )}
-          <ThemedText style={[styles.price, { color: isDark ? "#FFFFFF" : theme.text }]}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          {onRebook &&
+            (ride.status === "completed" || ride.status === "cancelled") && (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onRebook();
+                }}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  backgroundColor: UTOColors.primary + "20",
+                  borderRadius: 12,
+                }}
+              >
+                <ThemedText
+                  style={{
+                    color: UTOColors.primary,
+                    fontSize: 13,
+                    fontWeight: "600",
+                  }}
+                >
+                  Rebook
+                </ThemedText>
+              </Pressable>
+            )}
+          <ThemedText
+            style={[styles.price, { color: isDark ? "#FFFFFF" : theme.text }]}
+          >
             {formatPrice(Number(ride.discountedFare ?? ride.farePrice ?? 0))}
           </ThemedText>
         </View>

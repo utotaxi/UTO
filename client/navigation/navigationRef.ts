@@ -2,7 +2,10 @@ import { createNavigationContainerRef } from "@react-navigation/native";
 
 export const navigationRef = createNavigationContainerRef<any>();
 
-const navigateToDriverAccountScreen = (screen: string, params?: Record<string, any>) => {
+const navigateToDriverAccountScreen = (
+  screen: string,
+  params?: Record<string, any>,
+) => {
   if (!navigationRef.isReady()) return false;
 
   navigationRef.navigate("Main", {
@@ -16,7 +19,8 @@ const navigateToDriverAccountScreen = (screen: string, params?: Record<string, a
 };
 
 export const navigateFromNotification = (rawData: unknown) => {
-  if (!rawData || typeof rawData !== "object" || !navigationRef.isReady()) return false;
+  if (!rawData || typeof rawData !== "object" || !navigationRef.isReady())
+    return false;
 
   const data = rawData as Record<string, any>;
   const audience = String(data.audience || "").toLowerCase();
@@ -46,7 +50,11 @@ export const navigateFromNotification = (rawData: unknown) => {
     return false;
   }
 
-  if (type === "scheduled_marketplace_created" || type === "marketplace_reminder" || data.target === "Marketplace") {
+  if (
+    type === "scheduled_marketplace_created" ||
+    type === "marketplace_reminder" ||
+    data.target === "Marketplace"
+  ) {
     return navigateToDriverAccountScreen("Marketplace");
   }
 
@@ -58,14 +66,22 @@ export const navigateFromNotification = (rawData: unknown) => {
     return navigateToDriverAccountScreen("UpcomingBookings");
   }
 
-  if (type === "scheduled_booking_reminder" || type === "scheduled_booking_drive_to_pickup" || data.target === "ScheduledJobDetails") {
+  if (
+    type === "scheduled_booking_reminder" ||
+    type === "scheduled_booking_drive_to_pickup" ||
+    data.target === "ScheduledJobDetails"
+  ) {
     return navigateToDriverAccountScreen("ScheduledJobDetails", {
       bookingId: data.bookingId ? String(data.bookingId) : undefined,
       openDriveToPickup: true,
     });
   }
 
-  if (type === "scheduled_ride_live" || type === "ride_request" || type === "ride_requested") {
+  if (
+    type === "scheduled_ride_live" ||
+    type === "ride_request" ||
+    type === "ride_requested"
+  ) {
     // scheduled_ride_live can be rider or driver — route by audience.
     if (audience === "rider") {
       navigationRef.navigate("Main", { screen: "HomeTab" });

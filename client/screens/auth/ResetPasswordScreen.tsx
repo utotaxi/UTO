@@ -17,24 +17,80 @@ import { ThemedText } from "@/components/ThemedText";
 import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
 import { api } from "@/lib/api";
 
+type ResetStep = "email" | "otp" | "password";
+
 export default function ResetPasswordScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
-  
-  // Initialize with email passed from SignInScreen, if any
+
+  const [step, setStep] = useState<ResetStep>("email");
   const [email, setEmail] = useState(route.params?.email || "");
+  const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
 
-  const handleResetPassword = async () => {
+  const handleSendOtp = async () => {
     if (!email) {
       setError("Please provide an email address");
       return;
     }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const res = await api.auth.sendResetOtp(email);
+      if (res.success) {
+        setStep("otp");
+      } else {
+        setError(res.message || "Failed to send verification code");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to send verification code");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otp) {
+      setError("Please enter the verification code");
+      return;
+    }
+    if (otp.length < 6) {
+      setError("Verification code must be 6 digits");
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const res = await api.auth.verifyResetOtp(email, otp);
+      if (res.success) {
+        setStep("password");
+      } else {
+        setError(res.message || "Invalid verification code");
+      }
+    } catch (err: any) {
+      setError(err.message || "Verification failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
     if (!newPassword || !confirmPassword) {
       setError("Please fill in all password fields");
       return;
@@ -53,14 +109,52 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      await api.auth.resetPassword(email, newPassword);
-      Alert.alert("Success", "Your password has been reset successfully.", [
-        { text: "Log In", onPress: () => navigation.goBack() }
-      ]);
+      const res = await api.auth.resetPassword(email, newPassword);
+      if (res.success) {
+        Alert.alert("Success", "Your password has been reset successfully.", [
+          { text: "Log In", onPress: () => navigation.goBack() },
+        ]);
+      } else {
+        setError("Failed to reset password");
+      }
     } catch (err: any) {
       setError(err.message || "Failed to reset password");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleBack = () => {
+    if (step === "otp") {
+      setStep("email");
+      setError("");
+    } else if (step === "password") {
+      setStep("otp");
+      setError("");
+    } else {
+      navigation.goBack();
+    }
+  };
+
+  const getHeaderTitle = () => {
+    switch (step) {
+      case "email":
+        return "Reset Password";
+      case "otp":
+        return "Verify Email";
+      case "password":
+        return "Set New Password";
+    }
+  };
+
+  const getHeaderSubtitle = () => {
+    switch (step) {
+      case "email":
+        return "Enter your email address to receive a verification code.";
+      case "otp":
+        return `Enter the 6-digit code sent to ${email}`;
+      case "password":
+        return "Choose a strong password to secure your account.";
     }
   };
 
@@ -71,86 +165,198 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <View style={[styles.content, { paddingTop: insets.top + Spacing.xl }]}>
-          <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Pressable onPress={handleBack} style={styles.backButton}>
             <Feather name="arrow-left" size={24} color="#FFFFFF" />
           </Pressable>
 
           <View style={styles.headerSection}>
-            <ThemedText style={styles.title}>Reset Password</ThemedText>
+            <ThemedText style={styles.title}>{getHeaderTitle()}</ThemedText>
             <ThemedText style={styles.subtitle}>
-              Enter your new password below to reset it.
+              {getHeaderSubtitle()}
             </ThemedText>
           </View>
 
           <View style={styles.form}>
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.inputLabel}>Email address</ThemedText>
-              <View style={styles.inputWrapper}>
-                <Feather name="mail" size={20} color="#6B7280" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your email"
-                  placeholderTextColor="#6B7280"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
+            {step === "email" && (
+              <View style={styles.inputContainer}>
+                <ThemedText style={styles.inputLabel}>Email address</ThemedText>
+                <View style={styles.inputWrapper}>
+                  <Feather
+                    name="mail"
+                    size={20}
+                    color="#6B7280"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your email"
+                    placeholderTextColor="#6B7280"
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
               </View>
-            </View>
+            )}
 
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.inputLabel}>New Password</ThemedText>
-              <View style={styles.inputWrapper}>
-                <Feather name="lock" size={20} color="#6B7280" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter new password"
-                  placeholderTextColor="#6B7280"
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  secureTextEntry={!showPassword}
-                />
-                <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
-                  <Feather name={showPassword ? "eye-off" : "eye"} size={20} color="#6B7280" />
-                </Pressable>
+            {step === "otp" && (
+              <View style={styles.inputContainer}>
+                <ThemedText style={styles.inputLabel}>
+                  Verification Code
+                </ThemedText>
+                <View style={styles.inputWrapper}>
+                  <Feather
+                    name="shield"
+                    size={20}
+                    color="#6B7280"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter 6-digit code"
+                    placeholderTextColor="#6B7280"
+                    value={otp}
+                    onChangeText={setOtp}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                  />
+                </View>
               </View>
-            </View>
+            )}
 
-            <View style={styles.inputContainer}>
-              <ThemedText style={styles.inputLabel}>Re-enter Password</ThemedText>
-              <View style={styles.inputWrapper}>
-                <Feather name="lock" size={20} color="#6B7280" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirm new password"
-                  placeholderTextColor="#6B7280"
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry={!showConfirmPassword}
-                />
-                <Pressable onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton}>
-                  <Feather name={showConfirmPassword ? "eye-off" : "eye"} size={20} color="#6B7280" />
-                </Pressable>
-              </View>
-            </View>
+            {step === "password" && (
+              <>
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.inputLabel}>
+                    Email address
+                  </ThemedText>
+                  <View style={[styles.inputWrapper, { opacity: 0.6 }]}>
+                    <Feather
+                      name="mail"
+                      size={20}
+                      color="#6B7280"
+                      style={styles.inputIcon}
+                    />
+                    <TextInput
+                      style={styles.input}
+                      value={email}
+                      editable={false}
+                    />
+                  </View>
+                </View>
 
-            {error ? <ThemedText style={styles.errorText}>{error}</ThemedText> : null}
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.inputLabel}>
+                    New Password
+                  </ThemedText>
+                  <View style={styles.inputWrapper}>
+                    <Feather
+                      name="lock"
+                      size={20}
+                      color="#6B7280"
+                      style={styles.inputIcon}
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter new password"
+                      placeholderTextColor="#6B7280"
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      secureTextEntry={!showPassword}
+                    />
+                    <Pressable
+                      onPress={() => setShowPassword(!showPassword)}
+                      style={styles.eyeButton}
+                    >
+                      <Feather
+                        name={showPassword ? "eye-off" : "eye"}
+                        size={20}
+                        color="#6B7280"
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+
+                <View style={styles.inputContainer}>
+                  <ThemedText style={styles.inputLabel}>
+                    Re-enter Password
+                  </ThemedText>
+                  <View style={styles.inputWrapper}>
+                    <Feather
+                      name="lock"
+                      size={20}
+                      color="#6B7280"
+                      style={styles.inputIcon}
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Confirm new password"
+                      placeholderTextColor="#6B7280"
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      secureTextEntry={!showConfirmPassword}
+                    />
+                    <Pressable
+                      onPress={() =>
+                        setShowConfirmPassword(!showConfirmPassword)
+                      }
+                      style={styles.eyeButton}
+                    >
+                      <Feather
+                        name={showConfirmPassword ? "eye-off" : "eye"}
+                        size={20}
+                        color="#6B7280"
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+              </>
+            )}
+
+            {error ? (
+              <ThemedText style={styles.errorText}>{error}</ThemedText>
+            ) : null}
 
             <Pressable
-              onPress={handleResetPassword}
+              onPress={
+                step === "email"
+                  ? handleSendOtp
+                  : step === "otp"
+                    ? handleVerifyOtp
+                    : handleResetPassword
+              }
               disabled={isLoading}
               style={({ pressed }) => [
                 styles.submitButton,
-                { opacity: pressed || isLoading ? 0.7 : 1 }
+                { opacity: pressed || isLoading ? 0.7 : 1 },
               ]}
             >
               {isLoading ? (
                 <ActivityIndicator color="#000000" />
               ) : (
-                <ThemedText style={styles.submitButtonText}>Reset Password</ThemedText>
+                <ThemedText style={styles.submitButtonText}>
+                  {step === "email"
+                    ? "Verify Email"
+                    : step === "otp"
+                      ? "Verify & Continue"
+                      : "Reset Password"}
+                </ThemedText>
               )}
             </Pressable>
+
+            {step === "otp" && (
+              <Pressable
+                onPress={handleSendOtp}
+                disabled={isLoading}
+                style={styles.resendButton}
+              >
+                <ThemedText style={styles.resendText}>
+                  Didn't receive the email?{" "}
+                  <ThemedText style={styles.resendLink}>Resend Code</ThemedText>
+                </ThemedText>
+              </Pressable>
+            )}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -240,5 +446,18 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "600",
     color: "#000000",
+  },
+  resendButton: {
+    alignItems: "center",
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  resendText: {
+    fontSize: 14,
+    color: "#9CA3AF",
+  },
+  resendLink: {
+    color: UTOColors.primary,
+    fontWeight: "600",
   },
 });

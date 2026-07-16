@@ -46,8 +46,13 @@ export class ErrorBoundary extends Component<
     // Auto-reset when the resetKey changes (e.g. user logs in or out).
     // This prevents a transient navigation tear-down error from permanently
     // showing the ErrorFallback after the auth transition completes.
-    if (this.state.error !== null && prevProps.resetKey !== this.props.resetKey) {
-      console.log('[ErrorBoundary] resetKey changed — auto-resetting error boundary');
+    if (
+      this.state.error !== null &&
+      prevProps.resetKey !== this.props.resetKey
+    ) {
+      console.log(
+        "[ErrorBoundary] resetKey changed — auto-resetting error boundary",
+      );
       this.setState({ error: null });
     }
   }

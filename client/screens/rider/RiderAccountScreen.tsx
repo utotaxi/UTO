@@ -1,6 +1,13 @@
-
 import React from "react";
-import { Platform, StyleSheet, View, Pressable, Image, ScrollView, Linking } from "react-native";
+import {
+  Platform,
+  StyleSheet,
+  View,
+  Pressable,
+  Image,
+  ScrollView,
+  Linking,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -24,7 +31,14 @@ interface MenuItemProps {
   badgeColor?: string;
 }
 
-function MenuItem({ icon, title, subtitle, onPress, showBadge, badgeColor }: MenuItemProps) {
+function MenuItem({
+  icon,
+  title,
+  subtitle,
+  onPress,
+  showBadge,
+  badgeColor,
+}: MenuItemProps) {
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress();
@@ -48,7 +62,12 @@ function MenuItem({ icon, title, subtitle, onPress, showBadge, badgeColor }: Men
         ) : null}
       </View>
       {showBadge ? (
-        <View style={[styles.badge, { backgroundColor: badgeColor || UTOColors.primary }]} />
+        <View
+          style={[
+            styles.badge,
+            { backgroundColor: badgeColor || UTOColors.primary },
+          ]}
+        />
       ) : null}
       <MaterialIcons name="chevron-right" size={24} color="#6B7280" />
     </Pressable>
@@ -63,7 +82,8 @@ export default function RiderAccountScreen({ navigation }: any) {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [isAddingCard, setIsAddingCard] = React.useState(false);
   const [savedCards, setSavedCards] = React.useState<any[]>([]);
-  const walletBalance = typeof user?.walletBalance === "number" ? user.walletBalance : 0;
+  const walletBalance =
+    typeof user?.walletBalance === "number" ? user.walletBalance : 0;
 
   React.useEffect(() => {
     fetchSavedCards();
@@ -85,24 +105,27 @@ export default function RiderAccountScreen({ navigation }: any) {
       `Are you sure you want to remove card ending in ${last4}?`,
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Remove", 
+        {
+          text: "Remove",
           style: "destructive",
           onPress: async () => {
             try {
               const res = await api.payments.deleteSavedCard(cardId);
               if (res && res.success) {
-                setSavedCards(prev => prev.filter(c => c.id !== cardId));
+                setSavedCards((prev) => prev.filter((c) => c.id !== cardId));
               } else {
-                Alert.alert("Error", "Failed to remove card. Please try again.");
+                Alert.alert(
+                  "Error",
+                  "Failed to remove card. Please try again.",
+                );
               }
             } catch (error) {
               console.error("Delete card error:", error);
               Alert.alert("Error", "Failed to remove card.");
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -119,7 +142,7 @@ export default function RiderAccountScreen({ navigation }: any) {
       // 1. We ask the server to create a Setup Intent
       if (!user?.id) throw new Error("User disconnected");
       const { clientSecret } = await api.payments.setupIntent(user.id);
-      
+
       if (!clientSecret) throw new Error("Failed to initialize setup intent");
 
       // 2. Initialize the Payment Sheet for saving a card (setup mode)
@@ -141,12 +164,18 @@ export default function RiderAccountScreen({ navigation }: any) {
           Alert.alert("Error adding card", presentProps.error.message);
         }
       } else {
-        Alert.alert("Success", "Your card was successfully added for future rides!");
+        Alert.alert(
+          "Success",
+          "Your card was successfully added for future rides!",
+        );
         fetchSavedCards(); // Refresh cards when one is successfully added
       }
     } catch (error: any) {
       console.error(error);
-      Alert.alert("Error", error.message || "Failed to setup card. Please try again.");
+      Alert.alert(
+        "Error",
+        error.message || "Failed to setup card. Please try again.",
+      );
     } finally {
       setIsAddingCard(false);
     }
@@ -165,16 +194,24 @@ export default function RiderAccountScreen({ navigation }: any) {
         <ThemedText style={styles.headerTitle}>Account</ThemedText>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.profileSection}>
+      <Animated.View
+        entering={FadeInDown.delay(100).duration(400)}
+        style={styles.profileSection}
+      >
         <View style={styles.avatar}>
           {user?.profileImage ? (
-            <Image source={{ uri: user.profileImage }} style={styles.avatarImage} />
+            <Image
+              source={{ uri: user.profileImage }}
+              style={styles.avatarImage}
+            />
           ) : (
             <MaterialIcons name="person" size={32} color="#6B7280" />
           )}
         </View>
         <View style={styles.profileInfo}>
-          <ThemedText style={styles.userName}>{user?.fullName || "User"}</ThemedText>
+          <ThemedText style={styles.userName}>
+            {user?.fullName || "User"}
+          </ThemedText>
           <View style={styles.ratingContainer}>
             <MaterialIcons name="star" size={14} color={UTOColors.primary} />
             <ThemedText style={styles.rating}>
@@ -182,26 +219,35 @@ export default function RiderAccountScreen({ navigation }: any) {
             </ThemedText>
           </View>
         </View>
-        <Pressable style={styles.editButton} onPress={() => navigation.navigate("RiderProfile")}>
+        <Pressable
+          style={styles.editButton}
+          onPress={() => navigation.navigate("RiderProfile")}
+        >
           <MaterialIcons name="edit" size={18} color="#FFFFFF" />
         </Pressable>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
+      <Animated.View
+        entering={FadeInDown.delay(200).duration(400)}
+        style={styles.section}
+      >
         <ThemedText style={styles.sectionTitle}>My Rides</ThemedText>
         <View style={styles.sectionContent}>
           <MenuItem
             icon="event"
             title="Scheduled Rides"
             subtitle="View your upcoming planned rides"
-            onPress={() => navigation.navigate('ScheduledRides')}
+            onPress={() => navigation.navigate("ScheduledRides")}
             showBadge
             badgeColor={UTOColors.primary}
           />
         </View>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.section}>
+      <Animated.View
+        entering={FadeInDown.delay(300).duration(400)}
+        style={styles.section}
+      >
         <ThemedText style={styles.sectionTitle}>Account</ThemedText>
         <View style={styles.sectionContent}>
           <MenuItem
@@ -213,7 +259,7 @@ export default function RiderAccountScreen({ navigation }: any) {
           <MenuItem
             icon="account-balance-wallet"
             title="Wallet"
-            subtitle={`Balance: ${walletBalance < 0 ? '-' : ''}£${Math.abs(walletBalance).toFixed(2)}`}
+            subtitle={`Balance: ${walletBalance < 0 ? "-" : ""}£${Math.abs(walletBalance).toFixed(2)}`}
             onPress={() => navigation.navigate("Wallet")}
             showBadge={walletBalance !== 0}
             badgeColor={walletBalance < 0 ? "#EF4444" : "#10B981"}
@@ -229,13 +275,28 @@ export default function RiderAccountScreen({ navigation }: any) {
               {savedCards.map((card, idx) => (
                 <View key={card.id || idx} style={styles.savedCardItem}>
                   <View style={styles.savedCardItemLeft}>
-                    <MaterialIcons name="credit-card" size={20} color="#6B7280" />
+                    <MaterialIcons
+                      name="credit-card"
+                      size={20}
+                      color="#6B7280"
+                    />
                     <ThemedText style={styles.savedCardText}>
-                      {card.brand ? card.brand.charAt(0).toUpperCase() + card.brand.slice(1) : "Card"} •••• {card.last4}
+                      {card.brand
+                        ? card.brand.charAt(0).toUpperCase() +
+                          card.brand.slice(1)
+                        : "Card"}{" "}
+                      •••• {card.last4}
                     </ThemedText>
                   </View>
-                  <Pressable onPress={() => handleDeleteCard(card.id, card.last4)} style={styles.deleteCardButton}>
-                    <MaterialIcons name="delete-outline" size={20} color="#EF4444" />
+                  <Pressable
+                    onPress={() => handleDeleteCard(card.id, card.last4)}
+                    style={styles.deleteCardButton}
+                  >
+                    <MaterialIcons
+                      name="delete-outline"
+                      size={20}
+                      color="#EF4444"
+                    />
                   </Pressable>
                 </View>
               ))}
@@ -250,8 +311,10 @@ export default function RiderAccountScreen({ navigation }: any) {
         </View>
       </Animated.View>
 
-
-      <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.section}>
+      <Animated.View
+        entering={FadeInDown.delay(300).duration(400)}
+        style={styles.section}
+      >
         <ThemedText style={styles.sectionTitle}>Preferences</ThemedText>
         <View style={styles.sectionContent}>
           <MenuItem
@@ -279,7 +342,10 @@ export default function RiderAccountScreen({ navigation }: any) {
         </View>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(400).duration(400)} style={styles.section}>
+      <Animated.View
+        entering={FadeInDown.delay(400).duration(400)}
+        style={styles.section}
+      >
         <ThemedText style={styles.sectionTitle}>Support</ThemedText>
         <View style={styles.sectionContent}>
           <MenuItem
@@ -296,7 +362,7 @@ export default function RiderAccountScreen({ navigation }: any) {
                     text: "Call Support",
                     onPress: () => Linking.openURL("tel:+4407596266901"),
                   },
-                ]
+                ],
               );
             }}
           />
@@ -309,7 +375,10 @@ export default function RiderAccountScreen({ navigation }: any) {
         </View>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(500).duration(400)} style={styles.logoutSection}>
+      <Animated.View
+        entering={FadeInDown.delay(500).duration(400)}
+        style={styles.logoutSection}
+      >
         <Pressable onPress={handleLogout} style={styles.logoutButton}>
           <MaterialIcons name="logout" size={20} color="#EF4444" />
           <ThemedText style={styles.logoutText}>Log out</ThemedText>

@@ -163,7 +163,6 @@
 // //   );
 // // }
 
-
 // //client/navigation/RiderTabNavigator.tsx
 // import React from "react";
 // import { Platform, StyleSheet } from "react-native";
@@ -203,7 +202,7 @@
 //   const { isDark } = useTheme();
 
 //   return (
-//     <HomeStack.Navigator 
+//     <HomeStack.Navigator
 //       screenOptions={{
 //         ...screenOptions,
 //         headerStyle: {
@@ -236,7 +235,7 @@
 //   const { isDark } = useTheme();
 
 //   return (
-//     <ServicesStack.Navigator 
+//     <ServicesStack.Navigator
 //       screenOptions={{
 //         ...screenOptions,
 //         headerStyle: {
@@ -259,7 +258,7 @@
 //   const { isDark } = useTheme();
 
 //   return (
-//     <ActivityStack.Navigator 
+//     <ActivityStack.Navigator
 //       screenOptions={{
 //         ...screenOptions,
 //         headerStyle: {
@@ -282,7 +281,7 @@
 //   const { isDark } = useTheme();
 
 //   return (
-//     <AccountStack.Navigator 
+//     <AccountStack.Navigator
 //       screenOptions={{
 //         ...screenOptions,
 //         headerStyle: {
@@ -430,7 +429,7 @@ function HomeStackNavigator({ navigation }: any) {
   const { isDark } = useTheme();
 
   return (
-    <HomeStack.Navigator 
+    <HomeStack.Navigator
       screenOptions={{
         ...screenOptions,
         headerStyle: {
@@ -452,7 +451,7 @@ function HomeStackNavigator({ navigation }: any) {
       <HomeStack.Screen
         name="RideRequest"
         component={RideRequestScreen}
-        options={{ 
+        options={{
           headerTitle: "Request a Ride",
           headerBackTitle: "Back",
         }}
@@ -466,7 +465,7 @@ function ServicesStackNavigator() {
   const { isDark } = useTheme();
 
   return (
-    <ServicesStack.Navigator 
+    <ServicesStack.Navigator
       screenOptions={{
         ...screenOptions,
         headerStyle: {
@@ -489,7 +488,7 @@ function ActivityStackNavigator() {
   const { isDark } = useTheme();
 
   return (
-    <ActivityStack.Navigator 
+    <ActivityStack.Navigator
       screenOptions={{
         ...screenOptions,
         headerStyle: {
@@ -512,7 +511,7 @@ function AccountStackNavigator({ navigation }: any) {
   const { isDark } = useTheme();
 
   return (
-    <AccountStack.Navigator 
+    <AccountStack.Navigator
       screenOptions={{
         ...screenOptions,
         headerStyle: {

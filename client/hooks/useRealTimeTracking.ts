@@ -172,7 +172,10 @@ import {
   DriverLocation,
   RideUpdate,
 } from "@/lib/socket";
-import { startBackgroundLocationTracking, stopBackgroundLocationTracking } from "@/lib/backgroundLocation";
+import {
+  startBackgroundLocationTracking,
+  stopBackgroundLocationTracking,
+} from "@/lib/backgroundLocation";
 
 interface UseDriverTrackingOptions {
   driverId: string;
@@ -180,10 +183,17 @@ interface UseDriverTrackingOptions {
   updateInterval?: number;
 }
 
-export function useDriverTracking({ driverId, isOnline, updateInterval = 5000 }: UseDriverTrackingOptions) {
-  const [currentLocation, setCurrentLocation] = useState<Location.LocationObject | null>(null);
+export function useDriverTracking({
+  driverId,
+  isOnline,
+  updateInterval = 5000,
+}: UseDriverTrackingOptions) {
+  const [currentLocation, setCurrentLocation] =
+    useState<Location.LocationObject | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const locationSubscription = useRef<Location.LocationSubscription | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!isOnline) {
@@ -236,7 +246,7 @@ export function useDriverTracking({ driverId, isOnline, updateInterval = 5000 }:
               heading: location.coords.heading ?? undefined,
               speed: location.coords.speed ?? undefined,
             });
-          }
+          },
         );
       } catch (err) {
         setError("Failed to start location tracking");
@@ -264,7 +274,9 @@ interface UseRiderTrackingOptions {
 }
 
 export function useRiderTracking({ riderId, rideId }: UseRiderTrackingOptions) {
-  const [driverLocation, setDriverLocation] = useState<DriverLocation | null>(null);
+  const [driverLocation, setDriverLocation] = useState<DriverLocation | null>(
+    null,
+  );
   const [rideStatus, setRideStatus] = useState<string | null>(null);
   const rideIdRef = useRef<string | undefined>(rideId);
 
@@ -292,7 +304,11 @@ export function useRiderTracking({ riderId, rideId }: UseRiderTrackingOptions) {
 
     const unsubLocation = onDriverLocation((location) => {
       const activeRideId = rideIdRef.current;
-      if (!activeRideId || !location.rideId || location.rideId === activeRideId) {
+      if (
+        !activeRideId ||
+        !location.rideId ||
+        location.rideId === activeRideId
+      ) {
         setDriverLocation(location);
       }
     });
@@ -319,12 +335,11 @@ export function useRiderTracking({ riderId, rideId }: UseRiderTrackingOptions) {
 
     return () => {
       clearInterval(locationRefresh);
-      if (typeof unsubLocation === 'function') unsubLocation();
-      if (typeof unsubAccepted === 'function') unsubAccepted();
-      if (typeof unsubRide === 'function') unsubRide();
+      if (typeof unsubLocation === "function") unsubLocation();
+      if (typeof unsubAccepted === "function") unsubAccepted();
+      if (typeof unsubRide === "function") unsubRide();
     };
   }, [riderId]);
 
   return { driverLocation, rideStatus };
 }
-

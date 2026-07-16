@@ -39,7 +39,14 @@ interface CheckboxRowProps {
   testID?: string;
 }
 
-function CheckboxRow({ checked, onToggle, label, linkLabel, onLinkPress, testID }: CheckboxRowProps) {
+function CheckboxRow({
+  checked,
+  onToggle,
+  label,
+  linkLabel,
+  onLinkPress,
+  testID,
+}: CheckboxRowProps) {
   return (
     <Pressable onPress={onToggle} style={styles.checkboxRow} testID={testID}>
       <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
@@ -96,7 +103,9 @@ export default function SignUpScreen({ navigation, route }: any) {
     }
 
     if (!acceptedTerms || !acceptedPrivacy) {
-      setError("Please accept the Terms & Conditions and Privacy Policy to continue");
+      setError(
+        "Please accept the Terms & Conditions and Privacy Policy to continue",
+      );
       return;
     }
 
@@ -105,21 +114,36 @@ export default function SignUpScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      const driverDetails = isDriver
-        ? { councilLicence, badgeNo }
-        : undefined;
+      const driverDetails = isDriver ? { councilLicence, badgeNo } : undefined;
 
-      const signedUpUser = await signUp(fullName, email, password, selectedRole, driverDetails);
-      const serverRole = (signedUpUser.role || selectedRole || (isDriver ? "driver" : "rider")).toLowerCase();
-      setUserRole(serverRole === "both" ? "both" : serverRole === "driver" ? "driver" : "rider");
+      const signedUpUser = await signUp(
+        fullName,
+        email,
+        password,
+        selectedRole,
+        driverDetails,
+      );
+      const serverRole = (
+        signedUpUser.role ||
+        selectedRole ||
+        (isDriver ? "driver" : "rider")
+      ).toLowerCase();
+      setUserRole(
+        serverRole === "both"
+          ? "both"
+          : serverRole === "driver"
+            ? "driver"
+            : "rider",
+      );
     } catch (err: any) {
       // Extract server error message if available (e.g. "User already exists")
       const message =
-        err?.message?.includes("409") || err?.message?.toLowerCase().includes("already exists")
+        err?.message?.includes("409") ||
+        err?.message?.toLowerCase().includes("already exists")
           ? "An account with this email already exists. Please sign in."
           : err?.message
-          ? err.message.replace(/^\d+:\s*/, "") // strip leading HTTP status codes like "409: "
-          : "Sign up failed. Please try again.";
+            ? err.message.replace(/^\d+:\s*/, "") // strip leading HTTP status codes like "409: "
+            : "Sign up failed. Please try again.";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -150,7 +174,10 @@ export default function SignUpScreen({ navigation, route }: any) {
         <ScrollView
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: insets.top + Spacing.xl, paddingBottom: insets.bottom + Spacing.xl },
+            {
+              paddingTop: insets.top + Spacing.xl,
+              paddingBottom: insets.bottom + Spacing.xl,
+            },
           ]}
           keyboardShouldPersistTaps="handled"
         >
@@ -192,7 +219,12 @@ export default function SignUpScreen({ navigation, route }: any) {
             <View style={styles.inputContainer}>
               <ThemedText style={styles.inputLabel}>Full Name</ThemedText>
               <View style={styles.inputWrapper}>
-                <Feather name="user" size={20} color="#6B7280" style={styles.inputIcon} />
+                <Feather
+                  name="user"
+                  size={20}
+                  color="#6B7280"
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your full name"
@@ -209,7 +241,12 @@ export default function SignUpScreen({ navigation, route }: any) {
             <View style={styles.inputContainer}>
               <ThemedText style={styles.inputLabel}>Email address</ThemedText>
               <View style={styles.inputWrapper}>
-                <Feather name="mail" size={20} color="#6B7280" style={styles.inputIcon} />
+                <Feather
+                  name="mail"
+                  size={20}
+                  color="#6B7280"
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   style={styles.input}
                   placeholder="Enter your email"
@@ -228,7 +265,12 @@ export default function SignUpScreen({ navigation, route }: any) {
             <View style={styles.inputContainer}>
               <ThemedText style={styles.inputLabel}>Password</ThemedText>
               <View style={styles.inputWrapper}>
-                <Feather name="lock" size={20} color="#6B7280" style={styles.inputIcon} />
+                <Feather
+                  name="lock"
+                  size={20}
+                  color="#6B7280"
+                  style={styles.inputIcon}
+                />
                 <TextInput
                   style={styles.input}
                   placeholder="Create a password"
@@ -254,11 +296,22 @@ export default function SignUpScreen({ navigation, route }: any) {
 
             {/* Driver Details (Drivers Only) */}
             {isDriver && (
-              <Animated.View entering={FadeInDown.delay(300).duration(400)} style={{ gap: Spacing.lg }}>
+              <Animated.View
+                entering={FadeInDown.delay(300).duration(400)}
+                style={{ gap: Spacing.lg }}
+              >
                 <View style={styles.inputContainer}>
-                  <ThemedText style={styles.inputLabel}>Which Council are you registered? <ThemedText style={{ color: "#EF4444" }}>*</ThemedText></ThemedText>
+                  <ThemedText style={styles.inputLabel}>
+                    Which Council are you registered?{" "}
+                    <ThemedText style={{ color: "#EF4444" }}>*</ThemedText>
+                  </ThemedText>
                   <View style={styles.inputWrapper}>
-                    <Feather name="map-pin" size={20} color="#6B7280" style={styles.inputIcon} />
+                    <Feather
+                      name="map-pin"
+                      size={20}
+                      color="#6B7280"
+                      style={styles.inputIcon}
+                    />
                     <TextInput
                       style={styles.input}
                       placeholder="e.g. Gloucester City Council"
@@ -271,9 +324,17 @@ export default function SignUpScreen({ navigation, route }: any) {
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <ThemedText style={styles.inputLabel}>Badge No <ThemedText style={{ color: "#EF4444" }}>*</ThemedText></ThemedText>
+                  <ThemedText style={styles.inputLabel}>
+                    Badge No{" "}
+                    <ThemedText style={{ color: "#EF4444" }}>*</ThemedText>
+                  </ThemedText>
                   <View style={styles.inputWrapper}>
-                    <Feather name="credit-card" size={20} color="#6B7280" style={styles.inputIcon} />
+                    <Feather
+                      name="credit-card"
+                      size={20}
+                      color="#6B7280"
+                      style={styles.inputIcon}
+                    />
                     <TextInput
                       style={styles.input}
                       placeholder="Enter your badge number"
@@ -289,9 +350,16 @@ export default function SignUpScreen({ navigation, route }: any) {
             )}
 
             {/* ── T&C Consent (role-specific) ── */}
-            <Animated.View entering={FadeInDown.delay(350).duration(400)} style={styles.consentBox}>
+            <Animated.View
+              entering={FadeInDown.delay(350).duration(400)}
+              style={styles.consentBox}
+            >
               <View style={styles.consentHeader}>
-                <MaterialIcons name="gavel" size={16} color={UTOColors.primary} />
+                <MaterialIcons
+                  name="gavel"
+                  size={16}
+                  color={UTOColors.primary}
+                />
                 <ThemedText style={styles.consentTitle}>
                   {isDriver ? "Driver Agreement" : "Passenger Agreement"}
                 </ThemedText>
@@ -304,7 +372,11 @@ export default function SignUpScreen({ navigation, route }: any) {
                   setAcceptedTerms((v) => !v);
                 }}
                 label={`I have read and agree to the`}
-                linkLabel={isDriver ? "Driver Terms & Conditions" : "Passenger Terms & Conditions"}
+                linkLabel={
+                  isDriver
+                    ? "Driver Terms & Conditions"
+                    : "Passenger Terms & Conditions"
+                }
                 onLinkPress={openTerms}
                 testID="checkbox-terms"
               />
@@ -323,7 +395,11 @@ export default function SignUpScreen({ navigation, route }: any) {
 
               {!canSubmit && (
                 <View style={styles.consentWarning}>
-                  <MaterialIcons name="info-outline" size={14} color="#9CA3AF" />
+                  <MaterialIcons
+                    name="info-outline"
+                    size={14}
+                    color="#9CA3AF"
+                  />
                   <ThemedText style={styles.consentWarningText}>
                     You must accept both to create an account
                   </ThemedText>
@@ -339,7 +415,9 @@ export default function SignUpScreen({ navigation, route }: any) {
 
             <AnimatedPressable
               onPress={handleSignUp}
-              onPressIn={() => canSubmit && (buttonScale.value = withSpring(0.98))}
+              onPressIn={() =>
+                canSubmit && (buttonScale.value = withSpring(0.98))
+              }
               onPressOut={() => (buttonScale.value = withSpring(1))}
               disabled={isLoading || !canSubmit}
               style={[
@@ -352,14 +430,21 @@ export default function SignUpScreen({ navigation, route }: any) {
               {isLoading ? (
                 <ActivityIndicator color="#000000" />
               ) : (
-                <ThemedText style={[styles.signUpButtonText, !canSubmit && styles.signUpButtonTextDisabled]}>
+                <ThemedText
+                  style={[
+                    styles.signUpButtonText,
+                    !canSubmit && styles.signUpButtonTextDisabled,
+                  ]}
+                >
                   Create Account
                 </ThemedText>
               )}
             </AnimatedPressable>
 
             <Pressable
-              onPress={() => navigation.navigate("SignIn", { role: selectedRole })}
+              onPress={() =>
+                navigation.navigate("SignIn", { role: selectedRole })
+              }
               style={styles.signInLink}
             >
               <ThemedText style={styles.signInText}>

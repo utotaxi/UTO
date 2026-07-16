@@ -17,9 +17,17 @@ import { MaterialIcons } from "@expo/vector-icons";
 
 import { useTheme } from "@/hooks/useTheme";
 import { useDriver, Trip } from "@/context/DriverContext";
-import { Spacing, BorderRadius, formatPrice, UTOColors } from "@/constants/theme";
+import {
+  Spacing,
+  BorderRadius,
+  formatPrice,
+  UTOColors,
+} from "@/constants/theme";
 import { parseBackendTimestamp } from "@/lib/dateTime";
-import { getDriverDeductionDisplayLabel, isCancellationCreditDeduction } from "@shared/driverDeductions";
+import {
+  getDriverDeductionDisplayLabel,
+  isCancellationCreditDeduction,
+} from "@shared/driverDeductions";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -31,27 +39,52 @@ type TimeFilter = "today" | "week" | "month";
 type EarningsEntry =
   | (Trip & { entryType?: "trip" })
   | {
-    id: string;
-    entryType: "deduction";
-    amount: number;
-    reason?: string;
-    type: string;
-    createdAt: string;
-  };
+      id: string;
+      entryType: "deduction";
+      amount: number;
+      reason?: string;
+      type: string;
+      createdAt: string;
+    };
 
 // ─── Month names ───
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 const MONTH_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
 ];
 
-const getSignedDeductionAmount = (deduction: { amount: number; type: string; reason?: string | null }): number => {
+const getSignedDeductionAmount = (deduction: {
+  amount: number;
+  type: string;
+  reason?: string | null;
+}): number => {
   const amount = Number(deduction.amount || 0);
-  if (isCancellationCreditDeduction(deduction.type, deduction.reason)) return Math.abs(amount);
+  if (isCancellationCreditDeduction(deduction.type, deduction.reason))
+    return Math.abs(amount);
   return amount < 0 ? amount : -Math.abs(amount);
 };
 
@@ -59,31 +92,44 @@ export default function EarningsScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const { theme, isDark } = useTheme();
-  const { tripHistory, driverDeductions, earnings, totalEarnings, refreshData } = useDriver();
+  const {
+    tripHistory,
+    driverDeductions,
+    earnings,
+    totalEarnings,
+    refreshData,
+  } = useDriver();
 
   const [refreshing, setRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<TimeFilter>("week");
   const [showMonthPicker, setShowMonthPicker] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth()); // 0-indexed
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<number>(
+    new Date().getMonth(),
+  ); // 0-indexed
+  const [selectedYear, setSelectedYear] = useState<number>(
+    new Date().getFullYear(),
+  );
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
 
   // ─── Dynamic colours based on theme ───
-  const C = useMemo(() => ({
-    bg: isDark ? "#111111" : "#FFFFFF",
-    card: isDark ? "#1A1A1A" : "#F5F5F5",
-    border: isDark ? "#2A2A2A" : "#E5E5E5",
-    text: isDark ? "#FFFFFF" : "#1A1A1A",
-    textDim: isDark ? "#6B7280" : "#9CA3AF",
-    textMid: isDark ? "#9CA3AF" : "#6B7280",
-    gold: GOLD,
-    success: SUCCESS,
-    modalBg: isDark ? "#1A1A1A" : "#FFFFFF",
-    pillBg: isDark ? "#1A1A1A" : "#F0F0F0",
-    pillBorder: isDark ? "#2A2A2A" : "#E0E0E0",
-    barBg: isDark ? GOLD + "30" : GOLD + "50",
-    barActive: GOLD,
-  }), [isDark]);
+  const C = useMemo(
+    () => ({
+      bg: isDark ? "#111111" : "#FFFFFF",
+      card: isDark ? "#1A1A1A" : "#F5F5F5",
+      border: isDark ? "#2A2A2A" : "#E5E5E5",
+      text: isDark ? "#FFFFFF" : "#1A1A1A",
+      textDim: isDark ? "#6B7280" : "#9CA3AF",
+      textMid: isDark ? "#9CA3AF" : "#6B7280",
+      gold: GOLD,
+      success: SUCCESS,
+      modalBg: isDark ? "#1A1A1A" : "#FFFFFF",
+      pillBg: isDark ? "#1A1A1A" : "#F0F0F0",
+      pillBorder: isDark ? "#2A2A2A" : "#E0E0E0",
+      barBg: isDark ? GOLD + "30" : GOLD + "50",
+      barActive: GOLD,
+    }),
+    [isDark],
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -99,7 +145,11 @@ export default function EarningsScreen() {
     const months: { month: number; year: number; label: string }[] = [];
 
     // Show months for 2026 only up to current month
-    for (let m = 0; m <= (selectedYear === currentYear ? currentMonth : 11); m++) {
+    for (
+      let m = 0;
+      m <= (selectedYear === currentYear ? currentMonth : 11);
+      m++
+    ) {
       months.push({
         month: m,
         year: selectedYear,
@@ -112,7 +162,11 @@ export default function EarningsScreen() {
   // ─── Compute cutoff date based on filter ───
   const cutoffDate = useMemo(() => {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
 
     switch (selectedFilter) {
       case "today":
@@ -137,7 +191,11 @@ export default function EarningsScreen() {
     if (selectedFilter === "week") {
       // End of Sunday
       const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+      );
       const dayOfWeek = todayStart.getDay();
       const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       const weekMonday = new Date(todayStart);
@@ -145,7 +203,14 @@ export default function EarningsScreen() {
 
       const weekSunday = new Date(weekMonday);
       weekSunday.setDate(weekSunday.getDate() + 6);
-      return new Date(weekSunday.getFullYear(), weekSunday.getMonth(), weekSunday.getDate(), 23, 59, 59);
+      return new Date(
+        weekSunday.getFullYear(),
+        weekSunday.getMonth(),
+        weekSunday.getDate(),
+        23,
+        59,
+        59,
+      );
     }
     return new Date(); // now
   }, [selectedFilter, selectedMonth, selectedYear]);
@@ -211,31 +276,53 @@ export default function EarningsScreen() {
         }
       });
 
-      const secs = Object.entries(dateGroups).map(([title, data]) => {
-        return {
-          title,
-          data: data.sort((a, b) => {
-            const aDate = parseBackendTimestamp(a.entryType === "deduction" ? a.createdAt : a.completedAt).getTime() || 0;
-            const bDate = parseBackendTimestamp(b.entryType === "deduction" ? b.createdAt : b.completedAt).getTime() || 0;
-            return bDate - aDate;
-          }),
-          dayTotal: data.reduce((sum, item) => {
-            if (item.entryType === "deduction") {
-              return sum + getSignedDeductionAmount(item);
-            } else {
-              return sum + item.farePrice;
-            }
-          }, 0),
-        };
-      }).sort((a, b) => {
-        const aDate = parseBackendTimestamp(a.data[0]?.entryType === "deduction" ? a.data[0]?.createdAt : a.data[0]?.completedAt).getTime() || 0;
-        const bDate = parseBackendTimestamp(b.data[0]?.entryType === "deduction" ? b.data[0]?.createdAt : b.data[0]?.completedAt).getTime() || 0;
-        return bDate - aDate;
-      });
+      const secs = Object.entries(dateGroups)
+        .map(([title, data]) => {
+          return {
+            title,
+            data: data.sort((a, b) => {
+              const aDate =
+                parseBackendTimestamp(
+                  a.entryType === "deduction" ? a.createdAt : a.completedAt,
+                ).getTime() || 0;
+              const bDate =
+                parseBackendTimestamp(
+                  b.entryType === "deduction" ? b.createdAt : b.completedAt,
+                ).getTime() || 0;
+              return bDate - aDate;
+            }),
+            dayTotal: data.reduce((sum, item) => {
+              if (item.entryType === "deduction") {
+                return sum + getSignedDeductionAmount(item);
+              } else {
+                return sum + item.farePrice;
+              }
+            }, 0),
+          };
+        })
+        .sort((a, b) => {
+          const aDate =
+            parseBackendTimestamp(
+              a.data[0]?.entryType === "deduction"
+                ? a.data[0]?.createdAt
+                : a.data[0]?.completedAt,
+            ).getTime() || 0;
+          const bDate =
+            parseBackendTimestamp(
+              b.data[0]?.entryType === "deduction"
+                ? b.data[0]?.createdAt
+                : b.data[0]?.completedAt,
+            ).getTime() || 0;
+          return bDate - aDate;
+        });
 
       // Build daily bar data for current week (Monday to Sunday)
       const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+      );
       const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
       // Get Monday of current week
@@ -285,7 +372,9 @@ export default function EarningsScreen() {
   // ─── Driving time ───
   const drivingTime = useMemo(() => {
     let totalMinutes = 0;
-    filteredTrips.forEach((t) => { totalMinutes += t.durationMinutes || 0; });
+    filteredTrips.forEach((t) => {
+      totalMinutes += t.durationMinutes || 0;
+    });
     const h = Math.floor(totalMinutes / 60);
     const m = totalMinutes % 60;
     return `${h}h ${m}m`;
@@ -293,22 +382,40 @@ export default function EarningsScreen() {
 
   // ─── Average rating ───
   const avgRating = useMemo(() => {
-    let total = 0, count = 0;
-    filteredTrips.forEach((t) => { if (t.rating) { total += t.rating; count++; } });
+    let total = 0,
+      count = 0;
+    filteredTrips.forEach((t) => {
+      if (t.rating) {
+        total += t.rating;
+        count++;
+      }
+    });
     return count > 0 ? (total / count).toFixed(1) : "5.0";
   }, [filteredTrips]);
 
-  const maxBarAmount = useMemo(() => Math.max(...dailyData.map((d) => Math.abs(d.amount)), 1), [dailyData]);
+  const maxBarAmount = useMemo(
+    () => Math.max(...dailyData.map((d) => Math.abs(d.amount)), 1),
+    [dailyData],
+  );
 
   // ─── Date range label ───
   const dateRangeLabel = useMemo(() => {
     const now = new Date();
-    const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
+    const fmt = (d: Date) =>
+      d.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        timeZone: "Europe/London",
+      });
     switch (selectedFilter) {
       case "today":
         return `Today, ${fmt(now)}`;
       case "week": {
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const todayStart = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+        );
         const dayOfWeek = todayStart.getDay();
         const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         const weekMonday = new Date(todayStart);
@@ -326,7 +433,11 @@ export default function EarningsScreen() {
 
   const formatTime = (dateStr: string) => {
     const d = parseBackendTimestamp(dateStr);
-    return d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", timeZone: "Europe/London" });
+    return d.toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "Europe/London",
+    });
   };
 
   const handleFilterPress = useCallback((filter: TimeFilter) => {
@@ -354,7 +465,10 @@ export default function EarningsScreen() {
       {/* Date range with dropdown */}
       <TouchableOpacity
         activeOpacity={0.7}
-        style={[styles.dateRangeBtn, { backgroundColor: C.card, borderColor: C.border }]}
+        style={[
+          styles.dateRangeBtn,
+          { backgroundColor: C.card, borderColor: C.border },
+        ]}
         onPress={() => {
           if (selectedFilter === "month") {
             setShowMonthPicker(true);
@@ -362,9 +476,15 @@ export default function EarningsScreen() {
         }}
       >
         <MaterialIcons name="calendar-today" size={18} color={C.gold} />
-        <Text style={[styles.dateRangeText, { color: C.text }]}>{dateRangeLabel}</Text>
+        <Text style={[styles.dateRangeText, { color: C.text }]}>
+          {dateRangeLabel}
+        </Text>
         {selectedFilter === "month" && (
-          <MaterialIcons name="keyboard-arrow-down" size={20} color={C.textMid} />
+          <MaterialIcons
+            name="keyboard-arrow-down"
+            size={20}
+            color={C.textMid}
+          />
         )}
       </TouchableOpacity>
 
@@ -416,19 +536,36 @@ export default function EarningsScreen() {
 
       {/* Bar chart (week view) */}
       {selectedFilter === "week" && (
-        <View style={[styles.chartContainer, { backgroundColor: C.card, borderColor: C.border }]}>
+        <View
+          style={[
+            styles.chartContainer,
+            { backgroundColor: C.card, borderColor: C.border },
+          ]}
+        >
           <View style={styles.chartMaxLine}>
             <Text style={[styles.chartMaxLabel, { color: C.textDim }]}>
               {formatPrice(maxBarAmount)}
             </Text>
-            <View style={[styles.chartDashedLine, { borderColor: C.textDim + "40" }]} />
+            <View
+              style={[
+                styles.chartDashedLine,
+                { borderColor: C.textDim + "40" },
+              ]}
+            />
           </View>
           <View style={styles.chartBars}>
             {dailyData.map((day, idx) => {
-              const barH = maxBarAmount > 0 ? Math.max((Math.abs(day.amount) / maxBarAmount) * 120, 4) : 4;
+              const barH =
+                maxBarAmount > 0
+                  ? Math.max((Math.abs(day.amount) / maxBarAmount) * 120, 4)
+                  : 4;
               // Highlight today's bar (current day of the week: 0=Monday, 6=Sunday)
               const now = new Date();
-              const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+              const todayStart = new Date(
+                now.getFullYear(),
+                now.getMonth(),
+                now.getDate(),
+              );
               const dayOfWeek = todayStart.getDay();
               const todayIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Convert to our index (0=Mon, 6=Sun)
               const isToday = idx === todayIdx;
@@ -437,11 +574,23 @@ export default function EarningsScreen() {
                   <View
                     style={[
                       styles.chartBar,
-                      { height: barH, backgroundColor: day.amount < 0 ? "#EF4444" : (isToday ? C.barActive : C.barBg) },
+                      {
+                        height: barH,
+                        backgroundColor:
+                          day.amount < 0
+                            ? "#EF4444"
+                            : isToday
+                              ? C.barActive
+                              : C.barBg,
+                      },
                     ]}
                   />
-                  <Text style={[styles.chartBarDayNum, { color: C.textMid }]}>{day.dayNum}</Text>
-                  <Text style={[styles.chartBarLabel, { color: C.textDim }]}>{day.label}</Text>
+                  <Text style={[styles.chartBarDayNum, { color: C.textMid }]}>
+                    {day.dayNum}
+                  </Text>
+                  <Text style={[styles.chartBarLabel, { color: C.textDim }]}>
+                    {day.label}
+                  </Text>
                 </View>
               );
             })}
@@ -452,31 +601,60 @@ export default function EarningsScreen() {
       {/* Stats row */}
       <View style={styles.statsRow}>
         {[
-          { icon: "access-time" as const, label: "Driving", value: drivingTime },
-          { icon: "directions-car" as const, label: "Trips", value: `${filteredCount}` },
+          {
+            icon: "access-time" as const,
+            label: "Driving",
+            value: drivingTime,
+          },
+          {
+            icon: "directions-car" as const,
+            label: "Trips",
+            value: `${filteredCount}`,
+          },
           { icon: "star" as const, label: "Rating", value: avgRating },
         ].map((stat) => (
           <View
             key={stat.label}
-            style={[styles.statCard, { backgroundColor: C.card, borderColor: C.border }]}
+            style={[
+              styles.statCard,
+              { backgroundColor: C.card, borderColor: C.border },
+            ]}
           >
             <MaterialIcons name={stat.icon} size={18} color={C.gold} />
-            <Text style={[styles.statValue, { color: C.text }]}>{stat.value}</Text>
-            <Text style={[styles.statLabel, { color: C.textDim }]}>{stat.label}</Text>
+            <Text style={[styles.statValue, { color: C.text }]}>
+              {stat.value}
+            </Text>
+            <Text style={[styles.statLabel, { color: C.textDim }]}>
+              {stat.label}
+            </Text>
           </View>
         ))}
       </View>
 
       {/* Period summary */}
       <View style={styles.periodRow}>
-        <View style={[styles.periodCard, { backgroundColor: C.card, borderColor: C.border }]}>
-          <Text style={[styles.periodLabel, { color: C.textMid }]}>Current Week</Text>
+        <View
+          style={[
+            styles.periodCard,
+            { backgroundColor: C.card, borderColor: C.border },
+          ]}
+        >
+          <Text style={[styles.periodLabel, { color: C.textMid }]}>
+            Current Week
+          </Text>
           <Text style={[styles.periodValue, { color: C.gold }]}>
             {formatPrice(earnings.thisWeek)}
           </Text>
         </View>
-        <View style={[styles.periodCard, { backgroundColor: C.card, borderColor: C.border }]}>
-          <Text style={[styles.periodLabel, { color: C.textMid }]}>Current Month</Text>
+        <View
+          style={[
+            styles.periodCard,
+            { backgroundColor: C.card, borderColor: C.border },
+          ]}
+        >
+          <Text style={[styles.periodLabel, { color: C.textMid }]}>
+            Current Month
+          </Text>
           <Text style={[styles.periodValue, { color: C.gold }]}>
             {formatPrice(earnings.thisMonth)}
           </Text>
@@ -489,9 +667,15 @@ export default function EarningsScreen() {
   );
 
   // ─── RENDER: Section header (date) ───
-  const renderSectionHeader = ({ section }: { section: { title: string; dayTotal: number } }) => (
+  const renderSectionHeader = ({
+    section,
+  }: {
+    section: { title: string; dayTotal: number };
+  }) => (
     <View style={[styles.sectionHeader, { backgroundColor: C.bg }]}>
-      <Text style={[styles.sectionHeaderText, { color: C.text }]}>{section.title}</Text>
+      <Text style={[styles.sectionHeaderText, { color: C.text }]}>
+        {section.title}
+      </Text>
       <Text style={[styles.sectionHeaderTotal, { color: C.gold }]}>
         {formatPrice(section.dayTotal)}
       </Text>
@@ -500,38 +684,58 @@ export default function EarningsScreen() {
 
   // ─── RENDER: Trip card ───
   const renderTrip = ({ item }: { item: EarningsEntry }) => {
-    const isDeduction = "amount" in item && "type" in item && item.entryType === "deduction";
+    const isDeduction =
+      "amount" in item && "type" in item && item.entryType === "deduction";
 
     if (isDeduction) {
       const deductionItem = item as any;
       // Check if this is a credit (rider cancelled) or deduction (driver cancelled)
-      const isCredit = isCancellationCreditDeduction(deductionItem.type, deductionItem.reason);
+      const isCredit = isCancellationCreditDeduction(
+        deductionItem.type,
+        deductionItem.reason,
+      );
       const displayColor = isCredit ? SUCCESS : "#EF4444";
       const signedAmount = getSignedDeductionAmount(deductionItem);
       const displayIcon = signedAmount >= 0 ? "+" : "-";
       const displayDotColor = isCredit ? SUCCESS : "#EF4444";
 
       return (
-        <View style={[styles.tripCard, { backgroundColor: C.card, borderColor: C.border }]}>
+        <View
+          style={[
+            styles.tripCard,
+            { backgroundColor: C.card, borderColor: C.border },
+          ]}
+        >
           <View style={styles.tripLeft}>
-            <Text style={[styles.tripTime, { color: C.textMid }]}>{formatTime(deductionItem.createdAt)}</Text>
+            <Text style={[styles.tripTime, { color: C.textMid }]}>
+              {formatTime(deductionItem.createdAt)}
+            </Text>
           </View>
 
           <View style={styles.tripCenter}>
             <View style={styles.tripRouteRow}>
-              <View style={[styles.tripDot, { backgroundColor: displayDotColor }]} />
-              <Text style={[styles.tripAddr, { color: C.text }]} numberOfLines={1}>
+              <View
+                style={[styles.tripDot, { backgroundColor: displayDotColor }]}
+              />
+              <Text
+                style={[styles.tripAddr, { color: C.text }]}
+                numberOfLines={1}
+              >
                 {isCredit ? "Cancellation Fee Credit" : "Cancellation Fee"}
               </Text>
             </View>
-            <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={2}>
+            <Text
+              style={[styles.tripAddr, { color: C.textMid }]}
+              numberOfLines={2}
+            >
               {getDriverDeductionDisplayLabel(deductionItem)}
             </Text>
           </View>
 
           <View style={styles.tripRight}>
             <Text style={[styles.tripFare, { color: displayColor }]}>
-              {displayIcon}{formatPrice(Math.abs(signedAmount))}
+              {displayIcon}
+              {formatPrice(Math.abs(signedAmount))}
             </Text>
           </View>
         </View>
@@ -543,22 +747,33 @@ export default function EarningsScreen() {
       <TouchableOpacity
         activeOpacity={0.7}
         onPress={() => setSelectedTrip(trip)}
-        style={[styles.tripCard, { backgroundColor: C.card, borderColor: C.border }]}
+        style={[
+          styles.tripCard,
+          { backgroundColor: C.card, borderColor: C.border },
+        ]}
       >
         <View style={styles.tripLeft}>
-          <Text style={[styles.tripTime, { color: C.textMid }]}>{formatTime(trip.completedAt)}</Text>
+          <Text style={[styles.tripTime, { color: C.textMid }]}>
+            {formatTime(trip.completedAt)}
+          </Text>
         </View>
 
         <View style={styles.tripCenter}>
           <View style={styles.tripRouteRow}>
             <View style={[styles.tripDot, { backgroundColor: SUCCESS }]} />
-            <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={1}>
+            <Text
+              style={[styles.tripAddr, { color: C.textMid }]}
+              numberOfLines={1}
+            >
               {trip.pickupAddress}
             </Text>
           </View>
           <View style={styles.tripRouteRow}>
             <View style={[styles.tripDot, { backgroundColor: "#EF4444" }]} />
-            <Text style={[styles.tripAddr, { color: C.textMid }]} numberOfLines={1}>
+            <Text
+              style={[styles.tripAddr, { color: C.textMid }]}
+              numberOfLines={1}
+            >
               {trip.dropoffAddress}
             </Text>
           </View>
@@ -571,7 +786,9 @@ export default function EarningsScreen() {
           {trip.rating ? (
             <View style={styles.tripRating}>
               <MaterialIcons name="star" size={12} color={C.gold} />
-              <Text style={[styles.tripRatingText, { color: C.textMid }]}>{trip.rating}</Text>
+              <Text style={[styles.tripRatingText, { color: C.textMid }]}>
+                {trip.rating}
+              </Text>
             </View>
           ) : null}
           <MaterialIcons name="chevron-right" size={18} color={C.textDim} />
@@ -593,7 +810,8 @@ export default function EarningsScreen() {
           styles.listContent,
           {
             paddingTop: insets.top + 12,
-            paddingBottom: tabBarHeight > 0 ? tabBarHeight + Spacing.xl : insets.bottom + 80,
+            paddingBottom:
+              tabBarHeight > 0 ? tabBarHeight + Spacing.xl : insets.bottom + 80,
           },
         ]}
         refreshControl={
@@ -606,10 +824,17 @@ export default function EarningsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <View style={[styles.emptyIcon, { backgroundColor: C.card, borderColor: C.border }]}>
+            <View
+              style={[
+                styles.emptyIcon,
+                { backgroundColor: C.card, borderColor: C.border },
+              ]}
+            >
               <MaterialIcons name="trending-up" size={36} color={C.textDim} />
             </View>
-            <Text style={[styles.emptyTitle, { color: C.text }]}>No trips yet</Text>
+            <Text style={[styles.emptyTitle, { color: C.text }]}>
+              No trips yet
+            </Text>
             <Text style={[styles.emptySub, { color: C.textDim }]}>
               Complete rides to start earning
             </Text>
@@ -619,14 +844,27 @@ export default function EarningsScreen() {
 
       {/* ═══ Month Picker Modal ═══ */}
       <Modal visible={showMonthPicker} transparent animationType="fade">
-        <Pressable style={styles.modalOverlay} onPress={() => setShowMonthPicker(false)}>
-          <View style={[styles.monthPickerCard, { backgroundColor: C.modalBg }]}>
-            <Text style={[styles.monthPickerTitle, { color: C.text }]}>Select Month</Text>
-            <Text style={[styles.monthPickerYear, { color: C.textMid }]}>{selectedYear}</Text>
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowMonthPicker(false)}
+        >
+          <View
+            style={[styles.monthPickerCard, { backgroundColor: C.modalBg }]}
+          >
+            <Text style={[styles.monthPickerTitle, { color: C.text }]}>
+              Select Month
+            </Text>
+            <Text style={[styles.monthPickerYear, { color: C.textMid }]}>
+              {selectedYear}
+            </Text>
 
-            <ScrollView style={styles.monthList} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={styles.monthList}
+              showsVerticalScrollIndicator={false}
+            >
               {availableMonths.map((item) => {
-                const active = item.month === selectedMonth && item.year === selectedYear;
+                const active =
+                  item.month === selectedMonth && item.year === selectedYear;
                 return (
                   <TouchableOpacity
                     key={`${item.year}-${item.month}`}
@@ -648,7 +886,9 @@ export default function EarningsScreen() {
                     >
                       {item.label}
                     </Text>
-                    {active && <MaterialIcons name="check" size={20} color="#000000" />}
+                    {active && (
+                      <MaterialIcons name="check" size={20} color="#000000" />
+                    )}
                   </TouchableOpacity>
                 );
               })}
@@ -659,7 +899,9 @@ export default function EarningsScreen() {
               onPress={() => setShowMonthPicker(false)}
               style={[styles.monthCloseBtn, { borderColor: C.border }]}
             >
-              <Text style={[styles.monthCloseBtnText, { color: C.textMid }]}>Cancel</Text>
+              <Text style={[styles.monthCloseBtnText, { color: C.textMid }]}>
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -673,12 +915,21 @@ export default function EarningsScreen() {
               <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
                 {/* Header */}
                 <View style={styles.tripDetailHeader}>
-                  <View style={[styles.tripDetailCheckCircle, { backgroundColor: SUCCESS }]}>
+                  <View
+                    style={[
+                      styles.tripDetailCheckCircle,
+                      { backgroundColor: SUCCESS },
+                    ]}
+                  >
                     <MaterialIcons name="check" size={28} color="#FFFFFF" />
                   </View>
-                  <Text style={[styles.tripDetailTitle, { color: C.text }]}>Ride Summary</Text>
+                  <Text style={[styles.tripDetailTitle, { color: C.text }]}>
+                    Ride Summary
+                  </Text>
                   <Text style={[styles.tripDetailDate, { color: C.textMid }]}>
-                    {parseBackendTimestamp(selectedTrip.completedAt).toLocaleDateString("en-GB", {
+                    {parseBackendTimestamp(
+                      selectedTrip.completedAt,
+                    ).toLocaleDateString("en-GB", {
                       weekday: "long",
                       day: "numeric",
                       month: "long",
@@ -691,45 +942,114 @@ export default function EarningsScreen() {
                 </View>
 
                 {/* Fare card */}
-                <View style={[styles.tripDetailFareCard, { backgroundColor: isDark ? "#111111" : "#F9F9F9", borderColor: C.border }]}>
-                  <Text style={[styles.tripDetailFareLabel, { color: C.textMid }]}>FARE EARNED</Text>
-                  <Text style={[styles.tripDetailFareAmount, { color: C.gold }]}>
+                <View
+                  style={[
+                    styles.tripDetailFareCard,
+                    {
+                      backgroundColor: isDark ? "#111111" : "#F9F9F9",
+                      borderColor: C.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.tripDetailFareLabel, { color: C.textMid }]}
+                  >
+                    FARE EARNED
+                  </Text>
+                  <Text
+                    style={[styles.tripDetailFareAmount, { color: C.gold }]}
+                  >
                     {formatPrice(selectedTrip.farePrice)}
                   </Text>
-                  <View style={[styles.tripDetailFareBadge, {
-                    backgroundColor: UTOColors.primary + "20"
-                  }]}>
+                  <View
+                    style={[
+                      styles.tripDetailFareBadge,
+                      {
+                        backgroundColor: UTOColors.primary + "20",
+                      },
+                    ]}
+                  >
                     <MaterialIcons
                       name="credit-card"
                       size={14}
                       color={UTOColors.primary}
                     />
-                    <Text style={[styles.tripDetailFareBadgeText, {
-                      color: UTOColors.primary
-                    }]}>
+                    <Text
+                      style={[
+                        styles.tripDetailFareBadgeText,
+                        {
+                          color: UTOColors.primary,
+                        },
+                      ]}
+                    >
                       Card Payment
                     </Text>
                   </View>
                 </View>
 
                 {/* Route */}
-                <Text style={[styles.tripDetailSectionLabel, { color: C.text }]}>Route</Text>
-                <View style={[styles.tripDetailRouteCard, { backgroundColor: isDark ? "#111111" : "#F9F9F9", borderColor: C.border }]}>
+                <Text
+                  style={[styles.tripDetailSectionLabel, { color: C.text }]}
+                >
+                  Route
+                </Text>
+                <View
+                  style={[
+                    styles.tripDetailRouteCard,
+                    {
+                      backgroundColor: isDark ? "#111111" : "#F9F9F9",
+                      borderColor: C.border,
+                    },
+                  ]}
+                >
                   <View style={styles.tripDetailRouteRow}>
-                    <View style={[styles.tripDetailRouteDot, { backgroundColor: SUCCESS }]} />
+                    <View
+                      style={[
+                        styles.tripDetailRouteDot,
+                        { backgroundColor: SUCCESS },
+                      ]}
+                    />
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.tripDetailRouteLabel, { color: C.textDim }]}>PICKUP</Text>
-                      <Text style={[styles.tripDetailRouteAddr, { color: C.text }]}>
+                      <Text
+                        style={[
+                          styles.tripDetailRouteLabel,
+                          { color: C.textDim },
+                        ]}
+                      >
+                        PICKUP
+                      </Text>
+                      <Text
+                        style={[styles.tripDetailRouteAddr, { color: C.text }]}
+                      >
                         {selectedTrip.pickupAddress}
                       </Text>
                     </View>
                   </View>
-                  <View style={[styles.tripDetailRouteLine, { backgroundColor: C.border }]} />
+                  <View
+                    style={[
+                      styles.tripDetailRouteLine,
+                      { backgroundColor: C.border },
+                    ]}
+                  />
                   <View style={styles.tripDetailRouteRow}>
-                    <View style={[styles.tripDetailRouteDot, { backgroundColor: "#EF4444" }]} />
+                    <View
+                      style={[
+                        styles.tripDetailRouteDot,
+                        { backgroundColor: "#EF4444" },
+                      ]}
+                    />
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.tripDetailRouteLabel, { color: C.textDim }]}>DROPOFF</Text>
-                      <Text style={[styles.tripDetailRouteAddr, { color: C.text }]}>
+                      <Text
+                        style={[
+                          styles.tripDetailRouteLabel,
+                          { color: C.textDim },
+                        ]}
+                      >
+                        DROPOFF
+                      </Text>
+                      <Text
+                        style={[styles.tripDetailRouteAddr, { color: C.text }]}
+                      >
                         {selectedTrip.dropoffAddress}
                       </Text>
                     </View>
@@ -737,19 +1057,52 @@ export default function EarningsScreen() {
                 </View>
 
                 {/* Details grid */}
-                <Text style={[styles.tripDetailSectionLabel, { color: C.text }]}>Details</Text>
+                <Text
+                  style={[styles.tripDetailSectionLabel, { color: C.text }]}
+                >
+                  Details
+                </Text>
                 <View style={styles.tripDetailGrid}>
                   {[
-                    { icon: "person" as const, label: "Rider", value: selectedTrip.riderName },
-                    { icon: "straighten" as const, label: "Distance", value: `${selectedTrip.distanceMiles} mi` },
+                    {
+                      icon: "person" as const,
+                      label: "Rider",
+                      value: selectedTrip.riderName,
+                    },
+                    {
+                      icon: "straighten" as const,
+                      label: "Distance",
+                      value: `${selectedTrip.distanceMiles} mi`,
+                    },
                   ].map((item) => (
                     <View
                       key={item.label}
-                      style={[styles.tripDetailGridItem, { backgroundColor: isDark ? "#111111" : "#F9F9F9", borderColor: C.border }]}
+                      style={[
+                        styles.tripDetailGridItem,
+                        {
+                          backgroundColor: isDark ? "#111111" : "#F9F9F9",
+                          borderColor: C.border,
+                        },
+                      ]}
                     >
-                      <MaterialIcons name={item.icon} size={20} color={C.gold} />
-                      <Text style={[styles.tripDetailGridValue, { color: C.text }]}>{item.value}</Text>
-                      <Text style={[styles.tripDetailGridLabel, { color: C.textDim }]}>{item.label}</Text>
+                      <MaterialIcons
+                        name={item.icon}
+                        size={20}
+                        color={C.gold}
+                      />
+                      <Text
+                        style={[styles.tripDetailGridValue, { color: C.text }]}
+                      >
+                        {item.value}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.tripDetailGridLabel,
+                          { color: C.textDim },
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
                     </View>
                   ))}
                 </View>
@@ -758,7 +1111,10 @@ export default function EarningsScreen() {
                 <TouchableOpacity
                   activeOpacity={0.7}
                   onPress={() => setSelectedTrip(null)}
-                  style={[styles.tripDetailCloseBtn, { backgroundColor: C.gold }]}
+                  style={[
+                    styles.tripDetailCloseBtn,
+                    { backgroundColor: C.gold },
+                  ]}
                 >
                   <Text style={styles.tripDetailCloseBtnText}>Close</Text>
                 </TouchableOpacity>

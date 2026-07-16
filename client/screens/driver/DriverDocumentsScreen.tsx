@@ -31,25 +31,85 @@ interface DocConfig {
 
 const DOCUMENT_LIST: DocConfig[] = [
   // Driver Documents
-  { key: "documentPhdl", title: "Private Hire Driver Licence", category: "driver", hasExpiry: true },
-  { key: "documentDvlaLicence", title: "DVLA Driving Licence", category: "driver", hasExpiry: true },
-  { key: "documentDvlaCheckCode", title: "DBS Certificate / DBS Update Service", category: "driver", hasExpiry: false },
-  { key: "documentNationalInsurance", title: "National Insurance Number Proof", category: "driver", hasExpiry: false },
-  { key: "documentBankStatement", title: "Bank Statement", category: "driver", hasExpiry: false },
-  { key: "documentProfilePhoto", title: "Profile Photo", category: "driver", hasExpiry: false },
+  {
+    key: "documentPhdl",
+    title: "Private Hire Driver Licence",
+    category: "driver",
+    hasExpiry: true,
+  },
+  {
+    key: "documentDvlaLicence",
+    title: "DVLA Driving Licence",
+    category: "driver",
+    hasExpiry: true,
+  },
+  {
+    key: "documentDvlaCheckCode",
+    title: "DBS Certificate / DBS Update Service",
+    category: "driver",
+    hasExpiry: false,
+  },
+  {
+    key: "documentNationalInsurance",
+    title: "National Insurance Number Proof",
+    category: "driver",
+    hasExpiry: false,
+  },
+  {
+    key: "documentBankStatement",
+    title: "Bank Statement",
+    category: "driver",
+    hasExpiry: false,
+  },
+  {
+    key: "documentProfilePhoto",
+    title: "Profile Photo",
+    category: "driver",
+    hasExpiry: false,
+  },
   // Vehicle Documents
-  { key: "documentPhvl", title: "Private Hire Vehicle Licence", category: "vehicle", hasExpiry: true },
-  { key: "documentInsurance", title: "Vehicle Insurance Certificate", category: "vehicle", hasExpiry: true },
-  { key: "documentInspection", title: "MOT Certificate", category: "vehicle", hasExpiry: true },
-  { key: "documentLogbook", title: "Vehicle Logbook / V5C", category: "vehicle", hasExpiry: false },
+  {
+    key: "documentPhvl",
+    title: "Private Hire Vehicle Licence",
+    category: "vehicle",
+    hasExpiry: true,
+  },
+  {
+    key: "documentInsurance",
+    title: "Vehicle Insurance Certificate",
+    category: "vehicle",
+    hasExpiry: true,
+  },
+  {
+    key: "documentInspection",
+    title: "MOT Certificate",
+    category: "vehicle",
+    hasExpiry: true,
+  },
+  {
+    key: "documentLogbook",
+    title: "Vehicle Logbook / V5C",
+    category: "vehicle",
+    hasExpiry: false,
+  },
 ];
 
-type DocStatus = "not_uploaded" | "pending" | "completed" | "rejected" | "expired";
+type DocStatus =
+  | "not_uploaded"
+  | "pending"
+  | "completed"
+  | "rejected"
+  | "expired";
 
-function getDocStatus(profile: DriverProfile | null, docKey: string): DocStatus {
+function getDocStatus(
+  profile: DriverProfile | null,
+  docKey: string,
+): DocStatus {
   if (!profile) return "not_uploaded";
   const urlVal = (profile as any)[`${docKey}Url`];
-  const statusVal: string | null | undefined = (profile as any)[`${docKey}Status`];
+  const statusVal: string | null | undefined = (profile as any)[
+    `${docKey}Status`
+  ];
 
   if (!urlVal && (!statusVal || statusVal === "pending")) return "not_uploaded";
   if (statusVal === "completed" || statusVal === "approved") return "completed";
@@ -61,31 +121,46 @@ function getDocStatus(profile: DriverProfile | null, docKey: string): DocStatus 
 
 function getStatusLabel(status: DocStatus): string {
   switch (status) {
-    case "not_uploaded": return "Not uploaded";
-    case "pending": return "Pending review";
-    case "completed": return "Approved";
-    case "rejected": return "Rejected";
-    case "expired": return "Expired";
+    case "not_uploaded":
+      return "Not uploaded";
+    case "pending":
+      return "Pending review";
+    case "completed":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    case "expired":
+      return "Expired";
   }
 }
 
 function getStatusColor(status: DocStatus): string {
   switch (status) {
-    case "not_uploaded": return "#9CA3AF";
-    case "pending": return "#F59E0B";
-    case "completed": return "#10B981";
-    case "rejected": return "#EF4444";
-    case "expired": return "#F97316";
+    case "not_uploaded":
+      return "#9CA3AF";
+    case "pending":
+      return "#F59E0B";
+    case "completed":
+      return "#10B981";
+    case "rejected":
+      return "#EF4444";
+    case "expired":
+      return "#F97316";
   }
 }
 
 function getStatusIcon(status: DocStatus): { name: string; color: string } {
   switch (status) {
-    case "not_uploaded": return { name: "upload-cloud", color: "#9CA3AF" };
-    case "pending": return { name: "clock", color: "#F59E0B" };
-    case "completed": return { name: "check-circle", color: "#10B981" };
-    case "rejected": return { name: "x-circle", color: "#EF4444" };
-    case "expired": return { name: "alert-triangle", color: "#F97316" };
+    case "not_uploaded":
+      return { name: "upload-cloud", color: "#9CA3AF" };
+    case "pending":
+      return { name: "clock", color: "#F59E0B" };
+    case "completed":
+      return { name: "check-circle", color: "#10B981" };
+    case "rejected":
+      return { name: "x-circle", color: "#EF4444" };
+    case "expired":
+      return { name: "alert-triangle", color: "#F97316" };
   }
 }
 
@@ -97,51 +172,81 @@ interface DocumentItemProps {
   onUpload: () => void;
 }
 
-function DocumentItem({ config, profile, isUploading, onUpload }: DocumentItemProps) {
+function DocumentItem({
+  config,
+  profile,
+  isUploading,
+  onUpload,
+}: DocumentItemProps) {
   const { theme } = useTheme();
   const status = getDocStatus(profile, config.key);
   const statusLabel = getStatusLabel(status);
   const statusColor = getStatusColor(status);
   const statusIcon = getStatusIcon(status);
 
-  const rejectionReason = status === "rejected"
-    ? (profile as any)?.[`${config.key}RejectionReason`] || "Document not accepted – please re-upload"
-    : null;
+  const rejectionReason =
+    status === "rejected"
+      ? (profile as any)?.[`${config.key}RejectionReason`] ||
+        "Document not accepted – please re-upload"
+      : null;
 
   const expiryDate = config.hasExpiry
     ? (profile as any)?.[`${config.key}Expiry`] || null
     : null;
 
-  const actionLabel = status === "not_uploaded"
-    ? "Upload"
-    : status === "rejected" || status === "expired"
-      ? "Upload Again"
-      : status === "pending" || status === "completed"
-        ? "View / Replace"
-        : "Upload";
+  const actionLabel =
+    status === "not_uploaded"
+      ? "Upload"
+      : status === "rejected" || status === "expired"
+        ? "Upload Again"
+        : status === "pending" || status === "completed"
+          ? "View / Replace"
+          : "Upload";
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.docItem,
-        { backgroundColor: pressed ? theme.backgroundDefault + "80" : "transparent" },
+        {
+          backgroundColor: pressed
+            ? theme.backgroundDefault + "80"
+            : "transparent",
+        },
       ]}
       onPress={onUpload}
       disabled={isUploading}
     >
       <View style={styles.docRow}>
         {/* Status Icon */}
-        <View style={[styles.statusIconCircle, { backgroundColor: statusColor + "15" }]}>
-          <Feather name={statusIcon.name as any} size={18} color={statusIcon.color} />
+        <View
+          style={[
+            styles.statusIconCircle,
+            { backgroundColor: statusColor + "15" },
+          ]}
+        >
+          <Feather
+            name={statusIcon.name as any}
+            size={18}
+            color={statusIcon.color}
+          />
         </View>
 
         {/* Document Info */}
         <View style={styles.docInfo}>
-          <Text style={[styles.docTitle, { color: theme.text }]}>{config.title}</Text>
+          <Text style={[styles.docTitle, { color: theme.text }]}>
+            {config.title}
+          </Text>
 
           <View style={styles.statusRow}>
-            <View style={[styles.statusBadge, { backgroundColor: statusColor + "15" }]}>
-              <Text style={[styles.statusBadgeText, { color: statusColor }]}>{statusLabel}</Text>
+            <View
+              style={[
+                styles.statusBadge,
+                { backgroundColor: statusColor + "15" },
+              ]}
+            >
+              <Text style={[styles.statusBadgeText, { color: statusColor }]}>
+                {statusLabel}
+              </Text>
             </View>
             {expiryDate && (
               <Text style={[styles.expiryText, { color: theme.textSecondary }]}>
@@ -164,19 +269,51 @@ function DocumentItem({ config, profile, isUploading, onUpload }: DocumentItemPr
           {isUploading ? (
             <ActivityIndicator size="small" color={UTOColors.primary} />
           ) : (
-            <View style={[styles.actionBtn, {
-              backgroundColor: status === "not_uploaded" || status === "rejected" || status === "expired"
-                ? UTOColors.primary
-                : theme.backgroundSecondary || "#F3F4F6"
-            }]}>
+            <View
+              style={[
+                styles.actionBtn,
+                {
+                  backgroundColor:
+                    status === "not_uploaded" ||
+                    status === "rejected" ||
+                    status === "expired"
+                      ? UTOColors.primary
+                      : theme.backgroundSecondary || "#F3F4F6",
+                },
+              ]}
+            >
               <Feather
-                name={status === "not_uploaded" || status === "rejected" || status === "expired" ? "upload" : "eye"}
+                name={
+                  status === "not_uploaded" ||
+                  status === "rejected" ||
+                  status === "expired"
+                    ? "upload"
+                    : "eye"
+                }
                 size={14}
-                color={status === "not_uploaded" || status === "rejected" || status === "expired" ? "#000" : theme.textSecondary}
+                color={
+                  status === "not_uploaded" ||
+                  status === "rejected" ||
+                  status === "expired"
+                    ? "#000"
+                    : theme.textSecondary
+                }
               />
-              <Text style={[styles.actionBtnText, {
-                color: status === "not_uploaded" || status === "rejected" || status === "expired" ? "#000" : theme.textSecondary
-              }]}>{actionLabel}</Text>
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  {
+                    color:
+                      status === "not_uploaded" ||
+                      status === "rejected" ||
+                      status === "expired"
+                        ? "#000"
+                        : theme.textSecondary,
+                  },
+                ]}
+              >
+                {actionLabel}
+              </Text>
             </View>
           )}
         </View>
@@ -197,12 +334,14 @@ export default function DriverDocumentsScreen() {
     ? `${driverProfile.vehicleMake} ${driverProfile.vehicleModel} (${driverProfile.licensePlate})`
     : "Your Vehicle";
 
-  const driverDocs = DOCUMENT_LIST.filter(d => d.category === "driver");
-  const vehicleDocs = DOCUMENT_LIST.filter(d => d.category === "vehicle");
+  const driverDocs = DOCUMENT_LIST.filter((d) => d.category === "driver");
+  const vehicleDocs = DOCUMENT_LIST.filter((d) => d.category === "vehicle");
 
   // Count completed docs
   const totalDocs = DOCUMENT_LIST.length;
-  const completedDocs = DOCUMENT_LIST.filter(d => getDocStatus(driverProfile, d.key) === "completed").length;
+  const completedDocs = DOCUMENT_LIST.filter(
+    (d) => getDocStatus(driverProfile, d.key) === "completed",
+  ).length;
   const allApproved = completedDocs === totalDocs;
 
   const handleDocumentPick = async (docKey: string) => {
@@ -210,7 +349,8 @@ export default function DriverDocumentsScreen() {
     const statusKey = `${docKey}Status` as keyof DriverProfile;
 
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (permissionResult.granted === false) {
         Alert.alert("Permission to access camera roll is required!");
         return;
@@ -232,7 +372,10 @@ export default function DriverDocumentsScreen() {
       }
 
       if (!result.assets[0].base64) {
-        Alert.alert("Error", "Could not read the image file properly. Please select a different image.");
+        Alert.alert(
+          "Error",
+          "Could not read the image file properly. Please select a different image.",
+        );
         return;
       }
 
@@ -242,19 +385,27 @@ export default function DriverDocumentsScreen() {
         uploadTargetId,
         result.assets[0].base64,
         urlKey as string,
-        result.assets[0].mimeType || "image/jpeg"
+        result.assets[0].mimeType || "image/jpeg",
       );
 
-      const updatedProfile = { ...(driverProfile || { id: uploadTargetId } as DriverProfile) };
+      const updatedProfile = {
+        ...(driverProfile || ({ id: uploadTargetId } as DriverProfile)),
+      };
       (updatedProfile as any)[urlKey] = uploadedUrl;
       (updatedProfile as any)[statusKey] = "pending";
       await setDriverProfile(updatedProfile);
       await refreshData();
 
-      Alert.alert("Success ✅", "Document uploaded successfully! It will be reviewed by our team.");
+      Alert.alert(
+        "Success ✅",
+        "Document uploaded successfully! It will be reviewed by our team.",
+      );
     } catch (error: any) {
       console.error("Error picking document:", error);
-      Alert.alert("Error", error?.message || "Could not upload document. Please try again.");
+      Alert.alert(
+        "Error",
+        error?.message || "Could not upload document. Please try again.",
+      );
     } finally {
       setUploadingDoc(null);
     }
@@ -266,13 +417,29 @@ export default function DriverDocumentsScreen() {
       contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
     >
       {/* Compliance Banner */}
-      <View style={[styles.banner, { backgroundColor: allApproved ? "#10B98115" : "#F59E0B15" }]}>
-        <View style={[styles.bannerIcon, { backgroundColor: allApproved ? "#10B98120" : "#F59E0B20" }]}>
-          <Feather name={allApproved ? "check-circle" : "shield"} size={24} color={allApproved ? "#10B981" : "#F59E0B"} />
+      <View
+        style={[
+          styles.banner,
+          { backgroundColor: allApproved ? "#10B98115" : "#F59E0B15" },
+        ]}
+      >
+        <View
+          style={[
+            styles.bannerIcon,
+            { backgroundColor: allApproved ? "#10B98120" : "#F59E0B20" },
+          ]}
+        >
+          <Feather
+            name={allApproved ? "check-circle" : "shield"}
+            size={24}
+            color={allApproved ? "#10B981" : "#F59E0B"}
+          />
         </View>
         <View style={styles.bannerTextContainer}>
           <Text style={[styles.bannerTitle, { color: theme.text }]}>
-            {allApproved ? "All documents approved" : "Keep your documents up to date"}
+            {allApproved
+              ? "All documents approved"
+              : "Keep your documents up to date"}
           </Text>
           <Text style={[styles.bannerSubtitle, { color: theme.textSecondary }]}>
             {allApproved
@@ -284,8 +451,21 @@ export default function DriverDocumentsScreen() {
 
       {/* Progress Bar */}
       <View style={styles.progressSection}>
-        <View style={[styles.progressBar, { backgroundColor: theme.backgroundDefault }]}>
-          <View style={[styles.progressFill, { width: `${(completedDocs / totalDocs) * 100}%`, backgroundColor: allApproved ? "#10B981" : UTOColors.primary }]} />
+        <View
+          style={[
+            styles.progressBar,
+            { backgroundColor: theme.backgroundDefault },
+          ]}
+        >
+          <View
+            style={[
+              styles.progressFill,
+              {
+                width: `${(completedDocs / totalDocs) * 100}%`,
+                backgroundColor: allApproved ? "#10B981" : UTOColors.primary,
+              },
+            ]}
+          />
         </View>
       </View>
 
@@ -293,13 +473,30 @@ export default function DriverDocumentsScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Feather name="user" size={18} color={UTOColors.primary} />
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Driver Documents</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            Driver Documents
+          </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: theme.backgroundDefault, borderColor: theme.border || "#E5E7EB" }]}>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: theme.backgroundDefault,
+              borderColor: theme.border || "#E5E7EB",
+            },
+          ]}
+        >
           {driverDocs.map((doc, index) => (
             <React.Fragment key={doc.key}>
-              {index > 0 && <View style={[styles.divider, { backgroundColor: theme.border || "#F3F4F6" }]} />}
+              {index > 0 && (
+                <View
+                  style={[
+                    styles.divider,
+                    { backgroundColor: theme.border || "#F3F4F6" },
+                  ]}
+                />
+              )}
               <DocumentItem
                 config={doc}
                 profile={driverProfile}
@@ -315,13 +512,30 @@ export default function DriverDocumentsScreen() {
       <View style={[styles.section, { marginTop: Spacing.xl }]}>
         <View style={styles.sectionHeader}>
           <Feather name="truck" size={18} color={UTOColors.primary} />
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>{vehicleName}</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            {vehicleName}
+          </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: theme.backgroundDefault, borderColor: theme.border || "#E5E7EB" }]}>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: theme.backgroundDefault,
+              borderColor: theme.border || "#E5E7EB",
+            },
+          ]}
+        >
           {vehicleDocs.map((doc, index) => (
             <React.Fragment key={doc.key}>
-              {index > 0 && <View style={[styles.divider, { backgroundColor: theme.border || "#F3F4F6" }]} />}
+              {index > 0 && (
+                <View
+                  style={[
+                    styles.divider,
+                    { backgroundColor: theme.border || "#F3F4F6" },
+                  ]}
+                />
+              )}
               <DocumentItem
                 config={doc}
                 profile={driverProfile}
@@ -337,7 +551,8 @@ export default function DriverDocumentsScreen() {
       <View style={styles.complianceNote}>
         <Feather name="info" size={16} color="#9CA3AF" />
         <Text style={[styles.complianceText, { color: "#9CA3AF" }]}>
-          Drivers must have all mandatory documents uploaded and approved before going online. Documents are reviewed within 24–48 hours.
+          Drivers must have all mandatory documents uploaded and approved before
+          going online. Documents are reviewed within 24–48 hours.
         </Text>
       </View>
     </ScrollView>

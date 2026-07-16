@@ -29,22 +29,22 @@ function SettingItem({ title, subtitle, onPress, index }: SettingItemProps) {
         }}
         style={({ pressed }) => [
           styles.settingItem,
-          { backgroundColor: pressed ? theme.backgroundDefault : "transparent" },
+          {
+            backgroundColor: pressed ? theme.backgroundDefault : "transparent",
+          },
         ]}
       >
         <View style={styles.textContainer}>
           <ThemedText style={styles.title}>{title}</ThemedText>
           {subtitle ? (
-            <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
+            <ThemedText
+              style={[styles.subtitle, { color: theme.textSecondary }]}
+            >
               {subtitle}
             </ThemedText>
           ) : null}
         </View>
-        <Feather
-          name="chevron-right"
-          size={20}
-          color={theme.textSecondary}
-        />
+        <Feather name="chevron-right" size={20} color={theme.textSecondary} />
       </Pressable>
       <View style={[styles.divider, { backgroundColor: theme.border }]} />
     </Animated.View>
@@ -64,7 +64,7 @@ export default function TaxInformationScreen({ navigation }: any) {
           styles.scrollContent,
           {
             paddingTop: Math.max(headerHeight, 56) + insets.top + Spacing.xl,
-            paddingBottom: insets.bottom + Spacing.lg
+            paddingBottom: insets.bottom + Spacing.lg,
           },
         ]}
         showsVerticalScrollIndicator={false}

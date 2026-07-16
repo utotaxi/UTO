@@ -19,7 +19,7 @@ export default function TaxInvoicesScreen() {
           styles.content,
           {
             paddingTop: Math.max(headerHeight, 56) + insets.top + Spacing.xl,
-            paddingBottom: insets.bottom + Spacing.lg
+            paddingBottom: insets.bottom + Spacing.lg,
           },
         ]}
       >

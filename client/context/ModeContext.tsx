@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type AppMode = "rider" | "driver";
@@ -33,11 +39,11 @@ export function ModeProvider({ children }: { children: ReactNode }) {
         AsyncStorage.getItem(MODE_STORAGE_KEY),
         AsyncStorage.getItem(ROLE_STORAGE_KEY),
       ]);
-      
+
       if (storedRole) {
         setUserRoleState(storedRole as UserRole);
       }
-      
+
       if (storedMode && (storedRole === "both" || storedRole === storedMode)) {
         setCurrentMode(storedMode as AppMode);
       }
@@ -51,7 +57,7 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const switchMode = async (mode: AppMode) => {
     if (userRole === "rider" && mode === "driver") return;
     if (userRole === "driver" && mode === "rider") return;
-    
+
     setCurrentMode(mode);
     try {
       await AsyncStorage.setItem(MODE_STORAGE_KEY, mode);

@@ -1,50 +1,82 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput, ActivityIndicator, Linking, Platform, Modal } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import * as Location from 'expo-location';
-import { getApiUrl } from '@/lib/query-client';
-import { useAuth } from '@/context/AuthContext';
-import { useDriver } from '@/context/DriverContext';
-import { UTOColors } from '@/constants/theme';
-import { getSocket } from '@/lib/socket';
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Alert,
+  TextInput,
+  ActivityIndicator,
+  Linking,
+  Platform,
+  Modal,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MaterialIcons, Feather } from "@expo/vector-icons";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import * as Location from "expo-location";
+import { getApiUrl } from "@/lib/query-client";
+import { useAuth } from "@/context/AuthContext";
+import { useDriver } from "@/context/DriverContext";
+import { UTOColors } from "@/constants/theme";
+import { getSocket } from "@/lib/socket";
 
-const UTO_YELLOW = '#FFD000';
+const UTO_YELLOW = "#FFD000";
 const ACTIVATION_WINDOW_MS = 60 * 60 * 1000;
 const DROP_OFF_COMPLETION_RADIUS_METERS = 200;
 
-type LiveRideStatus = 'accepted' | 'arrived' | 'at_pickup' | 'arriving' | 'in_progress' | 'completed' | 'cancelled' | string;
+type LiveRideStatus =
+  | "accepted"
+  | "arrived"
+  | "at_pickup"
+  | "arriving"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | string;
 
 function fmtDateTimeFull(iso: string | null | undefined) {
-  if (!iso) return 'N/A';
+  if (!iso) return "N/A";
   const d = new Date(iso);
-  return d.toLocaleString('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Europe/London',
+  return d.toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/London",
   });
 }
 
 function fmtTime(iso: string | null | undefined) {
-  if (!iso) return 'N/A';
+  if (!iso) return "N/A";
   const d = new Date(iso);
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+  return d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/London",
+  });
 }
 
-function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+function haversineDistanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+) {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const R = 6371_000;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -56,40 +88,53 @@ export default function ScheduledJobDetailsScreen() {
   const { user } = useAuth();
   const { driverProfile } = useDriver();
   const tabBarHeight = useBottomTabBarHeight();
-  
+
   const initialParams = (route.params as any) || {};
   const bookingIdFromParams = initialParams?.bookingId as string | undefined;
   const [booking, setBooking] = useState<any>(initialParams?.booking || null);
-  const [isLoadingBooking, setIsLoadingBooking] = useState<boolean>(!initialParams?.booking && !!bookingIdFromParams);
+  const [isLoadingBooking, setIsLoadingBooking] = useState<boolean>(
+    !initialParams?.booking && !!bookingIdFromParams,
+  );
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [cancelOtherText, setCancelOtherText] = useState("");
-  const [liveRideId, setLiveRideId] = useState<string | null>(initialParams?.booking?.live_ride_id || null);
-  const [liveRideStatus, setLiveRideStatus] = useState<LiveRideStatus | null>(null);
+  const [liveRideId, setLiveRideId] = useState<string | null>(
+    initialParams?.booking?.live_ride_id || null,
+  );
+  const [liveRideStatus, setLiveRideStatus] = useState<LiveRideStatus | null>(
+    null,
+  );
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState(false);
   const [isStartingTrip, setIsStartingTrip] = useState(false);
   const [isFinishingTrip, setIsFinishingTrip] = useState(false);
   const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
-  const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(null);
+  const [earlyCompleteReason, setEarlyCompleteReason] = useState<string | null>(
+    null,
+  );
   const [earlyCompleteOther, setEarlyCompleteOther] = useState("");
   const [isCheckingArrival, setIsCheckingArrival] = useState(false);
 
-  const refreshLiveRideStatus = useCallback(async (rideId?: string | null) => {
-    const targetRideId = rideId || liveRideId || booking?.live_ride_id;
-    if (!targetRideId) return;
-    try {
-      const res = await fetch(`${getApiUrl()}/api/rides/${targetRideId}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const status = String(data?.ride?.status || "").toLowerCase() as LiveRideStatus;
-      if (status) setLiveRideStatus(status);
-      if (!liveRideId && targetRideId) setLiveRideId(targetRideId);
-    } catch (err) {
-      console.warn("Could not refresh live ride status:", err);
-    }
-  }, [booking?.live_ride_id, liveRideId]);
+  const refreshLiveRideStatus = useCallback(
+    async (rideId?: string | null) => {
+      const targetRideId = rideId || liveRideId || booking?.live_ride_id;
+      if (!targetRideId) return;
+      try {
+        const res = await fetch(`${getApiUrl()}/api/rides/${targetRideId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const status = String(
+          data?.ride?.status || "",
+        ).toLowerCase() as LiveRideStatus;
+        if (status) setLiveRideStatus(status);
+        if (!liveRideId && targetRideId) setLiveRideId(targetRideId);
+      } catch (err) {
+        console.warn("Could not refresh live ride status:", err);
+      }
+    },
+    [booking?.live_ride_id, liveRideId],
+  );
 
   useEffect(() => {
     if (booking?.live_ride_id) {
@@ -113,7 +158,9 @@ export default function ScheduledJobDetailsScreen() {
     const loadBooking = async () => {
       try {
         setIsLoadingBooking(true);
-        const res = await fetch(`${getApiUrl()}/api/later-bookings/${bookingIdFromParams}`);
+        const res = await fetch(
+          `${getApiUrl()}/api/later-bookings/${bookingIdFromParams}`,
+        );
         if (!res.ok) throw new Error("Failed to load booking");
         const data = await res.json();
         if (!cancelled) {
@@ -159,15 +206,29 @@ export default function ScheduledJobDetailsScreen() {
       : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
 
     if (appUrl) {
-      Linking.openURL(appUrl).catch(() => Linking.openURL(fallbackWebUrl).catch(() => {
-        Alert.alert("Navigation unavailable", "Could not open maps on this device.");
-      }));
+      Linking.openURL(appUrl).catch(() =>
+        Linking.openURL(fallbackWebUrl).catch(() => {
+          Alert.alert(
+            "Navigation unavailable",
+            "Could not open maps on this device.",
+          );
+        }),
+      );
     }
   };
 
   if (isLoadingBooking) {
     return (
-      <View style={[s.root, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+      <View
+        style={[
+          s.root,
+          {
+            paddingTop: insets.top,
+            justifyContent: "center",
+            alignItems: "center",
+          },
+        ]}
+      >
         <ActivityIndicator size="large" color={UTOColors.primary} />
       </View>
     );
@@ -175,9 +236,26 @@ export default function ScheduledJobDetailsScreen() {
 
   if (!booking) {
     return (
-      <View style={[s.root, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+      <View
+        style={[
+          s.root,
+          {
+            paddingTop: insets.top,
+            justifyContent: "center",
+            alignItems: "center",
+          },
+        ]}
+      >
         <Text>Booking not found</Text>
-        <Pressable onPress={() => navigation.goBack()} style={{ marginTop: 20, padding: 10, backgroundColor: '#DDD', borderRadius: 8 }}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={{
+            marginTop: 20,
+            padding: 10,
+            backgroundColor: "#DDD",
+            borderRadius: 8,
+          }}
+        >
           <Text>Go Back</Text>
         </Pressable>
       </View>
@@ -188,7 +266,8 @@ export default function ScheduledJobDetailsScreen() {
   const msUntilPickup = new Date(booking.pickup_at).getTime() - now;
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
   const START_GRACE_AFTER_MS = 30 * 60 * 1000;
-  const withinThreeHours = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
+  const withinThreeHours =
+    msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
   const driverOwnsThis = (() => {
     const ids = [user?.id, driverProfile?.id].filter(Boolean).map(String);
     const bookingIds = [booking.driver_id, booking.assigned_driver_id]
@@ -199,13 +278,17 @@ export default function ScheduledJobDetailsScreen() {
   const assignmentPending =
     !!booking.assignment_pending ||
     (!!driverOwnsThis &&
-      ['scheduled', 'marketplace', 'assigned'].includes(String(booking.status || '').toLowerCase()) &&
-      String(booking.status || '').toLowerCase() !== 'driver_accepted');
+      ["scheduled", "marketplace", "assigned"].includes(
+        String(booking.status || "").toLowerCase(),
+      ) &&
+      String(booking.status || "").toLowerCase() !== "driver_accepted");
   const withinStartWindow =
-    msUntilPickup <= ACTIVATION_WINDOW_MS && msUntilPickup >= -START_GRACE_AFTER_MS;
+    msUntilPickup <= ACTIVATION_WINDOW_MS &&
+    msUntilPickup >= -START_GRACE_AFTER_MS;
   const tripIsLive = !!liveRideId || !!booking.live_ride_id;
   const tripInProgress =
-    liveRideStatus === "in_progress" || String(booking.status || "").toLowerCase() === "in_progress";
+    liveRideStatus === "in_progress" ||
+    String(booking.status || "").toLowerCase() === "in_progress";
   const isExpiredRide =
     msUntilPickup < -START_GRACE_AFTER_MS &&
     !tripInProgress &&
@@ -221,62 +304,78 @@ export default function ScheduledJobDetailsScreen() {
   const canFinishTrip =
     driverOwnsThis &&
     tripInProgress &&
-    ["driver_accepted", "in_progress"].includes(String(booking.status || "").toLowerCase());
-
+    ["driver_accepted", "in_progress"].includes(
+      String(booking.status || "").toLowerCase(),
+    );
 
   const handleAccept = async () => {
     Alert.alert(
-      'Accept Booking',
-      'By accepting this booking, you confirm your availability to complete the trip. If you later cancel, the booking will be released back to marketplace or ASAP dispatch for another driver.',
+      "Accept Booking",
+      "By accepting this booking, you confirm your availability to complete the trip. If you later cancel, the booking will be released back to marketplace or ASAP dispatch for another driver.",
       [
-        { text: 'Go Back', style: 'cancel' },
+        { text: "Go Back", style: "cancel" },
         {
-          text: 'Accept & Agree',
+          text: "Accept & Agree",
           onPress: async () => {
             try {
-              const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/accept`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ driverId: user?.id })
-              });
-              if (!res.ok) throw new Error('Failed to accept');
+              const res = await fetch(
+                `${getApiUrl()}/api/later-bookings/${booking.id}/accept`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ driverId: user?.id }),
+                },
+              );
+              if (!res.ok) throw new Error("Failed to accept");
               const data = await res.json();
               setBooking(data.booking);
-              Alert.alert('Success', 'Booking accepted successfully!');
+              Alert.alert("Success", "Booking accepted successfully!");
               navigation.goBack();
             } catch (err) {
-              Alert.alert('Error', 'Could not accept the booking. Please try again.');
+              Alert.alert(
+                "Error",
+                "Could not accept the booking. Please try again.",
+              );
             }
           },
         },
-      ]
+      ],
     );
   };
 
   const handleDeclineAssignment = () => {
     Alert.alert(
-      'Decline Assigned Ride',
+      "Decline Assigned Ride",
       `Decline ride ${booking.id}? It will return to the marketplace for other drivers.`,
       [
-        { text: 'Keep', style: 'cancel' },
+        { text: "Keep", style: "cancel" },
         {
-          text: 'Decline',
-          style: 'destructive',
+          text: "Decline",
+          style: "destructive",
           onPress: async () => {
             try {
-              const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/decline`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ driverId: user?.id, reason: 'declined_assignment' }),
-              });
+              const res = await fetch(
+                `${getApiUrl()}/api/later-bookings/${booking.id}/decline`,
+                {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    driverId: user?.id,
+                    reason: "declined_assignment",
+                  }),
+                },
+              );
               if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
-                throw new Error(body.error || 'Failed to decline');
+                throw new Error(body.error || "Failed to decline");
               }
               // Return immediately — marketplace notify runs in background on server
               navigation.goBack();
             } catch (err: any) {
-              Alert.alert('Error', err?.message || 'Could not decline the booking.');
+              Alert.alert(
+                "Error",
+                err?.message || "Could not decline the booking.",
+              );
             }
           },
         },
@@ -289,23 +388,38 @@ export default function ScheduledJobDetailsScreen() {
       Alert.alert("Reason Required", "Please select a cancellation reason.");
       return;
     }
-    const finalReason = cancelReason === 'Other' ? cancelOtherText : cancelReason;
-    
+    const finalReason =
+      cancelReason === "Other" ? cancelOtherText : cancelReason;
+
     try {
-      const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/cancel`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cancelledBy: 'driver', reason: finalReason }),
-      });
+      const res = await fetch(
+        `${getApiUrl()}/api/later-bookings/${booking.id}/cancel`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cancelledBy: "driver", reason: finalReason }),
+        },
+      );
       if (!res.ok) {
         let resBody: any = {};
-        try { resBody = await res.json(); } catch (_) {}
-        throw new Error(resBody.error || 'Failed to cancel');
+        try {
+          resBody = await res.json();
+        } catch (_) {}
+        throw new Error(resBody.error || "Failed to cancel");
       }
-      Alert.alert('Booking Released', 'The booking has been released for another driver.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      Alert.alert(
+        "Booking Released",
+        "The booking has been released for another driver.",
+        [{ text: "OK", onPress: () => navigation.goBack() }],
+      );
       setShowCancelModal(false);
     } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Could not cancel the booking. Please try again.');
+      Alert.alert(
+        "Error",
+        err instanceof Error
+          ? err.message
+          : "Could not cancel the booking. Please try again.",
+      );
     }
   };
 
@@ -332,9 +446,14 @@ export default function ScheduledJobDetailsScreen() {
       : `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
 
     if (appUrl) {
-      Linking.openURL(appUrl).catch(() => Linking.openURL(fallbackWebUrl).catch(() => {
-        Alert.alert("Navigation unavailable", "Could not open maps on this device.");
-      }));
+      Linking.openURL(appUrl).catch(() =>
+        Linking.openURL(fallbackWebUrl).catch(() => {
+          Alert.alert(
+            "Navigation unavailable",
+            "Could not open maps on this device.",
+          );
+        }),
+      );
     }
   };
 
@@ -342,32 +461,48 @@ export default function ScheduledJobDetailsScreen() {
     let rideId = liveRideId || booking?.live_ride_id;
     if (!rideId) {
       try {
-        const prep = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/prepare-start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ driverId: user?.id }),
-        });
+        const prep = await fetch(
+          `${getApiUrl()}/api/later-bookings/${booking.id}/prepare-start`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ driverId: user?.id }),
+          },
+        );
         const prepData = await prep.json().catch(() => ({}));
         if (!prep.ok) {
-          Alert.alert("Cannot Start Yet", prepData?.error || "This booking is not ready to start.");
+          Alert.alert(
+            "Cannot Start Yet",
+            prepData?.error || "This booking is not ready to start.",
+          );
           return;
         }
-        rideId = prepData?.liveRideId || prepData?.booking?.live_ride_id || null;
+        rideId =
+          prepData?.liveRideId || prepData?.booking?.live_ride_id || null;
         if (prepData?.booking) setBooking(prepData.booking);
         if (rideId) setLiveRideId(rideId);
         if (prepData?.alreadyStarted) {
           setLiveRideStatus("in_progress");
           setShowPinModal(false);
-          Alert.alert("Trip Already Started", "Navigate to the drop-off and tap Finish when you arrive.");
+          Alert.alert(
+            "Trip Already Started",
+            "Navigate to the drop-off and tap Finish when you arrive.",
+          );
           return;
         }
       } catch (_) {
-        Alert.alert("Error", "Could not prepare this ride to start. Please try again.");
+        Alert.alert(
+          "Error",
+          "Could not prepare this ride to start. Please try again.",
+        );
         return;
       }
     }
     if (!rideId) {
-      Alert.alert("Not Yet Active", "Could not activate this booking. Please try again in a moment.");
+      Alert.alert(
+        "Not Yet Active",
+        "Could not activate this booking. Please try again in a moment.",
+      );
       return;
     }
     if (pinValue.length < 4) return;
@@ -383,14 +518,23 @@ export default function ScheduledJobDetailsScreen() {
       if (!res.ok) {
         setPinError(true);
         setPinValue("");
-        Alert.alert("Invalid PIN", data?.error || "The PIN you entered is incorrect. Please ask the rider for their 4-digit PIN.");
+        Alert.alert(
+          "Invalid PIN",
+          data?.error ||
+            "The PIN you entered is incorrect. Please ask the rider for their 4-digit PIN.",
+        );
         return;
       }
       setLiveRideStatus("in_progress");
-      setBooking((prev: any) => (prev ? { ...prev, status: "in_progress", live_ride_id: rideId } : prev));
+      setBooking((prev: any) =>
+        prev ? { ...prev, status: "in_progress", live_ride_id: rideId } : prev,
+      );
       setShowPinModal(false);
       setPinValue("");
-      Alert.alert("Trip Started", "Navigate to the drop-off location. Tap Finish when you arrive.");
+      Alert.alert(
+        "Trip Started",
+        "Navigate to the drop-off location. Tap Finish when you arrive.",
+      );
     } catch (err) {
       Alert.alert("Error", "Could not start the trip. Please try again.");
     } finally {
@@ -405,20 +549,25 @@ export default function ScheduledJobDetailsScreen() {
     try {
       let rideId = liveRideId || booking?.live_ride_id;
       if (!rideId) {
-        const prep = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/prepare-start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ driverId: user?.id }),
-        });
+        const prep = await fetch(
+          `${getApiUrl()}/api/later-bookings/${booking.id}/prepare-start`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ driverId: user?.id }),
+          },
+        );
         const prepData = await prep.json().catch(() => ({}));
         if (!prep.ok) {
           Alert.alert(
             "Cannot Start Yet",
-            prepData?.error || "This booking will become available to start within 60 minutes of pickup time.",
+            prepData?.error ||
+              "This booking will become available to start within 60 minutes of pickup time.",
           );
           return;
         }
-        rideId = prepData?.liveRideId || prepData?.booking?.live_ride_id || null;
+        rideId =
+          prepData?.liveRideId || prepData?.booking?.live_ride_id || null;
         if (prepData?.booking) setBooking(prepData.booking);
         if (rideId) {
           setLiveRideId(rideId);
@@ -426,12 +575,18 @@ export default function ScheduledJobDetailsScreen() {
         }
         if (prepData?.alreadyStarted) {
           setLiveRideStatus("in_progress");
-          Alert.alert("Trip Already Started", "Navigate to the drop-off and tap Finish when you arrive.");
+          Alert.alert(
+            "Trip Already Started",
+            "Navigate to the drop-off and tap Finish when you arrive.",
+          );
           return;
         }
       }
       if (!rideId) {
-        Alert.alert("Not Yet Active", "Could not activate this booking. Please try again shortly.");
+        Alert.alert(
+          "Not Yet Active",
+          "Could not activate this booking. Please try again shortly.",
+        );
         return;
       }
       setShowPinModal(true);
@@ -458,11 +613,15 @@ export default function ScheduledJobDetailsScreen() {
         ...(reason?.trim() ? { earlyCompletionReason: reason.trim() } : {}),
       });
       setLiveRideStatus("completed");
-      setBooking((prev: any) => (prev ? { ...prev, status: "completed" } : prev));
+      setBooking((prev: any) =>
+        prev ? { ...prev, status: "completed" } : prev,
+      );
       setShowEarlyCompleteModal(false);
-      Alert.alert("Trip Completed", "This scheduled ride has been marked as completed. Payment was already collected.", [
-        { text: "OK", onPress: () => navigation.goBack() },
-      ]);
+      Alert.alert(
+        "Trip Completed",
+        "This scheduled ride has been marked as completed. Payment was already collected.",
+        [{ text: "OK", onPress: () => navigation.goBack() }],
+      );
     } catch (err) {
       Alert.alert("Error", "Could not complete the trip. Please try again.");
     } finally {
@@ -473,7 +632,8 @@ export default function ScheduledJobDetailsScreen() {
   const handleFinishTrip = async () => {
     const dropoffLat = Number(booking?.dropoff_latitude);
     const dropoffLng = Number(booking?.dropoff_longitude);
-    const hasDropoffCoords = Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng);
+    const hasDropoffCoords =
+      Number.isFinite(dropoffLat) && Number.isFinite(dropoffLng);
 
     if (!hasDropoffCoords) {
       Alert.alert(
@@ -482,7 +642,7 @@ export default function ScheduledJobDetailsScreen() {
         [
           { text: "Not Yet", style: "cancel" },
           { text: "Finish Trip", onPress: () => finishTrip() },
-        ]
+        ],
       );
       return;
     }
@@ -490,10 +650,10 @@ export default function ScheduledJobDetailsScreen() {
     setIsCheckingArrival(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
+      if (status !== "granted") {
         Alert.alert(
           "Location Needed",
-          "Please allow location access to confirm you are near the destination, or use End Early if the passenger requested an early drop-off."
+          "Please allow location access to confirm you are near the destination, or use End Early if the passenger requested an early drop-off.",
         );
         return;
       }
@@ -523,7 +683,7 @@ export default function ScheduledJobDetailsScreen() {
                 setShowEarlyCompleteModal(true);
               },
             },
-          ]
+          ],
         );
         return;
       }
@@ -534,12 +694,12 @@ export default function ScheduledJobDetailsScreen() {
         [
           { text: "Not Yet", style: "cancel" },
           { text: "Finish Trip", onPress: () => finishTrip() },
-        ]
+        ],
       );
     } catch (err) {
       Alert.alert(
         "Location Check Failed",
-        "We could not confirm your location. Please try again, or use End Early only if the passenger requested to finish early."
+        "We could not confirm your location. Please try again, or use End Early only if the passenger requested to finish early.",
       );
     } finally {
       setIsCheckingArrival(false);
@@ -548,10 +708,16 @@ export default function ScheduledJobDetailsScreen() {
 
   const submitEarlyCompletion = () => {
     if (!earlyCompleteReason) {
-      Alert.alert("Reason Required", "Please select a reason for early completion.");
+      Alert.alert(
+        "Reason Required",
+        "Please select a reason for early completion.",
+      );
       return;
     }
-    const finalReason = earlyCompleteReason === "Other" ? earlyCompleteOther : earlyCompleteReason;
+    const finalReason =
+      earlyCompleteReason === "Other"
+        ? earlyCompleteOther
+        : earlyCompleteReason;
     finishTrip(finalReason);
   };
 
@@ -559,39 +725,64 @@ export default function ScheduledJobDetailsScreen() {
     <View style={[s.root, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={s.header}>
-        <Pressable onPress={() => navigation.goBack()} style={{ padding: 8, marginLeft: -8 }}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={{ padding: 8, marginLeft: -8 }}
+        >
           <Feather name="arrow-left" size={24} color="#000000" />
         </Pressable>
         <Text style={s.headerTitle}>Job Details</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={s.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={s.card}>
           <View style={s.cardHeader}>
-            <View style={[s.statusBadge, (booking.status === 'cancelled' || isExpiredRide) && s.statusBadgeCancelled]}>
-              <Text style={[s.statusText, (booking.status === 'cancelled' || isExpiredRide) && s.statusTextCancelled]}>
+            <View
+              style={[
+                s.statusBadge,
+                (booking.status === "cancelled" || isExpiredRide) &&
+                  s.statusBadgeCancelled,
+              ]}
+            >
+              <Text
+                style={[
+                  s.statusText,
+                  (booking.status === "cancelled" || isExpiredRide) &&
+                    s.statusTextCancelled,
+                ]}
+              >
                 {isExpiredRide
-                  ? 'EXPIRED RIDE'
+                  ? "EXPIRED RIDE"
                   : booking.isUrgentScheduled
-                    ? 'URGENT SCHEDULED RIDE'
-                    : booking.status.toUpperCase().replace('_', ' ')}
+                    ? "URGENT SCHEDULED RIDE"
+                    : booking.status.toUpperCase().replace("_", " ")}
               </Text>
             </View>
-            <Text style={s.fareText}>{
-              (() => {
-                const discount = Math.max(0, Number(booking.discount_amount || 0));
+            <Text style={s.fareText}>
+              {(() => {
+                const discount = Math.max(
+                  0,
+                  Number(booking.discount_amount || 0),
+                );
                 const driverFare = Number(booking.driver_fare);
                 const estimated = Number(booking.estimated_fare);
                 const fareValue =
-                  (Number.isFinite(driverFare) && driverFare > 0)
+                  Number.isFinite(driverFare) && driverFare > 0
                     ? driverFare
-                    : (Number.isFinite(estimated) && estimated > 0)
+                    : Number.isFinite(estimated) && estimated > 0
                       ? estimated
-                      : Math.max(0, Number(booking.full_fare || booking.fare || 0) - discount);
-                return fareValue > 0 ? `£${fareValue.toFixed(2)}` : 'N/A';
-              })()
-            }</Text>
+                      : Math.max(
+                          0,
+                          Number(booking.full_fare || booking.fare || 0) -
+                            discount,
+                        );
+                return fareValue > 0 ? `£${fareValue.toFixed(2)}` : "N/A";
+              })()}
+            </Text>
           </View>
 
           <View style={s.section}>
@@ -599,7 +790,10 @@ export default function ScheduledJobDetailsScreen() {
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Name:</Text>
               <Text style={s.detailValue}>
-                {booking.rider_name || booking.customer_name || booking.passenger_name || 'Rider'}
+                {booking.rider_name ||
+                  booking.customer_name ||
+                  booking.passenger_name ||
+                  "Rider"}
               </Text>
             </View>
             {!!booking.rider_phone && (
@@ -628,22 +822,26 @@ export default function ScheduledJobDetailsScreen() {
             </View>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Pickup Time:</Text>
-              <Text style={s.detailValue}>{fmtDateTimeFull(booking.pickup_at)}</Text>
+              <Text style={s.detailValue}>
+                {fmtDateTimeFull(booking.pickup_at)}
+              </Text>
             </View>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Distance:</Text>
               <Text style={s.detailValue}>
-                {booking.distance_miles != null && Number(booking.distance_miles) > 0
+                {booking.distance_miles != null &&
+                Number(booking.distance_miles) > 0
                   ? `${Number(booking.distance_miles).toFixed(1)} miles`
-                  : 'N/A'}
+                  : "N/A"}
               </Text>
             </View>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Duration:</Text>
               <Text style={s.detailValue}>
-                {booking.duration_minutes != null && Number(booking.duration_minutes) > 0
+                {booking.duration_minutes != null &&
+                Number(booking.duration_minutes) > 0
                   ? `${Math.round(Number(booking.duration_minutes))} minutes`
-                  : 'N/A'}
+                  : "N/A"}
               </Text>
             </View>
           </View>
@@ -652,11 +850,24 @@ export default function ScheduledJobDetailsScreen() {
             <Text style={s.sectionTitle}>Service Details</Text>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Service Type:</Text>
-              <Text style={s.detailValue}>{booking.is_round_trip ? 'Return Journey' : (booking.booking_type === 'airport' ? 'Airport' : 'Scheduled')}</Text>
+              <Text style={s.detailValue}>
+                {booking.is_round_trip
+                  ? "Return Journey"
+                  : booking.booking_type === "airport"
+                    ? "Airport"
+                    : "Scheduled"}
+              </Text>
             </View>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Vehicle Type:</Text>
-              <Text style={s.detailValue}>{booking.vehicle_type === 'people_carrier' ? 'People Carrier' : booking.vehicle_type ? booking.vehicle_type.charAt(0).toUpperCase() + booking.vehicle_type.slice(1) : 'Saloon'}</Text>
+              <Text style={s.detailValue}>
+                {booking.vehicle_type === "people_carrier"
+                  ? "People Carrier"
+                  : booking.vehicle_type
+                    ? booking.vehicle_type.charAt(0).toUpperCase() +
+                      booking.vehicle_type.slice(1)
+                    : "Saloon"}
+              </Text>
             </View>
             <View style={s.detailRow}>
               <Text style={s.detailLabel}>Passengers:</Text>
@@ -681,19 +892,34 @@ export default function ScheduledJobDetailsScreen() {
       </ScrollView>
 
       {/* Fixed Bottom Action Bar */}
-      <View style={[s.bottomBar, { paddingBottom: tabBarHeight > 0 ? tabBarHeight + 16 : Math.max(insets.bottom, 16) }]}>
-        {(booking.status === 'scheduled' || booking.status === 'marketplace' || booking.status === 'assigned') && !assignmentPending && (
-          <Pressable style={s.acceptBtn} onPress={handleAccept}>
-            <Text style={s.acceptBtnText}>Accept Booking</Text>
-          </Pressable>
-        )}
+      <View
+        style={[
+          s.bottomBar,
+          {
+            paddingBottom:
+              tabBarHeight > 0
+                ? tabBarHeight + 16
+                : Math.max(insets.bottom, 16),
+          },
+        ]}
+      >
+        {(booking.status === "scheduled" ||
+          booking.status === "marketplace" ||
+          booking.status === "assigned") &&
+          !assignmentPending && (
+            <Pressable style={s.acceptBtn} onPress={handleAccept}>
+              <Text style={s.acceptBtnText}>Accept Booking</Text>
+            </Pressable>
+          )}
         {assignmentPending && driverOwnsThis && (
           <View style={{ gap: 10 }}>
             <Pressable style={s.acceptBtn} onPress={handleAccept}>
               <Text style={s.acceptBtnText}>Accept Assigned Ride</Text>
             </Pressable>
             <Pressable style={s.cancelBtn} onPress={handleDeclineAssignment}>
-              <Text style={s.cancelBtnText}>Decline — Return to Marketplace</Text>
+              <Text style={s.cancelBtnText}>
+                Decline — Return to Marketplace
+              </Text>
             </Pressable>
           </View>
         )}
@@ -703,18 +929,23 @@ export default function ScheduledJobDetailsScreen() {
               <Text style={s.driveBtnText}>Navigate To Destination</Text>
             </Pressable>
             <Pressable
-              style={[s.acceptBtn, { backgroundColor: '#10B981' }]}
+              style={[s.acceptBtn, { backgroundColor: "#10B981" }]}
               onPress={handleFinishTrip}
               disabled={isFinishingTrip || isCheckingArrival}
             >
               {isFinishingTrip || isCheckingArrival ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={[s.acceptBtnText, { color: '#FFFFFF' }]}>Finish Trip</Text>
+                <Text style={[s.acceptBtnText, { color: "#FFFFFF" }]}>
+                  Finish Trip
+                </Text>
               )}
             </Pressable>
             <Pressable
-              style={[s.cancelBtn, { marginTop: 10, backgroundColor: '#FEF3C7' }]}
+              style={[
+                s.cancelBtn,
+                { marginTop: 10, backgroundColor: "#FEF3C7" },
+              ]}
               onPress={() => {
                 setEarlyCompleteReason(null);
                 setEarlyCompleteOther("");
@@ -722,43 +953,62 @@ export default function ScheduledJobDetailsScreen() {
               }}
               disabled={isFinishingTrip || isCheckingArrival}
             >
-              <Text style={[s.cancelBtnText, { color: '#92400E' }]}>End Early</Text>
+              <Text style={[s.cancelBtnText, { color: "#92400E" }]}>
+                End Early
+              </Text>
             </Pressable>
           </>
         )}
-        {booking.status === 'driver_accepted' && driverOwnsThis && isExpiredRide && !tripInProgress && (
-          <View style={s.expiredBanner}>
-            <Text style={s.expiredBannerTitle}>Expired Ride</Text>
-            <Text style={s.expiredBannerText}>
-              This pickup time has passed. The ride can no longer be started from here.
-            </Text>
-          </View>
-        )}
-        {booking.status === 'driver_accepted' && driverOwnsThis && !tripInProgress && canStartTrip && (
-          <>
-            <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
-              <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
-            </Pressable>
-            <Pressable
-              style={s.acceptBtn}
-              onPress={openStartTripPinModal}
-              disabled={isStartingTrip}
-            >
-              {isStartingTrip ? (
-                <ActivityIndicator color="#000" />
-              ) : (
-                <Text style={s.acceptBtnText}>Start Trip (Enter Rider PIN)</Text>
-              )}
-            </Pressable>
-            <Pressable style={s.cancelBtn} onPress={() => setShowCancelModal(true)}>
-              <Text style={s.cancelBtnText}>Cancel Booking</Text>
-            </Pressable>
-          </>
-        )}
+        {booking.status === "driver_accepted" &&
+          driverOwnsThis &&
+          isExpiredRide &&
+          !tripInProgress && (
+            <View style={s.expiredBanner}>
+              <Text style={s.expiredBannerTitle}>Expired Ride</Text>
+              <Text style={s.expiredBannerText}>
+                This pickup time has passed. The ride can no longer be started
+                from here.
+              </Text>
+            </View>
+          )}
+        {booking.status === "driver_accepted" &&
+          driverOwnsThis &&
+          !tripInProgress &&
+          canStartTrip && (
+            <>
+              <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
+                <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
+              </Pressable>
+              <Pressable
+                style={s.acceptBtn}
+                onPress={openStartTripPinModal}
+                disabled={isStartingTrip}
+              >
+                {isStartingTrip ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={s.acceptBtnText}>
+                    Start Trip (Enter Rider PIN)
+                  </Text>
+                )}
+              </Pressable>
+              <Pressable
+                style={s.cancelBtn}
+                onPress={() => setShowCancelModal(true)}
+              >
+                <Text style={s.cancelBtnText}>Cancel Booking</Text>
+              </Pressable>
+            </>
+          )}
       </View>
 
       {/* PIN Entry Modal */}
-      <Modal visible={showPinModal} transparent animationType="slide" onRequestClose={() => setShowPinModal(false)}>
+      <Modal
+        visible={showPinModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPinModal(false)}
+      >
         <View style={s.modalOverlay}>
           <View style={s.modalContent}>
             <Text style={s.modalTitle}>Enter Rider PIN</Text>
@@ -766,30 +1016,51 @@ export default function ScheduledJobDetailsScreen() {
               Ask the rider for their 4-digit PIN to start this scheduled trip.
             </Text>
             {pinError ? (
-              <Text style={{ color: '#DC2626', marginTop: 8, fontWeight: '600' }}>Wrong PIN. Please try again.</Text>
+              <Text
+                style={{ color: "#DC2626", marginTop: 8, fontWeight: "600" }}
+              >
+                Wrong PIN. Please try again.
+              </Text>
             ) : null}
             <TextInput
               style={s.pinInput}
               value={pinValue}
-              onChangeText={(text) => setPinValue(text.replace(/\D/g, "").slice(0, 4))}
+              onChangeText={(text) =>
+                setPinValue(text.replace(/\D/g, "").slice(0, 4))
+              }
               keyboardType="number-pad"
               maxLength={4}
               placeholder="••••"
               secureTextEntry
             />
             <View style={s.modalActions}>
-              <Pressable style={s.modalBackBtn} onPress={() => { setShowPinModal(false); setPinValue(""); setPinError(false); }}>
+              <Pressable
+                style={s.modalBackBtn}
+                onPress={() => {
+                  setShowPinModal(false);
+                  setPinValue("");
+                  setPinError(false);
+                }}
+              >
                 <Text style={s.modalBackBtnText}>Cancel</Text>
               </Pressable>
               <Pressable
-                style={[s.modalConfirmBtn, { backgroundColor: pinValue.length === 4 ? UTOColors.primary : '#D1D5DB' }]}
+                style={[
+                  s.modalConfirmBtn,
+                  {
+                    backgroundColor:
+                      pinValue.length === 4 ? UTOColors.primary : "#D1D5DB",
+                  },
+                ]}
                 onPress={handleStartTrip}
                 disabled={pinValue.length < 4 || isStartingTrip}
               >
                 {isStartingTrip ? (
                   <ActivityIndicator color="#000000" />
                 ) : (
-                  <Text style={[s.modalConfirmBtnText, { color: '#000000' }]}>Start Trip</Text>
+                  <Text style={[s.modalConfirmBtnText, { color: "#000000" }]}>
+                    Start Trip
+                  </Text>
                 )}
               </Pressable>
             </View>
@@ -802,20 +1073,38 @@ export default function ScheduledJobDetailsScreen() {
         <View style={s.modalOverlay}>
           <View style={s.modalContent}>
             <Text style={s.modalTitle}>Early Completion</Text>
-            <Text style={s.modalDesc}>Please select a reason for completing before reaching the destination:</Text>
-            {['Passenger request', 'Traffic restriction', 'Wrong address', 'Other'].map((reason) => (
+            <Text style={s.modalDesc}>
+              Please select a reason for completing before reaching the
+              destination:
+            </Text>
+            {[
+              "Passenger request",
+              "Traffic restriction",
+              "Wrong address",
+              "Other",
+            ].map((reason) => (
               <Pressable
                 key={reason}
-                style={[s.reasonOption, earlyCompleteReason === reason && s.reasonOptionSelected]}
+                style={[
+                  s.reasonOption,
+                  earlyCompleteReason === reason && s.reasonOptionSelected,
+                ]}
                 onPress={() => setEarlyCompleteReason(reason)}
               >
-                <View style={[s.radioOuter, earlyCompleteReason === reason && s.radioOuterSelected]}>
-                  {earlyCompleteReason === reason && <View style={s.radioInner} />}
+                <View
+                  style={[
+                    s.radioOuter,
+                    earlyCompleteReason === reason && s.radioOuterSelected,
+                  ]}
+                >
+                  {earlyCompleteReason === reason && (
+                    <View style={s.radioInner} />
+                  )}
                 </View>
                 <Text style={s.reasonText}>{reason}</Text>
               </Pressable>
             ))}
-            {earlyCompleteReason === 'Other' && (
+            {earlyCompleteReason === "Other" && (
               <TextInput
                 style={s.otherInput}
                 placeholder="Please describe the reason..."
@@ -825,10 +1114,16 @@ export default function ScheduledJobDetailsScreen() {
               />
             )}
             <View style={s.modalActions}>
-              <Pressable style={s.modalBackBtn} onPress={() => setShowEarlyCompleteModal(false)}>
+              <Pressable
+                style={s.modalBackBtn}
+                onPress={() => setShowEarlyCompleteModal(false)}
+              >
                 <Text style={s.modalBackBtnText}>Go Back</Text>
               </Pressable>
-              <Pressable style={[s.modalConfirmBtn, { backgroundColor: '#10B981' }]} onPress={submitEarlyCompletion}>
+              <Pressable
+                style={[s.modalConfirmBtn, { backgroundColor: "#10B981" }]}
+                onPress={submitEarlyCompletion}
+              >
                 <Text style={s.modalConfirmBtnText}>Finish Trip</Text>
               </Pressable>
             </View>
@@ -844,33 +1139,59 @@ export default function ScheduledJobDetailsScreen() {
               <>
                 <Text style={s.modalTitle}>Late Cancellation Warning</Text>
                 <Text style={s.modalDesc}>
-                  This pickup is less than 3 hours away. Cancelling now will release the booking for ASAP dispatch to nearby available drivers.
+                  This pickup is less than 3 hours away. Cancelling now will
+                  release the booking for ASAP dispatch to nearby available
+                  drivers.
                 </Text>
               </>
             ) : (
               <>
                 <Text style={s.modalTitle}>Cancel Booking</Text>
                 <Text style={s.modalDesc}>
-                  Cancelling will release this booking back to the marketplace for another driver.
+                  Cancelling will release this booking back to the marketplace
+                  for another driver.
                 </Text>
               </>
             )}
 
-            <Text style={{ marginTop: 16, marginBottom: 8, fontWeight: '600', color: '#374151' }}>Please select a reason:</Text>
-            {['Vehicle issue', 'Emergency', 'Accepted by mistake', 'Too far away', 'Other'].map(reason => (
-              <Pressable 
-                key={reason} 
-                style={[s.reasonOption, cancelReason === reason && s.reasonOptionSelected]}
+            <Text
+              style={{
+                marginTop: 16,
+                marginBottom: 8,
+                fontWeight: "600",
+                color: "#374151",
+              }}
+            >
+              Please select a reason:
+            </Text>
+            {[
+              "Vehicle issue",
+              "Emergency",
+              "Accepted by mistake",
+              "Too far away",
+              "Other",
+            ].map((reason) => (
+              <Pressable
+                key={reason}
+                style={[
+                  s.reasonOption,
+                  cancelReason === reason && s.reasonOptionSelected,
+                ]}
                 onPress={() => setCancelReason(reason)}
               >
-                <View style={[s.radioOuter, cancelReason === reason && s.radioOuterSelected]}>
+                <View
+                  style={[
+                    s.radioOuter,
+                    cancelReason === reason && s.radioOuterSelected,
+                  ]}
+                >
                   {cancelReason === reason && <View style={s.radioInner} />}
                 </View>
                 <Text style={s.reasonText}>{reason}</Text>
               </Pressable>
             ))}
 
-            {cancelReason === 'Other' && (
+            {cancelReason === "Other" && (
               <TextInput
                 style={s.otherInput}
                 placeholder="Please describe the reason..."
@@ -881,14 +1202,25 @@ export default function ScheduledJobDetailsScreen() {
             )}
 
             <View style={s.modalActions}>
-              <Pressable style={s.modalBackBtn} onPress={() => { setShowCancelModal(false); setCancelReason(null); }}>
+              <Pressable
+                style={s.modalBackBtn}
+                onPress={() => {
+                  setShowCancelModal(false);
+                  setCancelReason(null);
+                }}
+              >
                 <Text style={s.modalBackBtnText}>Go Back</Text>
               </Pressable>
-              <Pressable 
-                style={[s.modalConfirmBtn, { backgroundColor: withinThreeHours ? '#DC2626' : '#EF4444' }]} 
+              <Pressable
+                style={[
+                  s.modalConfirmBtn,
+                  { backgroundColor: withinThreeHours ? "#DC2626" : "#EF4444" },
+                ]}
                 onPress={submitCancellation}
               >
-                <Text style={s.modalConfirmBtnText}>{withinThreeHours ? 'Cancel Anyway' : 'Confirm Cancellation'}</Text>
+                <Text style={s.modalConfirmBtnText}>
+                  {withinThreeHours ? "Cancel Anyway" : "Confirm Cancellation"}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -899,66 +1231,208 @@ export default function ScheduledJobDetailsScreen() {
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F3F4F6' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  root: { flex: 1, backgroundColor: "#F3F4F6" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+  headerTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
   scrollContent: { padding: 16, paddingBottom: 40 },
-  card: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingBottom: 12 },
-  statusBadge: { backgroundColor: UTOColors.primary + '30', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  statusText: { fontSize: 12, fontWeight: '700', color: '#92610A' },
-  statusBadgeCancelled: { backgroundColor: '#FEE2E2' },
-  statusTextCancelled: { color: '#DC2626' },
-  fareText: { fontSize: 24, fontWeight: '800', color: '#111827' },
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+    paddingBottom: 12,
+  },
+  statusBadge: {
+    backgroundColor: UTOColors.primary + "30",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statusText: { fontSize: 12, fontWeight: "700", color: "#92610A" },
+  statusBadgeCancelled: { backgroundColor: "#FEE2E2" },
+  statusTextCancelled: { color: "#DC2626" },
+  fareText: { fontSize: 24, fontWeight: "800", color: "#111827" },
   section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 12 },
-  detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
-  detailRowStack: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
-  detailLabel: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
-  detailValue: { fontSize: 15, color: '#111827', fontWeight: '600', marginTop: 4, textAlign: 'right', flex: 1 },
-  bottomBar: { backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 16, paddingTop: 16 },
-  acceptBtn: { backgroundColor: UTOColors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
-  acceptBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
-  cancelBtn: { backgroundColor: '#FEE2E2', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
-  cancelBtnText: { color: '#DC2626', fontSize: 16, fontWeight: '700' },
-  driveBtn: { backgroundColor: UTOColors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
-  driveBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 12,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F9FAFB",
+  },
+  detailRowStack: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F9FAFB",
+  },
+  detailLabel: { fontSize: 14, color: "#6B7280", fontWeight: "500" },
+  detailValue: {
+    fontSize: 15,
+    color: "#111827",
+    fontWeight: "600",
+    marginTop: 4,
+    textAlign: "right",
+    flex: 1,
+  },
+  bottomBar: {
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+    padding: 16,
+    paddingTop: 16,
+  },
+  acceptBtn: {
+    backgroundColor: UTOColors.primary,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  acceptBtnText: { color: "#000000", fontSize: 16, fontWeight: "700" },
+  cancelBtn: {
+    backgroundColor: "#FEE2E2",
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  cancelBtnText: { color: "#DC2626", fontSize: 16, fontWeight: "700" },
+  driveBtn: {
+    backgroundColor: UTOColors.primary,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  driveBtnText: { color: "#000000", fontSize: 16, fontWeight: "700" },
   expiredBanner: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: "#FEE2E2",
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: "#FECACA",
   },
-  expiredBannerTitle: { fontSize: 16, fontWeight: '700', color: '#DC2626', marginBottom: 6 },
-  expiredBannerText: { fontSize: 14, color: '#7F1D1D', lineHeight: 20 },
+  expiredBannerTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#DC2626",
+    marginBottom: 6,
+  },
+  expiredBannerText: { fontSize: 14, color: "#7F1D1D", lineHeight: 20 },
 
-  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 100 },
-  modalContent: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, width: '100%', maxHeight: '90%' },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: '#111827', marginBottom: 12 },
-  modalDesc: { fontSize: 14, color: '#4B5563', lineHeight: 20 },
-  reasonOption: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  reasonOptionSelected: { backgroundColor: '#F9FAFB' },
-  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    zIndex: 100,
+  },
+  modalContent: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 24,
+    width: "100%",
+    maxHeight: "90%",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 12,
+  },
+  modalDesc: { fontSize: 14, color: "#4B5563", lineHeight: 20 },
+  reasonOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  reasonOptionSelected: { backgroundColor: "#F9FAFB" },
+  radioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
   radioOuterSelected: { borderColor: UTOColors.primary },
-  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: UTOColors.primary },
-  reasonText: { fontSize: 15, color: '#111827', fontWeight: '500' },
-  otherInput: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, padding: 12, marginTop: 12, minHeight: 80, textAlignVertical: 'top' },
-  modalActions: { flexDirection: 'row', gap: 12, marginTop: 24 },
-  modalBackBtn: { flex: 1, backgroundColor: '#F3F4F6', paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
-  modalBackBtnText: { color: '#374151', fontSize: 15, fontWeight: '600' },
-  modalConfirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
-  modalConfirmBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: UTOColors.primary,
+  },
+  reasonText: { fontSize: 15, color: "#111827", fontWeight: "500" },
+  otherInput: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  modalActions: { flexDirection: "row", gap: 12, marginTop: 24 },
+  modalBackBtn: {
+    flex: 1,
+    backgroundColor: "#F3F4F6",
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  modalBackBtnText: { color: "#374151", fontSize: 15, fontWeight: "600" },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  modalConfirmBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" },
   pinInput: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: "#D1D5DB",
     borderRadius: 12,
     padding: 16,
     marginTop: 16,
     fontSize: 24,
     letterSpacing: 12,
-    textAlign: 'center',
-    fontWeight: '700',
+    textAlign: "center",
+    fontWeight: "700",
   },
 });
 
@@ -1001,7 +1475,7 @@ const s = StyleSheet.create({
 //   const route = useRoute();
 //   const { user } = useAuth();
 //   const tabBarHeight = useBottomTabBarHeight();
-  
+
 //   const [booking, setBooking] = useState<any>((route.params as any)?.booking);
 //   const [showCancelModal, setShowCancelModal] = useState(false);
 //   const [cancelReason, setCancelReason] = useState<string | null>(null);
@@ -1061,7 +1535,7 @@ const s = StyleSheet.create({
 //       return;
 //     }
 //     const finalReason = cancelReason === 'Other' ? cancelOtherText : cancelReason;
-    
+
 //     try {
 //       const res = await fetch(`${getApiUrl()}/api/later-bookings/${booking.id}/cancel`, {
 //         method: 'PUT',
@@ -1202,8 +1676,8 @@ const s = StyleSheet.create({
 
 //             <Text style={{ marginTop: 16, marginBottom: 8, fontWeight: '600', color: '#374151' }}>Please select a reason:</Text>
 //             {['Vehicle issue', 'Emergency', 'Accepted by mistake', 'Too far away', 'Other'].map(reason => (
-//               <Pressable 
-//                 key={reason} 
+//               <Pressable
+//                 key={reason}
 //                 style={[s.reasonOption, cancelReason === reason && s.reasonOptionSelected]}
 //                 onPress={() => setCancelReason(reason)}
 //               >
@@ -1228,8 +1702,8 @@ const s = StyleSheet.create({
 //               <Pressable style={s.modalBackBtn} onPress={() => { setShowCancelModal(false); setCancelReason(null); }}>
 //                 <Text style={s.modalBackBtnText}>Go Back</Text>
 //               </Pressable>
-//               <Pressable 
-//                 style={[s.modalConfirmBtn, { backgroundColor: withinThreeHours ? '#DC2626' : '#EF4444' }]} 
+//               <Pressable
+//                 style={[s.modalConfirmBtn, { backgroundColor: withinThreeHours ? '#DC2626' : '#EF4444' }]}
 //                 onPress={submitCancellation}
 //               >
 //                 <Text style={s.modalConfirmBtnText}>{withinThreeHours ? 'Cancel Anyway' : 'Confirm Cancellation'}</Text>

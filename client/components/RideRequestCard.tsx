@@ -31,8 +31,12 @@ interface RideRequestCardProps {
 }
 
 function formatRideRequestedType(value?: string): string {
-  const normalized = String(value || "saloon").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (normalized === "people_carrier" || normalized === "peoplecarrier") return "People Carrier";
+  const normalized = String(value || "saloon")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (normalized === "people_carrier" || normalized === "peoplecarrier")
+    return "People Carrier";
   if (normalized === "minibus" || normalized === "mini_bus") return "Minibus";
   return "Saloon";
 }
@@ -73,7 +77,7 @@ export function RideRequestCard({
     pulseScale.value = withRepeat(
       withTiming(1.02, { duration: 500, easing: Easing.inOut(Easing.ease) }),
       -1,
-      true
+      true,
     );
 
     return () => {
@@ -134,20 +138,38 @@ export function RideRequestCard({
 
       {/* Rider Info */}
       <View style={styles.riderSection}>
-        <View style={[styles.avatar, { backgroundColor: theme.backgroundSecondary }]}>
+        <View
+          style={[
+            styles.avatar,
+            { backgroundColor: theme.backgroundSecondary },
+          ]}
+        >
           <Feather name="user" size={20} color={theme.textSecondary} />
         </View>
         <View style={styles.riderInfo}>
           <ThemedText style={styles.riderName}>{riderName}</ThemedText>
-          <ThemedText style={[styles.pickupDistance, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.pickupDistance, { color: theme.textSecondary }]}
+          >
             Passenger
           </ThemedText>
         </View>
       </View>
 
-      <View style={[styles.rideTypeRow, { backgroundColor: theme.backgroundSecondary || "#F8F9FA" }]}>
-        <MaterialIcons name="directions-car" size={16} color={UTOColors.driver.primary} />
-        <ThemedText style={[styles.rideTypeLabel, { color: theme.textSecondary }]}>
+      <View
+        style={[
+          styles.rideTypeRow,
+          { backgroundColor: theme.backgroundSecondary || "#F8F9FA" },
+        ]}
+      >
+        <MaterialIcons
+          name="directions-car"
+          size={16}
+          color={UTOColors.driver.primary}
+        />
+        <ThemedText
+          style={[styles.rideTypeLabel, { color: theme.textSecondary }]}
+        >
           Ride requested type
         </ThemedText>
         <ThemedText style={styles.rideTypeValue}>
@@ -165,7 +187,9 @@ export function RideRequestCard({
         </View>
         {vias.map((via, index) => (
           <React.Fragment key={`via-${index}-${via.address}`}>
-            <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
+            <View
+              style={[styles.routeLine, { backgroundColor: theme.border }]}
+            />
             <View style={styles.routeRow}>
               <View style={[styles.dot, { backgroundColor: "#F59E0B" }]} />
               <ThemedText style={styles.address} numberOfLines={1}>
@@ -176,7 +200,9 @@ export function RideRequestCard({
         ))}
         <View style={[styles.routeLine, { backgroundColor: theme.border }]} />
         <View style={styles.routeRow}>
-          <View style={[styles.dot, { backgroundColor: UTOColors.driver.primary }]} />
+          <View
+            style={[styles.dot, { backgroundColor: UTOColors.driver.primary }]}
+          />
           <ThemedText style={styles.address} numberOfLines={1}>
             {dropoffAddress}
           </ThemedText>
@@ -184,36 +210,79 @@ export function RideRequestCard({
       </View>
 
       {/* Trip Distance Details */}
-      <View style={[styles.distanceSection, { backgroundColor: theme.backgroundSecondary || "#F8F9FA" }]}>
+      <View
+        style={[
+          styles.distanceSection,
+          { backgroundColor: theme.backgroundSecondary || "#F8F9FA" },
+        ]}
+      >
         <View style={styles.distanceRow}>
           <View style={styles.distanceItem}>
-            <MaterialIcons name="my-location" size={14} color={UTOColors.success} />
-            <ThemedText style={[styles.distanceLabel, { color: theme.textSecondary }]}>To pickup</ThemedText>
-            <ThemedText style={styles.distanceValue}>{pickupDistance ? `${pickupDistance.toFixed(1)} mi` : "—"}</ThemedText>
+            <MaterialIcons
+              name="my-location"
+              size={14}
+              color={UTOColors.success}
+            />
+            <ThemedText
+              style={[styles.distanceLabel, { color: theme.textSecondary }]}
+            >
+              To pickup
+            </ThemedText>
+            <ThemedText style={styles.distanceValue}>
+              {pickupDistance ? `${pickupDistance.toFixed(1)} mi` : "—"}
+            </ThemedText>
           </View>
 
-          <View style={[styles.distanceDivider, { backgroundColor: theme.border }]} />
+          <View
+            style={[styles.distanceDivider, { backgroundColor: theme.border }]}
+          />
 
           <View style={styles.distanceItem}>
-            <MaterialIcons name="route" size={14} color={UTOColors.driver.primary} />
-            <ThemedText style={[styles.distanceLabel, { color: theme.textSecondary }]}>Trip</ThemedText>
-            <ThemedText style={styles.distanceValue}>{distanceMiles ? `${distanceMiles.toFixed(1)} mi` : "—"}</ThemedText>
+            <MaterialIcons
+              name="route"
+              size={14}
+              color={UTOColors.driver.primary}
+            />
+            <ThemedText
+              style={[styles.distanceLabel, { color: theme.textSecondary }]}
+            >
+              Trip
+            </ThemedText>
+            <ThemedText style={styles.distanceValue}>
+              {distanceMiles ? `${distanceMiles.toFixed(1)} mi` : "—"}
+            </ThemedText>
           </View>
 
-          <View style={[styles.distanceDivider, { backgroundColor: theme.border }]} />
+          <View
+            style={[styles.distanceDivider, { backgroundColor: theme.border }]}
+          />
 
           <View style={styles.distanceItem}>
             <MaterialIcons name="straighten" size={14} color="#6B7280" />
-            <ThemedText style={[styles.distanceLabel, { color: theme.textSecondary }]}>Total</ThemedText>
-            <ThemedText style={styles.distanceValue}>{totalDistance ? `${totalDistance.toFixed(1)} mi` : "—"}</ThemedText>
+            <ThemedText
+              style={[styles.distanceLabel, { color: theme.textSecondary }]}
+            >
+              Total
+            </ThemedText>
+            <ThemedText style={styles.distanceValue}>
+              {totalDistance ? `${totalDistance.toFixed(1)} mi` : "—"}
+            </ThemedText>
           </View>
 
-          <View style={[styles.distanceDivider, { backgroundColor: theme.border }]} />
+          <View
+            style={[styles.distanceDivider, { backgroundColor: theme.border }]}
+          />
 
           <View style={styles.distanceItem}>
             <MaterialIcons name="schedule" size={14} color="#8B5CF6" />
-            <ThemedText style={[styles.distanceLabel, { color: theme.textSecondary }]}>Est. time</ThemedText>
-            <ThemedText style={styles.distanceValue}>{durationMinutes ? `${Math.round(durationMinutes)} min` : "—"}</ThemedText>
+            <ThemedText
+              style={[styles.distanceLabel, { color: theme.textSecondary }]}
+            >
+              Est. time
+            </ThemedText>
+            <ThemedText style={styles.distanceValue}>
+              {durationMinutes ? `${Math.round(durationMinutes)} min` : "—"}
+            </ThemedText>
           </View>
         </View>
       </View>

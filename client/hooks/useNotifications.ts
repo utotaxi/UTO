@@ -29,12 +29,17 @@ function audienceAllowed(data: Record<string, any> | undefined): boolean {
 try {
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
-      const data = (notification?.request?.content?.data || {}) as Record<string, any>;
+      const data = (notification?.request?.content?.data || {}) as Record<
+        string,
+        any
+      >;
       const trigger = notification?.request?.trigger as any;
       // Local (trigger null / non-push) vs remote Expo/FCM push.
       const isRemotePush =
         trigger?.type === "push" ||
-        (trigger != null && typeof trigger === "object" && "remoteMessage" in trigger);
+        (trigger != null &&
+          typeof trigger === "object" &&
+          "remoteMessage" in trigger);
 
       // Only suppress cross-role banners while the app is actively open in the
       // other mode. Background / killed delivery must still show so offline
@@ -126,14 +131,17 @@ async function ensureAndroidChannels() {
     lightColor: "#F7C948",
     sound: "default",
   });
-  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.rideRequests, {
-    name: "Ride Requests",
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 180],
-    lightColor: "#F7C948",
-    sound: "default",
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-  });
+  await Notifications.setNotificationChannelAsync(
+    ANDROID_CHANNELS.rideRequests,
+    {
+      name: "Ride Requests",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 180],
+      lightColor: "#F7C948",
+      sound: "default",
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    },
+  );
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.scheduled, {
     name: "Scheduled Bookings",
     importance: Notifications.AndroidImportance.HIGH,
@@ -163,8 +171,11 @@ function channelForNotificationType(type?: string) {
 
 export function useNotifications(userId?: string) {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [notification, setNotification] = useState<Notifications.Notification | null>(null);
-  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
+  const [notification, setNotification] =
+    useState<Notifications.Notification | null>(null);
+  const notificationListener = useRef<Notifications.EventSubscription | null>(
+    null,
+  );
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
 
   useEffect(() => {
@@ -217,7 +228,9 @@ export function useNotifications(userId?: string) {
 }
 
 /** Register/refresh Expo push token and persist it for background delivery. */
-export async function ensurePushTokenRegistered(userId?: string): Promise<string | null> {
+export async function ensurePushTokenRegistered(
+  userId?: string,
+): Promise<string | null> {
   const token = await registerForPushNotifications();
   if (token && userId) {
     await savePushToken(userId, token);
@@ -299,8 +312,11 @@ function handleIncomingNotificationData(rawData: unknown) {
   if (type === "ride_request" || type === "ride_requested") {
     // Only drivers restore the offer UI from push.
     if (activeAppMode !== "driver") return;
-    const rideId = data.rideId ? String(data.rideId) : String(data.ride?.id || "");
-    const ridePayload = data.ride && typeof data.ride === "object" ? data.ride : undefined;
+    const rideId = data.rideId
+      ? String(data.rideId)
+      : String(data.ride?.id || "");
+    const ridePayload =
+      data.ride && typeof data.ride === "object" ? data.ride : undefined;
     if (rideId || ridePayload) emitRideRequestNotification(rideId, ridePayload);
   }
 }
@@ -361,7 +377,8 @@ export async function sendLocalNotification(
     const channelId =
       type === "ride_request" || type === "ride_requested"
         ? ANDROID_CHANNELS.rideRequests
-        : type && channelForNotificationType(type) === ANDROID_CHANNELS.scheduled
+        : type &&
+            channelForNotificationType(type) === ANDROID_CHANNELS.scheduled
           ? ANDROID_CHANNELS.rideRequests
           : channelForNotificationType(type);
     await Notifications.scheduleNotificationAsync({

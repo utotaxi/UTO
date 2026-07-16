@@ -97,20 +97,66 @@ export interface PlacePrediction {
 
 export const api = {
   auth: {
-    async register(email: string, fullName: string, password?: string, role: string = "rider"): Promise<User> {
-      const res = await apiRequest("POST", "/api/auth/register", { email, fullName, password, role });
+    async register(
+      email: string,
+      fullName: string,
+      password?: string,
+      role: string = "rider",
+    ): Promise<User> {
+      const res = await apiRequest("POST", "/api/auth/register", {
+        email,
+        fullName,
+        password,
+        role,
+      });
       const data = await res.json();
       return data.user;
     },
 
-    async login(email: string, password?: string, isGoogle?: boolean, fullName?: string): Promise<User> {
-      const res = await apiRequest("POST", "/api/auth/login", { email, password, isGoogle, fullName });
+    async login(
+      email: string,
+      password?: string,
+      isGoogle?: boolean,
+      fullName?: string,
+    ): Promise<User> {
+      const res = await apiRequest("POST", "/api/auth/login", {
+        email,
+        password,
+        isGoogle,
+        fullName,
+      });
       const data = await res.json();
       return data.user;
     },
 
-    async resetPassword(email: string, newPassword?: string): Promise<{ success: boolean }> {
-      const res = await apiRequest("POST", "/api/auth/reset-password", { email, newPassword });
+    async resetPassword(
+      email: string,
+      newPassword?: string,
+    ): Promise<{ success: boolean }> {
+      const res = await apiRequest("POST", "/api/auth/reset-password", {
+        email,
+        newPassword,
+      });
+      return await res.json();
+    },
+
+    async sendResetOtp(
+      email: string,
+    ): Promise<{ success: boolean; message: string }> {
+      const res = await apiRequest("POST", "/api/auth/send-reset-otp", {
+        email,
+      });
+      return await res.json();
+    },
+
+    async verifyResetOtp(
+      email: string,
+      code: string,
+    ): Promise<{ success: boolean; message: string }> {
+      const res = await apiRequest("POST", "/api/auth/verify-reset-otp", {
+        email,
+        code,
+      });
       return await res.json();
     },
   },
@@ -132,13 +178,22 @@ export const api = {
       await apiRequest("PUT", `/api/users/${id}/push-token`, { pushToken });
     },
 
-    async uploadProfileImage(id: string, base64: string, mimeType?: string): Promise<string> {
-      const res = await apiRequest("POST", `/api/users/${id}/upload`, { base64, mimeType });
+    async uploadProfileImage(
+      id: string,
+      base64: string,
+      mimeType?: string,
+    ): Promise<string> {
+      const res = await apiRequest("POST", `/api/users/${id}/upload`, {
+        base64,
+        mimeType,
+      });
       const data = await res.json();
       return data.url;
     },
 
-    async deleteAccount(id: string): Promise<{ success: boolean; message: string }> {
+    async deleteAccount(
+      id: string,
+    ): Promise<{ success: boolean; message: string }> {
       try {
         const res = await apiRequest("POST", `/api/users/${id}/delete-account`);
         const data = await res.json();
@@ -146,7 +201,11 @@ export const api = {
       } catch (err: any) {
         // apiRequest throws on non-2xx — extract the meaningful message
         const msg = err?.message || "Failed to delete account";
-        throw new Error(msg.includes("Failed to delete") ? msg : `Failed to delete account: ${msg}`);
+        throw new Error(
+          msg.includes("Failed to delete")
+            ? msg
+            : `Failed to delete account: ${msg}`,
+        );
       }
     },
   },
@@ -186,8 +245,17 @@ export const api = {
       return data.drivers;
     },
 
-    async uploadDocument(id: string, base64: string, docType: string, mimeType?: string): Promise<string> {
-      const res = await apiRequest("POST", `/api/drivers/${id}/upload`, { base64, docType, mimeType });
+    async uploadDocument(
+      id: string,
+      base64: string,
+      docType: string,
+      mimeType?: string,
+    ): Promise<string> {
+      const res = await apiRequest("POST", `/api/drivers/${id}/upload`, {
+        base64,
+        docType,
+        mimeType,
+      });
       const data = await res.json();
       return data.url;
     },
@@ -242,7 +310,10 @@ export const api = {
     },
 
     async deleteSavedCard(methodId: string): Promise<{ success: boolean }> {
-      const res = await apiRequest("DELETE", `/api/payments/methods/${methodId}`);
+      const res = await apiRequest(
+        "DELETE",
+        `/api/payments/methods/${methodId}`,
+      );
       return res.json();
     },
 
@@ -260,8 +331,16 @@ export const api = {
       return res.json();
     },
 
-    async authorizeRide(userId: string, rideId: string, amount: number): Promise<{ success: boolean; paymentIntentId: string }> {
-      const res = await apiRequest("POST", "/api/payments/authorize-ride", { userId, rideId, amount });
+    async authorizeRide(
+      userId: string,
+      rideId: string,
+      amount: number,
+    ): Promise<{ success: boolean; paymentIntentId: string }> {
+      const res = await apiRequest("POST", "/api/payments/authorize-ride", {
+        userId,
+        rideId,
+        amount,
+      });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Failed to authorize card");
@@ -270,18 +349,33 @@ export const api = {
     },
 
     async setupIntent(userId: string): Promise<{ clientSecret: string }> {
-      const res = await apiRequest("POST", "/api/payments/setup-intent", { userId });
+      const res = await apiRequest("POST", "/api/payments/setup-intent", {
+        userId,
+      });
       return res.json();
     },
 
-    async confirm(paymentIntentId: string, rideId: string, userId: string, amount: number): Promise<boolean> {
-      const res = await apiRequest("POST", "/api/payments/confirm", { paymentIntentId, rideId, userId, amount });
+    async confirm(
+      paymentIntentId: string,
+      rideId: string,
+      userId: string,
+      amount: number,
+    ): Promise<boolean> {
+      const res = await apiRequest("POST", "/api/payments/confirm", {
+        paymentIntentId,
+        rideId,
+        userId,
+        amount,
+      });
       const data = await res.json();
       return data.success;
     },
 
     async getWalletTransactions(userId: string): Promise<WalletTransaction[]> {
-      const res = await apiRequest("GET", `/api/users/${userId}/wallet/transactions`);
+      const res = await apiRequest(
+        "GET",
+        `/api/users/${userId}/wallet/transactions`,
+      );
       try {
         const data = await res.json();
         return data.transactions || [];
@@ -290,9 +384,21 @@ export const api = {
       }
     },
 
-    async addWalletTransaction(userId: string, data: { rideId?: string, amount: number, type: "credit" | "debit", description?: string }): Promise<WalletTransaction | null> {
+    async addWalletTransaction(
+      userId: string,
+      data: {
+        rideId?: string;
+        amount: number;
+        type: "credit" | "debit";
+        description?: string;
+      },
+    ): Promise<WalletTransaction | null> {
       try {
-        const res = await apiRequest("POST", `/api/users/${userId}/wallet/transactions`, data);
+        const res = await apiRequest(
+          "POST",
+          `/api/users/${userId}/wallet/transactions`,
+          data,
+        );
         const result = await res.json();
         return result.transaction;
       } catch (e) {
@@ -304,12 +410,27 @@ export const api = {
 
   withdrawals: {
     async getPayoutMethod(userId: string): Promise<any> {
-      const res = await apiRequest("GET", `/api/rider-payout-methods/${userId}`);
+      const res = await apiRequest(
+        "GET",
+        `/api/rider-payout-methods/${userId}`,
+      );
       return res.json();
     },
 
-    async createPayoutMethod(userId: string, data: { account_name: string, account_no: string, sort_code: string, bank_provider: string }): Promise<any> {
-      const res = await apiRequest("POST", `/api/rider-payout-methods/${userId}`, data);
+    async createPayoutMethod(
+      userId: string,
+      data: {
+        account_name: string;
+        account_no: string;
+        sort_code: string;
+        bank_provider: string;
+      },
+    ): Promise<any> {
+      const res = await apiRequest(
+        "POST",
+        `/api/rider-payout-methods/${userId}`,
+        data,
+      );
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.error || "Failed to create payout method");
@@ -317,8 +438,21 @@ export const api = {
       return res.json();
     },
 
-    async updatePayoutMethod(userId: string, id: string, data: { account_name: string, account_no: string, sort_code: string, bank_provider: string }): Promise<any> {
-      const res = await apiRequest("PUT", `/api/rider-payout-methods/${userId}/${id}`, data);
+    async updatePayoutMethod(
+      userId: string,
+      id: string,
+      data: {
+        account_name: string;
+        account_no: string;
+        sort_code: string;
+        bank_provider: string;
+      },
+    ): Promise<any> {
+      const res = await apiRequest(
+        "PUT",
+        `/api/rider-payout-methods/${userId}/${id}`,
+        data,
+      );
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.error || "Failed to update payout method");
@@ -326,8 +460,15 @@ export const api = {
       return res.json();
     },
 
-    async requestWithdrawal(userId: string, amount: number, payout_method_id?: string): Promise<any> {
-      const res = await apiRequest("POST", `/api/withdrawals/${userId}`, { amount, payout_method_id });
+    async requestWithdrawal(
+      userId: string,
+      amount: number,
+      payout_method_id?: string,
+    ): Promise<any> {
+      const res = await apiRequest("POST", `/api/withdrawals/${userId}`, {
+        amount,
+        payout_method_id,
+      });
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.error || "Failed to process withdrawal");
@@ -341,8 +482,15 @@ export const api = {
       return data.withdrawals || [];
     },
 
-    async approveWithdrawal(withdrawalId: string, transactionId?: string): Promise<any> {
-      const res = await apiRequest("POST", `/api/withdrawals/${withdrawalId}/approve`, { transactionId });
+    async approveWithdrawal(
+      withdrawalId: string,
+      transactionId?: string,
+    ): Promise<any> {
+      const res = await apiRequest(
+        "POST",
+        `/api/withdrawals/${withdrawalId}/approve`,
+        { transactionId },
+      );
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.error || "Failed to approve withdrawal");
@@ -350,8 +498,15 @@ export const api = {
       return res.json();
     },
 
-    async cancelWithdrawal(withdrawalId: string, reason?: string): Promise<any> {
-      const res = await apiRequest("POST", `/api/withdrawals/${withdrawalId}/cancel`, { reason });
+    async cancelWithdrawal(
+      withdrawalId: string,
+      reason?: string,
+    ): Promise<any> {
+      const res = await apiRequest(
+        "POST",
+        `/api/withdrawals/${withdrawalId}/cancel`,
+        { reason },
+      );
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.error || "Failed to cancel withdrawal");
@@ -376,11 +531,14 @@ export const api = {
         console.error("Failed to fetch pricing rules:", e);
         return null;
       }
-    }
+    },
   },
 
   places: {
-    async autocomplete(input: string, sessionToken?: string): Promise<PlacePrediction[]> {
+    async autocomplete(
+      input: string,
+      sessionToken?: string,
+    ): Promise<PlacePrediction[]> {
       const baseUrl = getApiUrl();
       const url = new URL("/api/places/autocomplete", baseUrl);
       url.searchParams.set("input", input);
@@ -393,9 +551,13 @@ export const api = {
       return data.predictions || [];
     },
 
-    async getDetails(placeId: string): Promise<{ latitude: number; longitude: number; address: string }> {
+    async getDetails(
+      placeId: string,
+    ): Promise<{ latitude: number; longitude: number; address: string }> {
       const baseUrl = getApiUrl();
-      const res = await fetch(`${baseUrl}/api/places/details/${placeId}`, { credentials: "include" });
+      const res = await fetch(`${baseUrl}/api/places/details/${placeId}`, {
+        credentials: "include",
+      });
       const data = await res.json();
 
       return {
@@ -416,7 +578,13 @@ export const api = {
       }
     },
 
-    async create(place: { userId: string; name: string; address: string; latitude?: number; longitude?: number }): Promise<any> {
+    async create(place: {
+      userId: string;
+      name: string;
+      address: string;
+      latitude?: number;
+      longitude?: number;
+    }): Promise<any> {
       const res = await apiRequest("POST", "/api/places/saved", {
         userId: place.userId,
         name: place.name,
@@ -437,7 +605,10 @@ export const api = {
       }
     },
 
-    async update(id: string, data: { name?: string; address?: string }): Promise<any> {
+    async update(
+      id: string,
+      data: { name?: string; address?: string },
+    ): Promise<any> {
       const res = await apiRequest("PUT", `/api/places/saved/${id}`, data);
       const result = await res.json();
       return result.place;

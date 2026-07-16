@@ -56,7 +56,14 @@ interface ServiceCardProps {
   delay: number;
 }
 
-function ServiceCard({ id, name, icon, discount, onPress, delay }: ServiceCardProps) {
+function ServiceCard({
+  id,
+  name,
+  icon,
+  discount,
+  onPress,
+  delay,
+}: ServiceCardProps) {
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -108,8 +115,16 @@ const darkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
   { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#38414e" }],
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#17263c" }],
+  },
 ];
 
 export default function RiderHomeScreen({ navigation }: any) {
@@ -121,25 +136,37 @@ export default function RiderHomeScreen({ navigation }: any) {
 
   const [currentAddress, setCurrentAddress] = useState<string>("Locating...");
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
-  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
   const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
   const mapRef = React.useRef<any>(null);
 
-
-
   // Fetch real nearby drivers from the API
-  const fetchNearbyDrivers = async (coords: { latitude: number; longitude: number }) => {
+  const fetchNearbyDrivers = async (coords: {
+    latitude: number;
+    longitude: number;
+  }) => {
     try {
       const apiUrl = getApiUrl();
-      const response = await fetch(new URL("/api/drivers/online", apiUrl).toString());
+      const response = await fetch(
+        new URL("/api/drivers/online", apiUrl).toString(),
+      );
       const data = await response.json();
 
-      const realDrivers: NearbyDriver[] = (data.drivers || []).map((driver: any) => ({
-        id: driver.id,
-        latitude: driver.currentLatitude || coords.latitude + (Math.random() - 0.5) * 0.01,
-        longitude: driver.currentLongitude || coords.longitude + (Math.random() - 0.5) * 0.01,
-        heading: Math.random() * 360,
-      }));
+      const realDrivers: NearbyDriver[] = (data.drivers || []).map(
+        (driver: any) => ({
+          id: driver.id,
+          latitude:
+            driver.currentLatitude ||
+            coords.latitude + (Math.random() - 0.5) * 0.01,
+          longitude:
+            driver.currentLongitude ||
+            coords.longitude + (Math.random() - 0.5) * 0.01,
+          heading: Math.random() * 360,
+        }),
+      );
 
       setNearbyDrivers(realDrivers);
     } catch (error) {
@@ -171,12 +198,15 @@ export default function RiderHomeScreen({ navigation }: any) {
 
         // Animate map to actual user location
         if (mapRef.current) {
-          mapRef.current.animateToRegion({
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            latitudeDelta: 0.015,
-            longitudeDelta: 0.015,
-          }, 800);
+          mapRef.current.animateToRegion(
+            {
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              latitudeDelta: 0.015,
+              longitudeDelta: 0.015,
+            },
+            800,
+          );
         }
 
         // Reverse geocode for address
@@ -226,13 +256,12 @@ export default function RiderHomeScreen({ navigation }: any) {
             latitude: driver.latitude + Math.cos(rad) * speed,
             longitude: driver.longitude + Math.sin(rad) * speed,
           };
-        })
+        }),
       );
     }, 2000);
 
     return () => clearInterval(interval);
   }, [nearbyDrivers.length]);
-
 
   const handleWhereToPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -251,17 +280,17 @@ export default function RiderHomeScreen({ navigation }: any) {
 
   const mapRegion = userLocation
     ? {
-      latitude: userLocation.latitude,
-      longitude: userLocation.longitude,
-      latitudeDelta: 0.015,
-      longitudeDelta: 0.015,
-    }
+        latitude: userLocation.latitude,
+        longitude: userLocation.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      }
     : {
-      latitude: 51.5074, // Default to London
-      longitude: -0.1278,
-      latitudeDelta: 0.015,
-      longitudeDelta: 0.015,
-    };
+        latitude: 51.5074, // Default to London
+        longitude: -0.1278,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      };
 
   return (
     <View style={[styles.container, { backgroundColor: "#000000" }]}>
@@ -274,7 +303,10 @@ export default function RiderHomeScreen({ navigation }: any) {
         showsVerticalScrollIndicator={false}
       >
         {/* Map showing user location and nearby drivers */}
-        <Animated.View entering={FadeIn.duration(500)} style={styles.mapContainer}>
+        <Animated.View
+          entering={FadeIn.duration(500)}
+          style={styles.mapContainer}
+        >
           <MapViewWrapper
             style={styles.map}
             mapRef={mapRef}
@@ -285,10 +317,7 @@ export default function RiderHomeScreen({ navigation }: any) {
           >
             {/* User location marker */}
             {userLocation ? (
-              <MarkerWrapper
-                coordinate={userLocation}
-                title="You are here"
-              >
+              <MarkerWrapper coordinate={userLocation} title="You are here">
                 <View style={styles.userMarker}>
                   <View style={styles.userMarkerDot} />
                 </View>
@@ -309,8 +338,6 @@ export default function RiderHomeScreen({ navigation }: any) {
               </MarkerWrapper>
             ))}
           </MapViewWrapper>
-
-
         </Animated.View>
 
         {/* Where to search bar */}
@@ -327,7 +354,11 @@ export default function RiderHomeScreen({ navigation }: any) {
         <Animated.View entering={FadeInDown.delay(200).duration(400)}>
           <Pressable style={styles.currentLocationCard}>
             <View style={styles.locationIconContainer}>
-              <MaterialIcons name="my-location" size={18} color={UTOColors.success} />
+              <MaterialIcons
+                name="my-location"
+                size={18}
+                color={UTOColors.success}
+              />
             </View>
             <View style={styles.locationTextContainer}>
               {isLoadingLocation ? (
@@ -337,7 +368,9 @@ export default function RiderHomeScreen({ navigation }: any) {
                   <ThemedText style={styles.locationTitle} numberOfLines={1}>
                     {currentAddress}
                   </ThemedText>
-                  <ThemedText style={styles.locationSubtitle}>Your current location</ThemedText>
+                  <ThemedText style={styles.locationSubtitle}>
+                    Your current location
+                  </ThemedText>
                 </>
               )}
             </View>
@@ -371,9 +404,6 @@ export default function RiderHomeScreen({ navigation }: any) {
             />
           ))}
         </View>
-
-
-
       </ScrollView>
 
       {/* Rating Modal — rate the driver after trip */}

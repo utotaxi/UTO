@@ -1,7 +1,10 @@
-require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
+require("dotenv").config();
+const { createClient } = require("@supabase/supabase-js");
 
-const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const sb = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+);
 
 async function migrate() {
   const columns = [
@@ -13,15 +16,17 @@ async function migrate() {
   ];
 
   for (const sql of columns) {
-    const { error } = await sb.rpc('exec_sql', { sql });
+    const { error } = await sb.rpc("exec_sql", { sql });
     if (error) {
       // Try direct insert to check if column already exists by doing a test query
-      console.log(`Column may already exist or exec_sql not available: ${error.message}`);
+      console.log(
+        `Column may already exist or exec_sql not available: ${error.message}`,
+      );
     } else {
       console.log(`✅ Ran: ${sql.slice(0, 60)}...`);
     }
   }
-  console.log('Migration complete.');
+  console.log("Migration complete.");
 }
 
 migrate().catch(console.error);

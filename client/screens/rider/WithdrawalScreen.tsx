@@ -21,24 +21,26 @@ import { Spacing, BorderRadius, UTOColors } from "@/constants/theme";
 export default function WithdrawalScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"overview" | "payout" | "history">("overview");
-  
+  const [activeTab, setActiveTab] = useState<"overview" | "payout" | "history">(
+    "overview",
+  );
+
   // Payout method state
   const [payoutMethod, setPayoutMethod] = useState<any>(null);
   const [isLoadingPayout, setIsLoadingPayout] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showPayoutForm, setShowPayoutForm] = useState(false);
-  
+
   // Form state
   const [accountName, setAccountName] = useState("");
   const [accountNo, setAccountNo] = useState("");
   const [sortCode, setSortCode] = useState("");
   const [bankProvider, setBankProvider] = useState("");
-  
+
   // Withdrawal request state
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [isRequesting, setIsRequesting] = useState(false);
-  
+
   // Withdrawal history
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -88,7 +90,12 @@ export default function WithdrawalScreen({ navigation }: any) {
   };
 
   const handleSavePayoutMethod = async () => {
-    if (!accountName.trim() || !accountNo.trim() || !sortCode.trim() || !bankProvider.trim()) {
+    if (
+      !accountName.trim() ||
+      !accountNo.trim() ||
+      !sortCode.trim() ||
+      !bankProvider.trim()
+    ) {
       Alert.alert("Error", "All fields are required");
       return;
     }
@@ -140,8 +147,15 @@ export default function WithdrawalScreen({ navigation }: any) {
 
     try {
       setIsRequesting(true);
-      await api.withdrawals.requestWithdrawal(user!.id, amount, payoutMethod.id);
-      Alert.alert("Success", `Withdrawal request of £${amount.toFixed(2)} submitted`);
+      await api.withdrawals.requestWithdrawal(
+        user!.id,
+        amount,
+        payoutMethod.id,
+      );
+      Alert.alert(
+        "Success",
+        `Withdrawal request of £${amount.toFixed(2)} submitted`,
+      );
       setWithdrawAmount("");
       loadWithdrawalHistory();
     } catch (err: any) {
@@ -151,7 +165,10 @@ export default function WithdrawalScreen({ navigation }: any) {
     }
   };
 
-  const handleCancelWithdrawal = async (withdrawalId: string, amount: number) => {
+  const handleCancelWithdrawal = async (
+    withdrawalId: string,
+    amount: number,
+  ) => {
     Alert.alert(
       "Cancel Withdrawal?",
       `This will cancel your withdrawal request of £${amount.toFixed(2)} and refund your wallet.`,
@@ -162,18 +179,27 @@ export default function WithdrawalScreen({ navigation }: any) {
           onPress: async () => {
             try {
               setIsRequesting(true);
-              await api.withdrawals.cancelWithdrawal(withdrawalId, "Cancelled by user");
-              Alert.alert("Success", "Withdrawal cancelled and wallet refunded");
+              await api.withdrawals.cancelWithdrawal(
+                withdrawalId,
+                "Cancelled by user",
+              );
+              Alert.alert(
+                "Success",
+                "Withdrawal cancelled and wallet refunded",
+              );
               loadWithdrawalHistory();
             } catch (err: any) {
-              Alert.alert("Error", err.message || "Failed to cancel withdrawal");
+              Alert.alert(
+                "Error",
+                err.message || "Failed to cancel withdrawal",
+              );
             } finally {
               setIsRequesting(false);
             }
           },
           style: "destructive",
         },
-      ]
+      ],
     );
   };
 
@@ -215,7 +241,12 @@ export default function WithdrawalScreen({ navigation }: any) {
               <MaterialIcons name="close" size={20} color="#EF4444" />
             </Pressable>
           )}
-          <View style={[styles.statusBadge, { backgroundColor: statusColor + "20" }]}>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: statusColor + "20" },
+            ]}
+          >
             <Text style={[styles.statusBadgeText, { color: statusColor }]}>
               {item.status.charAt(0).toUpperCase()}
             </Text>
@@ -228,7 +259,10 @@ export default function WithdrawalScreen({ navigation }: any) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
           <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
         </Pressable>
         <ThemedText style={styles.headerTitle}>Withdrawals</ThemedText>
@@ -241,9 +275,17 @@ export default function WithdrawalScreen({ navigation }: any) {
           <Pressable
             key={tab}
             onPress={() => setActiveTab(tab)}
-            style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
+            style={[
+              styles.tabButton,
+              activeTab === tab && styles.tabButtonActive,
+            ]}
           >
-            <ThemedText style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}>
+            <ThemedText
+              style={[
+                styles.tabLabel,
+                activeTab === tab && styles.tabLabelActive,
+              ]}
+            >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </ThemedText>
           </Pressable>
@@ -256,7 +298,9 @@ export default function WithdrawalScreen({ navigation }: any) {
           <View>
             {/* Balance Card */}
             <View style={styles.balanceCard}>
-              <ThemedText style={styles.balanceLabel}>Available Balance</ThemedText>
+              <ThemedText style={styles.balanceLabel}>
+                Available Balance
+              </ThemedText>
               <ThemedText style={styles.balanceAmount}>
                 £{Number(user?.walletBalance || 0).toFixed(2)}
               </ThemedText>
@@ -271,11 +315,19 @@ export default function WithdrawalScreen({ navigation }: any) {
                 style={styles.actionButton}
                 onPress={() => setActiveTab("payout")}
               >
-                <MaterialIcons name="account-balance" size={24} color={UTOColors.primary} />
+                <MaterialIcons
+                  name="account-balance"
+                  size={24}
+                  color={UTOColors.primary}
+                />
                 <View style={{ flex: 1, marginLeft: 12 }}>
-                  <ThemedText style={styles.actionTitle}>Add Bank Account</ThemedText>
+                  <ThemedText style={styles.actionTitle}>
+                    Add Bank Account
+                  </ThemedText>
                   <ThemedText style={styles.actionSubtitle}>
-                    {payoutMethod ? "Update your bank details" : "Add your bank account for withdrawals"}
+                    {payoutMethod
+                      ? "Update your bank details"
+                      : "Add your bank account for withdrawals"}
                   </ThemedText>
                 </View>
                 <MaterialIcons name="chevron-right" size={24} color="#666" />
@@ -288,7 +340,9 @@ export default function WithdrawalScreen({ navigation }: any) {
                 >
                   <MaterialIcons name="credit-card" size={24} color="#10B981" />
                   <View style={{ flex: 1, marginLeft: 12 }}>
-                    <ThemedText style={styles.actionTitle}>Request Withdrawal</ThemedText>
+                    <ThemedText style={styles.actionTitle}>
+                      Request Withdrawal
+                    </ThemedText>
                     <ThemedText style={styles.actionSubtitle}>
                       Transfer funds to your bank account
                     </ThemedText>
@@ -301,7 +355,9 @@ export default function WithdrawalScreen({ navigation }: any) {
             {/* Withdrawal Request */}
             {payoutMethod && (
               <View style={styles.withdrawalSection}>
-                <ThemedText style={styles.sectionTitle}>Request Withdrawal</ThemedText>
+                <ThemedText style={styles.sectionTitle}>
+                  Request Withdrawal
+                </ThemedText>
                 <View style={styles.withdrawalInputContainer}>
                   <Text style={styles.currencySymbol}>£</Text>
                   <TextInput
@@ -317,14 +373,15 @@ export default function WithdrawalScreen({ navigation }: any) {
                 <View style={styles.infoBox}>
                   <MaterialIcons name="info" size={16} color="#3B82F6" />
                   <ThemedText style={styles.infoText}>
-                    Withdrawals are processed within 2-3 business days to {accountName || "your bank"}
+                    Withdrawals are processed within 2-3 business days to{" "}
+                    {accountName || "your bank"}
                   </ThemedText>
                 </View>
 
                 <Pressable
                   style={[
                     styles.withdrawButton,
-                    (!withdrawAmount || isRequesting) && { opacity: 0.5 }
+                    (!withdrawAmount || isRequesting) && { opacity: 0.5 },
                   ]}
                   onPress={handleRequestWithdrawal}
                   disabled={isRequesting || !withdrawAmount}
@@ -334,7 +391,9 @@ export default function WithdrawalScreen({ navigation }: any) {
                   ) : (
                     <>
                       <MaterialIcons name="send" size={18} color="#000" />
-                      <Text style={styles.withdrawButtonText}>Request Withdrawal</Text>
+                      <Text style={styles.withdrawButtonText}>
+                        Request Withdrawal
+                      </Text>
                     </>
                   )}
                 </Pressable>
@@ -357,7 +416,9 @@ export default function WithdrawalScreen({ navigation }: any) {
                 </ThemedText>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={styles.inputLabel}>Account Holder Name</ThemedText>
+                  <ThemedText style={styles.inputLabel}>
+                    Account Holder Name
+                  </ThemedText>
                   <TextInput
                     style={styles.input}
                     placeholder="Full name on bank account"
@@ -368,7 +429,9 @@ export default function WithdrawalScreen({ navigation }: any) {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={styles.inputLabel}>Account Number</ThemedText>
+                  <ThemedText style={styles.inputLabel}>
+                    Account Number
+                  </ThemedText>
                   <TextInput
                     style={styles.input}
                     placeholder="8 digits"
@@ -392,7 +455,9 @@ export default function WithdrawalScreen({ navigation }: any) {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={styles.inputLabel}>Bank Name/Provider</ThemedText>
+                  <ThemedText style={styles.inputLabel}>
+                    Bank Name/Provider
+                  </ThemedText>
                   <TextInput
                     style={styles.input}
                     placeholder="e.g., Barclays, HSBC, NatWest"
@@ -405,7 +470,8 @@ export default function WithdrawalScreen({ navigation }: any) {
                 <View style={styles.infoBox}>
                   <MaterialIcons name="security" size={16} color="#10B981" />
                   <ThemedText style={styles.infoText}>
-                    Your bank details are encrypted and only used for withdrawals
+                    Your bank details are encrypted and only used for
+                    withdrawals
                   </ThemedText>
                 </View>
 
@@ -435,33 +501,58 @@ export default function WithdrawalScreen({ navigation }: any) {
             ) : payoutMethod ? (
               <View style={styles.payoutDisplay}>
                 <View style={styles.payoutCard}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <ThemedText style={styles.sectionTitle}>Current Bank Account</ThemedText>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 16,
+                    }}
+                  >
+                    <ThemedText style={styles.sectionTitle}>
+                      Current Bank Account
+                    </ThemedText>
                     <Pressable onPress={() => setShowPayoutForm(true)}>
-                      <MaterialIcons name="edit" size={20} color={UTOColors.primary} />
+                      <MaterialIcons
+                        name="edit"
+                        size={20}
+                        color={UTOColors.primary}
+                      />
                     </Pressable>
                   </View>
 
                   <View style={styles.payoutInfo}>
-                    <ThemedText style={styles.payoutLabel}>Holder Name</ThemedText>
-                    <ThemedText style={styles.payoutValue}>{payoutMethod.account_name}</ThemedText>
+                    <ThemedText style={styles.payoutLabel}>
+                      Holder Name
+                    </ThemedText>
+                    <ThemedText style={styles.payoutValue}>
+                      {payoutMethod.account_name}
+                    </ThemedText>
                   </View>
 
                   <View style={styles.payoutInfo}>
-                    <ThemedText style={styles.payoutLabel}>Account Number</ThemedText>
+                    <ThemedText style={styles.payoutLabel}>
+                      Account Number
+                    </ThemedText>
                     <ThemedText style={styles.payoutValue}>
                       ••••{payoutMethod.account_no.slice(-4)}
                     </ThemedText>
                   </View>
 
                   <View style={styles.payoutInfo}>
-                    <ThemedText style={styles.payoutLabel}>Sort Code</ThemedText>
-                    <ThemedText style={styles.payoutValue}>{payoutMethod.sort_code}</ThemedText>
+                    <ThemedText style={styles.payoutLabel}>
+                      Sort Code
+                    </ThemedText>
+                    <ThemedText style={styles.payoutValue}>
+                      {payoutMethod.sort_code}
+                    </ThemedText>
                   </View>
 
                   <View style={styles.payoutInfo}>
                     <ThemedText style={styles.payoutLabel}>Bank</ThemedText>
-                    <ThemedText style={styles.payoutValue}>{payoutMethod.bank_provider}</ThemedText>
+                    <ThemedText style={styles.payoutValue}>
+                      {payoutMethod.bank_provider}
+                    </ThemedText>
                   </View>
                 </View>
               </View>
@@ -472,7 +563,9 @@ export default function WithdrawalScreen({ navigation }: any) {
         {/* History Tab */}
         {activeTab === "history" && (
           <View>
-            <ThemedText style={styles.sectionTitle}>Withdrawal History</ThemedText>
+            <ThemedText style={styles.sectionTitle}>
+              Withdrawal History
+            </ThemedText>
             {isLoadingHistory ? (
               <View style={styles.centerContainer}>
                 <ActivityIndicator size="large" color={UTOColors.primary} />
@@ -480,7 +573,9 @@ export default function WithdrawalScreen({ navigation }: any) {
             ) : withdrawals.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <MaterialIcons name="history" size={48} color="#333" />
-                <ThemedText style={styles.emptyText}>No withdrawals yet</ThemedText>
+                <ThemedText style={styles.emptyText}>
+                  No withdrawals yet
+                </ThemedText>
                 <ThemedText style={styles.emptySubtext}>
                   Request a withdrawal to see it here
                 </ThemedText>

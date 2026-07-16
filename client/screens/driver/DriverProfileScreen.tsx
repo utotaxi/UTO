@@ -41,7 +41,12 @@ export default function DriverProfileScreen({ navigation }: any) {
   const [profileBase64, setProfileBase64] = useState("");
 
   // Snapshot of last-saved state so Cancel restores properly
-  const savedRef = useRef({ fullName: "", phone: "", email: "", profileImage: "" });
+  const savedRef = useRef({
+    fullName: "",
+    phone: "",
+    email: "",
+    profileImage: "",
+  });
 
   useEffect(() => {
     (async () => {
@@ -92,7 +97,10 @@ export default function DriverProfileScreen({ navigation }: any) {
     try {
       const permResult = await ImagePicker.requestCameraPermissionsAsync();
       if (!permResult.granted) {
-        Alert.alert("Permission Required", "Please allow camera access to take a selfie.");
+        Alert.alert(
+          "Permission Required",
+          "Please allow camera access to take a selfie.",
+        );
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -111,9 +119,13 @@ export default function DriverProfileScreen({ navigation }: any) {
 
   const handlePickLibrary = async () => {
     try {
-      const permResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permResult.granted) {
-        Alert.alert("Permission Required", "Please allow access to your photo library to change your profile picture.");
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library to change your profile picture.",
+        );
         return;
       }
 
@@ -139,8 +151,8 @@ export default function DriverProfileScreen({ navigation }: any) {
       [
         { text: "Take a Selfie", onPress: handleTakePhoto },
         { text: "Choose from Library", onPress: handlePickLibrary },
-        { text: "Cancel", style: "cancel" }
-      ]
+        { text: "Cancel", style: "cancel" },
+      ],
     );
   };
 
@@ -161,7 +173,7 @@ export default function DriverProfileScreen({ navigation }: any) {
           finalProfileImage = await api.users.uploadProfileImage(
             user.id,
             profileBase64,
-            "image/jpeg"
+            "image/jpeg",
           );
         }
       }
@@ -171,8 +183,11 @@ export default function DriverProfileScreen({ navigation }: any) {
         phone: phone.trim(),
         email: email.trim(),
       };
-      
-      if (finalProfileImage && finalProfileImage !== savedRef.current.profileImage) {
+
+      if (
+        finalProfileImage &&
+        finalProfileImage !== savedRef.current.profileImage
+      ) {
         updates.profileImage = finalProfileImage;
       }
 
@@ -191,12 +206,19 @@ export default function DriverProfileScreen({ navigation }: any) {
       };
 
       setProfileImage(finalProfileImage);
-      setProfileBase64(""); 
+      setProfileBase64("");
       setIsEditing(false);
-      Alert.alert("Profile Updated", "Your profile has been saved successfully.");
+      Alert.alert(
+        "Profile Updated",
+        "Your profile has been saved successfully.",
+      );
     } catch (err: any) {
       console.error("Profile save error:", err);
-      Alert.alert("Error", err?.message || "Failed to save profile. Please check your connection and try again.");
+      Alert.alert(
+        "Error",
+        err?.message ||
+          "Failed to save profile. Please check your connection and try again.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -222,9 +244,20 @@ export default function DriverProfileScreen({ navigation }: any) {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { backgroundColor: theme.backgroundRoot, paddingTop: insets.top + 60, alignItems: "center" }]}>
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: theme.backgroundRoot,
+            paddingTop: insets.top + 60,
+            alignItems: "center",
+          },
+        ]}
+      >
         <ActivityIndicator size="large" color={UTOColors.primary} />
-        <ThemedText style={{ color: theme.textSecondary, marginTop: 12 }}>Loading profile…</ThemedText>
+        <ThemedText style={{ color: theme.textSecondary, marginTop: 12 }}>
+          Loading profile…
+        </ThemedText>
       </View>
     );
   }
@@ -263,11 +296,16 @@ export default function DriverProfileScreen({ navigation }: any) {
       style={{ flex: 1, backgroundColor: theme.backgroundRoot }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
+      <View
+        style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
+      >
         {/* Header */}
         <Animated.View
           entering={FadeIn.duration(300)}
-          style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: theme.border }]}
+          style={[
+            styles.header,
+            { paddingTop: insets.top + 8, borderBottomColor: theme.border },
+          ]}
         >
           <Pressable
             onPress={() => {
@@ -275,7 +313,11 @@ export default function DriverProfileScreen({ navigation }: any) {
               if (isEditing && hasChanges()) {
                 Alert.alert("Discard Changes?", "You have unsaved changes.", [
                   { text: "Keep Editing", style: "cancel" },
-                  { text: "Discard", style: "destructive", onPress: handleCancel },
+                  {
+                    text: "Discard",
+                    style: "destructive",
+                    onPress: handleCancel,
+                  },
                 ]);
               } else if (isEditing) {
                 handleCancel();
@@ -283,7 +325,10 @@ export default function DriverProfileScreen({ navigation }: any) {
                 navigation.goBack();
               }
             }}
-            style={[styles.backButton, { backgroundColor: theme.backgroundDefault }]}
+            style={[
+              styles.backButton,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
           >
             <Feather
               name={isEditing ? "x" : "arrow-left"}
@@ -291,12 +336,17 @@ export default function DriverProfileScreen({ navigation }: any) {
               color={theme.text}
             />
           </Pressable>
-          <ThemedText style={[styles.headerTitle, { color: theme.text }]}>Profile</ThemedText>
+          <ThemedText style={[styles.headerTitle, { color: theme.text }]}>
+            Profile
+          </ThemedText>
           {isEditing ? (
             <Pressable
               onPress={handleSave}
               disabled={isSaving || !hasChanges()}
-              style={[styles.saveButton, (isSaving || !hasChanges()) && { opacity: 0.5 }]}
+              style={[
+                styles.saveButton,
+                (isSaving || !hasChanges()) && { opacity: 0.5 },
+              ]}
             >
               {isSaving ? (
                 <ActivityIndicator size="small" color="#000000" />
@@ -330,13 +380,30 @@ export default function DriverProfileScreen({ navigation }: any) {
             entering={FadeInDown.delay(100).duration(400)}
             style={styles.avatarSection}
           >
-            <Pressable onPress={isEditing ? handlePickImage : undefined} style={styles.avatarWrapper}>
-              <View style={[styles.avatarContainer, { borderColor: theme.border }]}>
+            <Pressable
+              onPress={isEditing ? handlePickImage : undefined}
+              style={styles.avatarWrapper}
+            >
+              <View
+                style={[styles.avatarContainer, { borderColor: theme.border }]}
+              >
                 {profileImage ? (
-                  <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+                  <Image
+                    source={{ uri: profileImage }}
+                    style={styles.avatarImage}
+                  />
                 ) : (
-                  <View style={[styles.avatarPlaceholder, { backgroundColor: theme.backgroundDefault }]}>
-                    <Feather name="user" size={48} color={theme.textSecondary} />
+                  <View
+                    style={[
+                      styles.avatarPlaceholder,
+                      { backgroundColor: theme.backgroundDefault },
+                    ]}
+                  >
+                    <Feather
+                      name="user"
+                      size={48}
+                      color={theme.textSecondary}
+                    />
                   </View>
                 )}
               </View>
@@ -346,11 +413,16 @@ export default function DriverProfileScreen({ navigation }: any) {
                 </View>
               )}
             </Pressable>
-            <ThemedText style={[styles.avatarName, { color: theme.text }]}>{fullName || "Driver"}</ThemedText>
+            <ThemedText style={[styles.avatarName, { color: theme.text }]}>
+              {fullName || "Driver"}
+            </ThemedText>
             <View style={styles.ratingRow}>
               <Feather name="star" size={16} color={UTOColors.primary} />
-              <ThemedText style={[styles.ratingText, { color: theme.textSecondary }]}>
-                {user?.rating?.toFixed(1) || "5.0"} • {user?.totalRides || 0} rides
+              <ThemedText
+                style={[styles.ratingText, { color: theme.textSecondary }]}
+              >
+                {user?.rating?.toFixed(1) || "5.0"} • {user?.totalRides || 0}{" "}
+                rides
               </ThemedText>
             </View>
           </Animated.View>
@@ -360,24 +432,54 @@ export default function DriverProfileScreen({ navigation }: any) {
             entering={FadeInDown.delay(200).duration(400)}
             style={styles.fieldsSection}
           >
-            <ThemedText style={[styles.sectionLabel, { color: theme.textSecondary }]}>PERSONAL INFORMATION</ThemedText>
-            <View style={[styles.fieldsCard, { backgroundColor: theme.backgroundDefault }]}>
+            <ThemedText
+              style={[styles.sectionLabel, { color: theme.textSecondary }]}
+            >
+              PERSONAL INFORMATION
+            </ThemedText>
+            <View
+              style={[
+                styles.fieldsCard,
+                { backgroundColor: theme.backgroundDefault },
+              ]}
+            >
               {fields.map((field, index) => (
                 <View
                   key={field.key}
                   style={[
                     styles.fieldRow,
-                    index < fields.length - 1 && [styles.fieldBorder, { borderBottomColor: theme.border }],
+                    index < fields.length - 1 && [
+                      styles.fieldBorder,
+                      { borderBottomColor: theme.border },
+                    ],
                   ]}
                 >
-                  <View style={[styles.fieldIconContainer, { backgroundColor: theme.backgroundRoot }]}>
+                  <View
+                    style={[
+                      styles.fieldIconContainer,
+                      { backgroundColor: theme.backgroundRoot },
+                    ]}
+                  >
                     <Feather name={field.icon} size={20} color={theme.text} />
                   </View>
                   <View style={styles.fieldContent}>
-                    <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>{field.label}</ThemedText>
+                    <ThemedText
+                      style={[
+                        styles.fieldLabel,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      {field.label}
+                    </ThemedText>
                     {isEditing && field.editable ? (
                       <TextInput
-                        style={[styles.fieldInput, { color: theme.text, borderBottomColor: theme.border }]}
+                        style={[
+                          styles.fieldInput,
+                          {
+                            color: theme.text,
+                            borderBottomColor: theme.border,
+                          },
+                        ]}
                         value={field.value}
                         onChangeText={(text) => {
                           if (field.key === "fullName") setFullName(text);
@@ -387,12 +489,21 @@ export default function DriverProfileScreen({ navigation }: any) {
                         placeholder={field.placeholder}
                         placeholderTextColor={theme.textSecondary}
                         keyboardType={field.keyboardType || "default"}
-                        autoCapitalize={field.key === "fullName" ? "words" : "none"}
+                        autoCapitalize={
+                          field.key === "fullName" ? "words" : "none"
+                        }
                       />
                     ) : (
-                      <ThemedText style={[styles.fieldValue, { color: theme.text }]}>
+                      <ThemedText
+                        style={[styles.fieldValue, { color: theme.text }]}
+                      >
                         {field.value || (
-                          <ThemedText style={[styles.fieldPlaceholder, { color: theme.textSecondary }]}>
+                          <ThemedText
+                            style={[
+                              styles.fieldPlaceholder,
+                              { color: theme.textSecondary },
+                            ]}
+                          >
                             {field.placeholder}
                           </ThemedText>
                         )}
@@ -400,8 +511,17 @@ export default function DriverProfileScreen({ navigation }: any) {
                     )}
                   </View>
                   {!field.editable && (
-                    <View style={[styles.lockedBadge, { backgroundColor: theme.backgroundRoot }]}>
-                      <Feather name="lock" size={14} color={theme.textSecondary} />
+                    <View
+                      style={[
+                        styles.lockedBadge,
+                        { backgroundColor: theme.backgroundRoot },
+                      ]}
+                    >
+                      <Feather
+                        name="lock"
+                        size={14}
+                        color={theme.textSecondary}
+                      />
                     </View>
                   )}
                 </View>
@@ -414,28 +534,70 @@ export default function DriverProfileScreen({ navigation }: any) {
             entering={FadeInDown.delay(300).duration(400)}
             style={styles.fieldsSection}
           >
-            <ThemedText style={[styles.sectionLabel, { color: theme.textSecondary }]}>ACCOUNT</ThemedText>
-            <View style={[styles.fieldsCard, { backgroundColor: theme.backgroundDefault }]}>
-              <View style={[styles.fieldRow, styles.fieldBorder, { borderBottomColor: theme.border }]}>
-                <View style={[styles.fieldIconContainer, { backgroundColor: theme.backgroundRoot }]}>
+            <ThemedText
+              style={[styles.sectionLabel, { color: theme.textSecondary }]}
+            >
+              ACCOUNT
+            </ThemedText>
+            <View
+              style={[
+                styles.fieldsCard,
+                { backgroundColor: theme.backgroundDefault },
+              ]}
+            >
+              <View
+                style={[
+                  styles.fieldRow,
+                  styles.fieldBorder,
+                  { borderBottomColor: theme.border },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.fieldIconContainer,
+                    { backgroundColor: theme.backgroundRoot },
+                  ]}
+                >
                   <Feather name="hash" size={20} color={theme.text} />
                 </View>
                 <View style={styles.fieldContent}>
-                  <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>User ID</ThemedText>
-                  <ThemedText style={[styles.fieldValue, { fontSize: 12, color: theme.textSecondary }]}>
+                  <ThemedText
+                    style={[styles.fieldLabel, { color: theme.textSecondary }]}
+                  >
+                    User ID
+                  </ThemedText>
+                  <ThemedText
+                    style={[
+                      styles.fieldValue,
+                      { fontSize: 12, color: theme.textSecondary },
+                    ]}
+                  >
                     {user?.id || "—"}
                   </ThemedText>
                 </View>
               </View>
               <View style={styles.fieldRow}>
-                <View style={[styles.fieldIconContainer, { backgroundColor: theme.backgroundRoot }]}>
+                <View
+                  style={[
+                    styles.fieldIconContainer,
+                    { backgroundColor: theme.backgroundRoot },
+                  ]}
+                >
                   <Feather name="shield" size={20} color={theme.text} />
                 </View>
                 <View style={styles.fieldContent}>
-                  <ThemedText style={[styles.fieldLabel, { color: theme.textSecondary }]}>Account Type</ThemedText>
+                  <ThemedText
+                    style={[styles.fieldLabel, { color: theme.textSecondary }]}
+                  >
+                    Account Type
+                  </ThemedText>
                   <View style={styles.roleBadge}>
                     <ThemedText style={styles.roleBadgeText}>
-                      {user?.role === "both" ? "Rider & Driver" : user?.role === "driver" ? "Driver" : "Rider"}
+                      {user?.role === "both"
+                        ? "Rider & Driver"
+                        : user?.role === "driver"
+                          ? "Driver"
+                          : "Rider"}
                     </ThemedText>
                   </View>
                 </View>
@@ -471,20 +633,26 @@ export default function DriverProfileScreen({ navigation }: any) {
                                 text: "OK",
                                 onPress: () => signOut(),
                               },
-                            ]
+                            ],
                           );
                         } catch (err: any) {
-                          Alert.alert("Error", err?.message || "Failed to delete account. Please try again.");
+                          Alert.alert(
+                            "Error",
+                            err?.message ||
+                              "Failed to delete account. Please try again.",
+                          );
                         }
                       },
                     },
-                  ]
+                  ],
                 );
               }}
               style={styles.deleteButton}
             >
               <Feather name="trash-2" size={20} color="#EF4444" />
-              <ThemedText style={styles.deleteButtonText}>Delete Account</ThemedText>
+              <ThemedText style={styles.deleteButtonText}>
+                Delete Account
+              </ThemedText>
             </Pressable>
           </Animated.View>
         </ScrollView>
@@ -496,61 +664,93 @@ export default function DriverProfileScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: Spacing.lg, paddingBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: 12,
     borderBottomWidth: 1,
   },
   backButton: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: { fontSize: 18, fontWeight: "600" },
   saveButton: {
     backgroundColor: UTOColors.driver.primary,
-    paddingHorizontal: 20, paddingVertical: 8, borderRadius: BorderRadius.full,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
   },
   saveButtonText: { color: "#000000", fontSize: 14, fontWeight: "700" },
   editButton: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: BorderRadius.full,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
     borderWidth: 1,
   },
-  editButtonText: { color: UTOColors.driver.primary, fontSize: 14, fontWeight: "600" },
+  editButtonText: {
+    color: UTOColors.driver.primary,
+    fontSize: 14,
+    fontWeight: "600",
+  },
   scrollContent: { paddingTop: Spacing.xl },
   avatarSection: { alignItems: "center", marginBottom: Spacing["3xl"] },
   avatarWrapper: { position: "relative", marginBottom: Spacing.md },
   avatarContainer: {
-    width: 100, height: 100, borderRadius: 50, overflow: "hidden",
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    overflow: "hidden",
     borderWidth: 3,
   },
   avatarImage: { width: "100%", height: "100%" },
   avatarPlaceholder: {
-    width: "100%", height: "100%",
-    alignItems: "center", justifyContent: "center",
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarEditBadge: {
-    position: "absolute", bottom: 2, right: 2,
-    width: 32, height: 32, borderRadius: 16,
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: UTOColors.driver.primary,
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 3, borderColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#000000",
   },
   avatarName: { fontSize: 22, fontWeight: "700", marginBottom: 4 },
   ratingRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   ratingText: { fontSize: 14, fontWeight: "500" },
   fieldsSection: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.xl },
   sectionLabel: {
-    fontSize: 13, fontWeight: "600",
-    letterSpacing: 1, marginBottom: Spacing.md,
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 1,
+    marginBottom: Spacing.md,
   },
   fieldsCard: { borderRadius: BorderRadius.lg, overflow: "hidden" },
   fieldRow: {
-    flexDirection: "row", alignItems: "center",
-    paddingVertical: 14, paddingHorizontal: Spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
   },
   fieldBorder: { borderBottomWidth: 1 },
   fieldIconContainer: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: "center", justifyContent: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: Spacing.md,
   },
   fieldContent: { flex: 1 },
@@ -558,25 +758,42 @@ const styles = StyleSheet.create({
   fieldValue: { fontSize: 16, fontWeight: "500" },
   fieldPlaceholder: { fontSize: 16, fontStyle: "italic" },
   fieldInput: {
-    fontSize: 16, fontWeight: "500",
-    padding: 0, margin: 0,
-    borderBottomWidth: 1, paddingBottom: 4,
+    fontSize: 16,
+    fontWeight: "500",
+    padding: 0,
+    margin: 0,
+    borderBottomWidth: 1,
+    paddingBottom: 4,
   },
   lockedBadge: {
-    width: 28, height: 28, borderRadius: 14,
-    alignItems: "center", justifyContent: "center",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
   },
   roleBadge: {
     backgroundColor: UTOColors.driver.primary + "20",
-    paddingHorizontal: 10, paddingVertical: 3,
-    borderRadius: BorderRadius.full, alignSelf: "flex-start", marginTop: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    alignSelf: "flex-start",
+    marginTop: 2,
   },
-  roleBadgeText: { color: UTOColors.driver.primary, fontSize: 12, fontWeight: "600" },
+  roleBadgeText: {
+    color: UTOColors.driver.primary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
   deleteButton: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: BorderRadius.lg,
-    paddingVertical: 14, gap: Spacing.sm,
-    borderWidth: 1, borderColor: "#EF444430",
+    paddingVertical: 14,
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderColor: "#EF444430",
   },
   deleteButtonText: { color: "#EF4444", fontSize: 15, fontWeight: "500" },
 });

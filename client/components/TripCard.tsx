@@ -10,7 +10,12 @@ import * as Haptics from "expo-haptics";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { UTOColors, Spacing, BorderRadius, formatPrice } from "@/constants/theme";
+import {
+  UTOColors,
+  Spacing,
+  BorderRadius,
+  formatPrice,
+} from "@/constants/theme";
 import { Trip } from "@/context/DriverContext";
 
 interface TripCardProps {
@@ -64,10 +69,20 @@ export function TripCard({ trip, onPress }: TripCardProps) {
       ]}
     >
       <View style={styles.leftSection}>
-        <ThemedText style={[styles.time, { color: isDark ? "#9CA3AF" : theme.textSecondary, display: !!trip.completedAt ? "flex" : "none" }]}>
+        <ThemedText
+          style={[
+            styles.time,
+            {
+              color: isDark ? "#9CA3AF" : theme.textSecondary,
+              display: !!trip.completedAt ? "flex" : "none",
+            },
+          ]}
+        >
           {formatTime(trip.completedAt)}
         </ThemedText>
-        <ThemedText style={[styles.riderName, { color: isDark ? "#FFFFFF" : theme.text }]}>
+        <ThemedText
+          style={[styles.riderName, { color: isDark ? "#FFFFFF" : theme.text }]}
+        >
           {trip.riderName}
         </ThemedText>
       </View>
@@ -75,13 +90,25 @@ export function TripCard({ trip, onPress }: TripCardProps) {
       <View style={styles.middleSection}>
         <View style={styles.routeRow}>
           <View style={[styles.dot, { backgroundColor: UTOColors.success }]} />
-          <ThemedText style={[styles.address, { color: isDark ? "#9CA3AF" : theme.textSecondary }]} numberOfLines={1}>
+          <ThemedText
+            style={[
+              styles.address,
+              { color: isDark ? "#9CA3AF" : theme.textSecondary },
+            ]}
+            numberOfLines={1}
+          >
             {trip.pickupAddress}
           </ThemedText>
         </View>
         <View style={styles.routeRow}>
           <View style={[styles.dot, { backgroundColor: UTOColors.primary }]} />
-          <ThemedText style={[styles.address, { color: isDark ? "#9CA3AF" : theme.textSecondary }]} numberOfLines={1}>
+          <ThemedText
+            style={[
+              styles.address,
+              { color: isDark ? "#9CA3AF" : theme.textSecondary },
+            ]}
+            numberOfLines={1}
+          >
             {trip.dropoffAddress}
           </ThemedText>
         </View>
@@ -94,7 +121,12 @@ export function TripCard({ trip, onPress }: TripCardProps) {
         {trip.rating ? (
           <View style={styles.ratingContainer}>
             <Feather name="star" size={12} color={UTOColors.warning} />
-            <ThemedText style={[styles.rating, { color: isDark ? "#9CA3AF" : theme.textSecondary }]}>
+            <ThemedText
+              style={[
+                styles.rating,
+                { color: isDark ? "#9CA3AF" : theme.textSecondary },
+              ]}
+            >
               {trip.rating}
             </ThemedText>
           </View>

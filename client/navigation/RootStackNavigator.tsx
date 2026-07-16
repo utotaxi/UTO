@@ -1,4 +1,4 @@
-// //client/navigator/rootstacknavigator.tsx 
+// //client/navigator/rootstacknavigator.tsx
 // import React from "react";
 // import { ActivityIndicator, View, StyleSheet } from "react-native";
 // import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -104,7 +104,7 @@
 //   },
 // });
 
-//client/navigation/RootStackNavigator.tsx 
+//client/navigation/RootStackNavigator.tsx
 import React, { useEffect } from "react";
 import { ActivityIndicator, View, StyleSheet } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -174,7 +174,11 @@ function MainNavigator() {
 
   if (accountRole === "driver") return <DriverTabNavigator />;
 
-  return currentMode === "rider" ? <RiderTabNavigator /> : <DriverTabNavigator />;
+  return currentMode === "rider" ? (
+    <RiderTabNavigator />
+  ) : (
+    <DriverTabNavigator />
+  );
 }
 
 export default function RootStackNavigator() {
@@ -202,7 +206,7 @@ export default function RootStackNavigator() {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       {!isAuthenticated ? (
-        <Stack.Group screenOptions={{ animation: 'fade' }}>
+        <Stack.Group screenOptions={{ animation: "fade" }}>
           <Stack.Screen
             name="Welcome"
             component={WelcomeScreen}
@@ -230,7 +234,7 @@ export default function RootStackNavigator() {
           />
         </Stack.Group>
       ) : (
-        <Stack.Group screenOptions={{ animation: 'fade' }}>
+        <Stack.Group screenOptions={{ animation: "fade" }}>
           <Stack.Screen
             name="Main"
             component={MainNavigator}

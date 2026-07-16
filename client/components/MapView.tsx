@@ -114,9 +114,9 @@
 //   );
 // }
 
-// export function PolylineWrapper({ 
-//   coordinates, 
-//   strokeColor = "#4285F4", 
+// export function PolylineWrapper({
+//   coordinates,
+//   strokeColor = "#4285F4",
 //   strokeWidth = 4,
 //   lineDashPattern,
 // }: PolylineWrapperProps) {
@@ -251,20 +251,40 @@ export function MapViewWrapper({
 
   if (Platform.OS === "web" || !RNMapView) {
     return (
-      <View style={[styles.webMapContainer, style, { backgroundColor: isDark ? "#1a1a2e" : "#e8f4f8" }]}>
+      <View
+        style={[
+          styles.webMapContainer,
+          style,
+          { backgroundColor: isDark ? "#1a1a2e" : "#e8f4f8" },
+        ]}
+      >
         <View style={styles.webMapContent}>
-          <View style={[styles.webMapIcon, { backgroundColor: theme.backgroundDefault }]}>
-            <MaterialIcons name="map" size={48} color={UTOColors.rider.primary} />
+          <View
+            style={[
+              styles.webMapIcon,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
+            <MaterialIcons
+              name="map"
+              size={48}
+              color={UTOColors.rider.primary}
+            />
           </View>
           <ThemedText style={styles.webMapTitle}>Map View</ThemedText>
-          <ThemedText style={[styles.webMapSubtitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.webMapSubtitle, { color: theme.textSecondary }]}
+          >
             For the best experience, use the Expo Go app on your mobile device
           </ThemedText>
         </View>
         {initialRegion ? (
           <View style={styles.webMapCoords}>
-            <ThemedText style={[styles.coordText, { color: theme.textSecondary }]}>
-              {initialRegion.latitude.toFixed(4)}, {initialRegion.longitude.toFixed(4)}
+            <ThemedText
+              style={[styles.coordText, { color: theme.textSecondary }]}
+            >
+              {initialRegion.latitude.toFixed(4)},{" "}
+              {initialRegion.longitude.toFixed(4)}
             </ThemedText>
           </View>
         ) : null}
@@ -288,7 +308,14 @@ export function MapViewWrapper({
   );
 }
 
-export function MarkerWrapper({ coordinate, title, anchor, flat, image, children }: MarkerWrapperProps) {
+export function MarkerWrapper({
+  coordinate,
+  title,
+  anchor,
+  flat,
+  image,
+  children,
+}: MarkerWrapperProps) {
   if (Platform.OS === "web" || !Marker) {
     return null;
   }

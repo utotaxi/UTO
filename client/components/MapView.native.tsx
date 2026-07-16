@@ -57,12 +57,15 @@
 //   );
 // }
 
-
 //client/components/MapView.native.tsx - COMPLETE WITH POLYLINE
 
 import React from "react";
 import { Platform } from "react-native";
-import RNMapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import RNMapView, {
+  Marker,
+  Polyline,
+  PROVIDER_GOOGLE,
+} from "react-native-maps";
 
 interface MapViewWrapperProps {
   style?: any;
@@ -131,27 +134,23 @@ export function MapViewWrapper({
   );
 }
 
-export function MarkerWrapper({ 
-  coordinate, 
-  title, 
+export function MarkerWrapper({
+  coordinate,
+  title,
   description,
-  children 
+  children,
 }: MarkerWrapperProps) {
   return (
-    <Marker 
-      coordinate={coordinate} 
-      title={title}
-      description={description}
-    >
+    <Marker coordinate={coordinate} title={title} description={description}>
       {children}
     </Marker>
   );
 }
 
 // ✅ ADD THIS - THE MISSING POLYLINE COMPONENT!
-export function PolylineWrapper({ 
-  coordinates, 
-  strokeColor = "#000000", 
+export function PolylineWrapper({
+  coordinates,
+  strokeColor = "#000000",
   strokeWidth = 5,
   lineDashPattern,
 }: PolylineWrapperProps) {

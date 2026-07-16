@@ -1,10 +1,5 @@
 import React from "react";
-import {
-  StyleSheet,
-  View,
-  Pressable,
-  ScrollView,
-} from "react-native";
+import { StyleSheet, View, Pressable, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -42,7 +37,7 @@ const OFFERS = [
 ];
 
 interface OfferCardProps {
-  offer: typeof OFFERS[0];
+  offer: (typeof OFFERS)[0];
   index: number;
 }
 
@@ -61,14 +56,18 @@ function OfferCard({ offer, index }: OfferCardProps) {
         <View style={styles.offerHeader}>
           <View style={styles.offerIcon}>
             <MaterialIcons
-              name={offer.type === "percentage" ? "local-offer" : "card-giftcard"}
+              name={
+                offer.type === "percentage" ? "local-offer" : "card-giftcard"
+              }
               size={24}
               color={UTOColors.primary}
             />
           </View>
           <View style={styles.offerInfo}>
             <ThemedText style={styles.offerTitle}>{offer.title}</ThemedText>
-            <ThemedText style={styles.offerDescription}>{offer.description}</ThemedText>
+            <ThemedText style={styles.offerDescription}>
+              {offer.description}
+            </ThemedText>
           </View>
         </View>
 
@@ -77,10 +76,16 @@ function OfferCard({ offer, index }: OfferCardProps) {
             <ThemedText style={styles.codeLabel}>Code:</ThemedText>
             <ThemedText style={styles.codeValue}>{offer.code}</ThemedText>
             <Pressable onPress={handleCopy} style={styles.copyButton}>
-              <MaterialIcons name="content-copy" size={16} color={UTOColors.primary} />
+              <MaterialIcons
+                name="content-copy"
+                size={16}
+                color={UTOColors.primary}
+              />
             </Pressable>
           </View>
-          <ThemedText style={styles.expiryText}>Expires: {offer.expiresAt}</ThemedText>
+          <ThemedText style={styles.expiryText}>
+            Expires: {offer.expiresAt}
+          </ThemedText>
         </View>
 
         <Pressable onPress={handlePress} style={styles.applyButton}>
@@ -101,7 +106,10 @@ export default function OffersScreen() {
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + Spacing.lg, paddingBottom: tabBarHeight + Spacing.xl },
+          {
+            paddingTop: insets.top + Spacing.lg,
+            paddingBottom: tabBarHeight + Spacing.xl,
+          },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -115,7 +123,9 @@ export default function OffersScreen() {
         <View style={styles.promoInputContainer}>
           <View style={styles.promoInput}>
             <MaterialIcons name="local-offer" size={20} color="#6B7280" />
-            <ThemedText style={styles.promoPlaceholder}>Enter promo code</ThemedText>
+            <ThemedText style={styles.promoPlaceholder}>
+              Enter promo code
+            </ThemedText>
           </View>
           <Pressable style={styles.promoApplyButton}>
             <ThemedText style={styles.promoApplyText}>Apply</ThemedText>

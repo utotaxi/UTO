@@ -4,14 +4,19 @@ import {
   formatScheduledBookingCancellationPenalty,
 } from "../../shared/driverDeductions";
 
-export { formatLiveRideCancellationPenalty, formatScheduledBookingCancellationPenalty };
+export {
+  formatLiveRideCancellationPenalty,
+  formatScheduledBookingCancellationPenalty,
+};
 
 function getMissingSchemaColumn(error: any): string | null {
   const message = String(error?.message || "");
   const quotedMatch = message.match(/Could not find the '([^']+)' column/i);
   if (quotedMatch?.[1]) return quotedMatch[1];
 
-  const sqlMatch = message.match(/column "([^"]+)" of relation "[^"]+" does not exist/i);
+  const sqlMatch = message.match(
+    /column "([^"]+)" of relation "[^"]+" does not exist/i,
+  );
   return sqlMatch?.[1] || null;
 }
 
@@ -26,7 +31,10 @@ async function resolveDriverUserId(
       .eq("id", driverId)
       .maybeSingle();
     if (error) {
-      console.warn(`⚠️ Could not resolve user_id for driver ${driverId}:`, error);
+      console.warn(
+        `⚠️ Could not resolve user_id for driver ${driverId}:`,
+        error,
+      );
       return null;
     }
     return data?.user_id || null;
@@ -103,7 +111,9 @@ export async function findExistingDriverPenaltyDeduction(
       .ilike("reason", `%${rideId}%`)
       .limit(5);
     if (rideErr) throw rideErr;
-    const match = (byRide || []).find((row: any) => String(row?.reason || "").includes(rideId));
+    const match = (byRide || []).find((row: any) =>
+      String(row?.reason || "").includes(rideId),
+    );
     if (match?.id) return { id: match.id };
   }
 

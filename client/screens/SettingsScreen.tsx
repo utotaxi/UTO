@@ -38,7 +38,7 @@ function SettingItem({
   subtitle,
   onPress,
   index,
-  isDanger
+  isDanger,
 }: SettingItemProps) {
   const { theme } = useTheme();
 
@@ -51,13 +51,21 @@ function SettingItem({
         }}
         style={({ pressed }) => [
           styles.settingItem,
-          { backgroundColor: pressed ? theme.backgroundDefault : "transparent" },
+          {
+            backgroundColor: pressed ? theme.backgroundDefault : "transparent",
+          },
         ]}
       >
-        <View style={[
-          styles.iconContainer,
-          { backgroundColor: isDanger ? UTOColors.error + "15" : theme.backgroundDefault }
-        ]}>
+        <View
+          style={[
+            styles.iconContainer,
+            {
+              backgroundColor: isDanger
+                ? UTOColors.error + "15"
+                : theme.backgroundDefault,
+            },
+          ]}
+        >
           {iconFamily === "feather" ? (
             <Feather
               name={icon as keyof typeof Feather.glyphMap}
@@ -73,14 +81,15 @@ function SettingItem({
           )}
         </View>
         <View style={styles.textContainer}>
-          <ThemedText style={[
-            styles.title,
-            isDanger && { color: UTOColors.error }
-          ]}>
+          <ThemedText
+            style={[styles.title, isDanger && { color: UTOColors.error }]}
+          >
             {title}
           </ThemedText>
           {subtitle ? (
-            <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
+            <ThemedText
+              style={[styles.subtitle, { color: theme.textSecondary }]}
+            >
               {subtitle}
             </ThemedText>
           ) : null}
@@ -103,28 +112,24 @@ export default function SettingsScreen({ navigation }: any) {
   const { setThemeMode } = useThemeMode();
 
   const handleSignOut = () => {
-    Alert.alert(
-      "Sign Out",
-      "Are you sure you want to sign out?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
+    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await signOut();
+          } catch (error) {
+            console.error("Sign out error:", error);
+            Alert.alert("Error", "Failed to sign out. Please try again.");
+          }
         },
-        {
-          text: "Sign Out",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await signOut();
-            } catch (error) {
-              console.error("Sign out error:", error);
-              Alert.alert("Error", "Failed to sign out. Please try again.");
-            }
-          },
-        },
-      ]
-    );
+      },
+    ]);
   };
 
   return (
@@ -135,30 +140,44 @@ export default function SettingsScreen({ navigation }: any) {
           styles.scrollContent,
           {
             paddingTop: Math.max(headerHeight, 56) + insets.top + Spacing.xl,
-            paddingBottom: insets.bottom + Spacing.lg
+            paddingBottom: insets.bottom + Spacing.lg,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
-
         {/* Preferences Section */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             PREFERENCES
           </ThemedText>
-          <View style={[styles.sectionContent, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.sectionContent,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             {/* Appearance with toggle */}
             <Animated.View entering={FadeInDown.delay(1 * 30).duration(300)}>
               <View style={styles.settingItem}>
-                <View style={[
-                  styles.iconContainer,
-                  { backgroundColor: theme.backgroundDefault }
-                ]}>
-                  <Feather name={isDark ? "moon" : "sun"} size={20} color={theme.text} />
+                <View
+                  style={[
+                    styles.iconContainer,
+                    { backgroundColor: theme.backgroundDefault },
+                  ]}
+                >
+                  <Feather
+                    name={isDark ? "moon" : "sun"}
+                    size={20}
+                    color={theme.text}
+                  />
                 </View>
                 <View style={styles.textContainer}>
                   <ThemedText style={styles.title}>Appearance</ThemedText>
-                  <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
+                  <ThemedText
+                    style={[styles.subtitle, { color: theme.textSecondary }]}
+                  >
                     {isDark ? "Dark mode" : "Light mode"}
                   </ThemedText>
                 </View>
@@ -178,7 +197,7 @@ export default function SettingsScreen({ navigation }: any) {
               icon="lock"
               title="Privacy"
               subtitle="Manage your data"
-              onPress={() => { }}
+              onPress={() => {}}
               index={2}
             />
           </View>
@@ -186,10 +205,17 @@ export default function SettingsScreen({ navigation }: any) {
 
         {/* Legal Section */}
         <View style={styles.section}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.sectionTitle, { color: theme.textSecondary }]}
+          >
             LEGAL
           </ThemedText>
-          <View style={[styles.sectionContent, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.sectionContent,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             <SettingItem
               icon="file-text"
               title="Terms of Service"
@@ -208,7 +234,7 @@ export default function SettingsScreen({ navigation }: any) {
               icon="info"
               title="About UTO"
               subtitle="Version 1.0.0"
-              onPress={() => { }}
+              onPress={() => {}}
               index={5}
             />
           </View>
@@ -216,7 +242,12 @@ export default function SettingsScreen({ navigation }: any) {
 
         {/* Account Section */}
         <View style={styles.section}>
-          <View style={[styles.sectionContent, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[
+              styles.sectionContent,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
             <SettingItem
               icon="log-out"
               title="Sign Out"
@@ -229,7 +260,9 @@ export default function SettingsScreen({ navigation }: any) {
 
         {/* Version Footer */}
         <View style={styles.versionContainer}>
-          <ThemedText style={[styles.versionText, { color: theme.textSecondary }]}>
+          <ThemedText
+            style={[styles.versionText, { color: theme.textSecondary }]}
+          >
             UTO v1.0.0
           </ThemedText>
         </View>

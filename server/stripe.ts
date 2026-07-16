@@ -8,15 +8,15 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 export const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-    apiVersion: "2026-01-28.clover" as any,
-  })
+      apiVersion: "2026-01-28.clover" as any,
+    })
   : null;
 
 export async function createPaymentIntent(
   amount: number,
   currency: string = "gbp",
   customerId?: string,
-  options?: { captureMethod?: "automatic" | "manual"; rideId?: string }
+  options?: { captureMethod?: "automatic" | "manual"; rideId?: string },
 ): Promise<{ clientSecret: string; paymentIntentId: string } | null> {
   if (!stripe) {
     console.error("Stripe is not configured");
@@ -58,7 +58,7 @@ export async function authorizeSavedCard(
   stripeCustomerId: string,
   amount: number,
   rideId: string,
-  currency: string = "gbp"
+  currency: string = "gbp",
 ): Promise<{ success: boolean; paymentIntentId?: string; error?: string }> {
   if (!stripe) {
     return { success: false, error: "Stripe is not configured" };
@@ -109,11 +109,17 @@ export async function authorizeSavedCard(
     };
   } catch (error: any) {
     console.error("Error authorizing saved card:", error.message || error);
-    return { success: false, error: error.message || "Unknown Stripe authorization error" };
+    return {
+      success: false,
+      error: error.message || "Unknown Stripe authorization error",
+    };
   }
 }
 
-export async function createCustomer(email: string, name: string): Promise<string | null> {
+export async function createCustomer(
+  email: string,
+  name: string,
+): Promise<string | null> {
   if (!stripe) {
     console.error("Stripe is not configured");
     return null;
@@ -140,9 +146,9 @@ export async function getPaymentMethods(customerId: string) {
   try {
     const paymentMethods = await stripe.paymentMethods.list({
       customer: customerId,
-      type: 'card',
+      type: "card",
     });
-    return paymentMethods.data.map(pm => ({
+    return paymentMethods.data.map((pm) => ({
       id: pm.id,
       brand: pm.card?.brand,
       last4: pm.card?.last4,
@@ -170,7 +176,9 @@ export async function deletePaymentMethod(paymentMethodId: string) {
   }
 }
 
-export async function createSetupIntent(customerId: string): Promise<{ clientSecret: string } | null> {
+export async function createSetupIntent(
+  customerId: string,
+): Promise<{ clientSecret: string } | null> {
   if (!stripe) {
     console.error("Stripe is not configured");
     return null;
@@ -179,7 +187,7 @@ export async function createSetupIntent(customerId: string): Promise<{ clientSec
   try {
     const setupIntent = await stripe.setupIntents.create({
       customer: customerId,
-      payment_method_types: ['card'],
+      payment_method_types: ["card"],
     });
 
     return {
@@ -191,7 +199,9 @@ export async function createSetupIntent(customerId: string): Promise<{ clientSec
   }
 }
 
-export async function confirmPayment(paymentIntentId: string): Promise<boolean> {
+export async function confirmPayment(
+  paymentIntentId: string,
+): Promise<boolean> {
   if (!stripe) {
     console.error("Stripe is not configured");
     return false;
@@ -213,7 +223,7 @@ export async function confirmPayment(paymentIntentId: string): Promise<boolean> 
 
 export async function capturePaymentIntent(
   paymentIntentId: string,
-  amount?: number
+  amount?: number,
 ): Promise<{ success: boolean; paymentIntentId?: string; error?: string }> {
   if (!stripe) {
     return { success: false, error: "Stripe is not configured" };
@@ -239,7 +249,9 @@ export async function capturePaymentIntent(
     }
 
     const captured = await stripe.paymentIntents.capture(paymentIntentId, {
-      ...(amount && amount > 0 ? { amount_to_capture: Math.round(amount * 100) } : {}),
+      ...(amount && amount > 0
+        ? { amount_to_capture: Math.round(amount * 100) }
+        : {}),
     });
 
     if (captured.status === "succeeded") {
@@ -253,7 +265,11 @@ export async function capturePaymentIntent(
     };
   } catch (error: any) {
     console.error("Error capturing payment intent:", error.message || error);
-    return { success: false, paymentIntentId, error: error.message || "Unknown Stripe capture error" };
+    return {
+      success: false,
+      paymentIntentId,
+      error: error.message || "Unknown Stripe capture error",
+    };
   }
 }
 
@@ -268,7 +284,7 @@ export async function capturePaymentIntent(
  * the card for days and appears to the customer as a charge.
  */
 export async function releaseAuthorization(
-  paymentIntentId: string
+  paymentIntentId: string,
 ): Promise<{ success: boolean; alreadyFinal?: boolean; error?: string }> {
   if (!stripe) {
     return { success: false, error: "Stripe is not configured" };
@@ -287,12 +303,20 @@ export async function releaseAuthorization(
     }
 
     const canceled = await stripe.paymentIntents.cancel(paymentIntentId);
-    console.log(`↩️ Released card authorization ${paymentIntentId} (status: ${canceled.status})`);
+    console.log(
+      `↩️ Released card authorization ${paymentIntentId} (status: ${canceled.status})`,
+    );
     return { success: canceled.status === "canceled" };
   } catch (error: any) {
     // If it's already been captured or can't be canceled, treat as non-fatal.
-    console.error("Error releasing card authorization:", error.message || error);
-    return { success: false, error: error.message || "Unknown Stripe cancel error" };
+    console.error(
+      "Error releasing card authorization:",
+      error.message || error,
+    );
+    return {
+      success: false,
+      error: error.message || "Unknown Stripe cancel error",
+    };
   }
 }
 
@@ -330,7 +354,7 @@ export async function chargeSavedCard(
   amount: number,
   rideId: string,
   currency: string = "gbp",
-  chargeType: "ride_fare" | "no_show_fee" | "cancellation_fee" = "no_show_fee"
+  chargeType: "ride_fare" | "no_show_fee" | "cancellation_fee" = "no_show_fee",
 ): Promise<{ success: boolean; paymentIntentId?: string; error?: string }> {
   if (!stripe) {
     return { success: false, error: "Stripe is not configured" };
@@ -360,7 +384,9 @@ export async function chargeSavedCard(
     const cardBrand = paymentMethods.data[0].card?.brand || "card";
     const cardLast4 = paymentMethods.data[0].card?.last4 || "****";
 
-    console.log(`💳 Charging ${chargeType}: £${amount} on ${cardBrand} ****${cardLast4} for ride ${rideId}`);
+    console.log(
+      `💳 Charging ${chargeType}: £${amount} on ${cardBrand} ****${cardLast4} for ride ${rideId}`,
+    );
 
     // 2. Create and immediately confirm a PaymentIntent off-session
     const paymentIntent = await stripe.paymentIntents.create({
@@ -383,10 +409,14 @@ export async function chargeSavedCard(
     });
 
     if (paymentIntent.status === "succeeded") {
-      console.log(`✅ ${chargeType} charged successfully: PaymentIntent ${paymentIntent.id}`);
+      console.log(
+        `✅ ${chargeType} charged successfully: PaymentIntent ${paymentIntent.id}`,
+      );
       return { success: true, paymentIntentId: paymentIntent.id };
     } else {
-      console.warn(`⚠️ PaymentIntent status: ${paymentIntent.status} (expected succeeded)`);
+      console.warn(
+        `⚠️ PaymentIntent status: ${paymentIntent.status} (expected succeeded)`,
+      );
       return {
         success: false,
         paymentIntentId: paymentIntent.id,
@@ -401,10 +431,12 @@ export async function chargeSavedCard(
       return { success: false, error: `Card declined: ${error.message}` };
     }
     if (error.code === "authentication_required") {
-      return { success: false, error: "Card requires authentication — cannot charge off-session" };
+      return {
+        success: false,
+        error: "Card requires authentication — cannot charge off-session",
+      };
     }
 
     return { success: false, error: error.message || "Unknown Stripe error" };
   }
 }
-
