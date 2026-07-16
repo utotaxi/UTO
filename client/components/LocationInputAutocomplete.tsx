@@ -36,6 +36,7 @@ interface LocationInputAutocompleteProps {
   onSelectLocation: (location: PlaceSuggestion) => void;
   type: "pickup" | "dropoff" | "via";
   autoFocus?: boolean;
+  onRemove?: () => void;
 }
 
 export function LocationInputAutocomplete({
@@ -46,6 +47,7 @@ export function LocationInputAutocomplete({
   onSelectLocation,
   type,
   autoFocus = false,
+  onRemove,
 }: LocationInputAutocompleteProps) {
   const { theme, isDark } = useTheme();
   const { user } = useAuth();
@@ -325,7 +327,25 @@ export function LocationInputAutocomplete({
           />
         </View>
         {isLoading ? (
-          <ActivityIndicator size="small" color={UTOColors.primary} />
+          <ActivityIndicator size="small" color={UTOColors.primary} style={{ marginRight: 8 }} />
+        ) : null}
+        {onRemove ? (
+          <Pressable
+            onPress={onRemove}
+            hitSlop={10}
+            style={{
+              padding: 4,
+              marginRight: -4,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <MaterialIcons
+              name="close"
+              size={20}
+              color={isDark ? "#9CA3AF" : "#4B5563"}
+            />
+          </Pressable>
         ) : null}
       </View>
 

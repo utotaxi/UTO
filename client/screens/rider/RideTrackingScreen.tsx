@@ -176,9 +176,9 @@ export default function RideTrackingScreen({ navigation }: any) {
       const a =
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
         Math.cos((driverLocation.latitude * Math.PI) / 180) *
-          Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2);
+        Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const miles = R * c;
       const minutes = Math.max(1, Math.round(miles * 3));
@@ -441,7 +441,7 @@ export default function RideTrackingScreen({ navigation }: any) {
   const handleCancel = () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    } catch (_) {}
+    } catch (_) { }
     // 1 free minute from the moment a driver accepts; after that, full payable fare.
     const acceptedAtMs = (activeRide as any)?.acceptedAt
       ? new Date((activeRide as any).acceptedAt).getTime()
@@ -1698,9 +1698,9 @@ export default function RideTrackingScreen({ navigation }: any) {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos((driverLocation.latitude * Math.PI) / 180) *
-        Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const miles = R * c;
 
@@ -2236,32 +2236,66 @@ export default function RideTrackingScreen({ navigation }: any) {
           )}
 
           <View style={styles.tripDetails}>
-            <View style={styles.routeContainer}>
-              <View style={styles.routeIndicator}>
+            <View style={[styles.routeContainer, { alignItems: "center" }]}>
+              <View style={{ flex: 1 }}>
+
+                {/* Pickup Row */}
+                <View style={styles.routeRow}>
+                  <View
+                    style={[
+                      styles.routeDot,
+                      { backgroundColor: UTOColors.success, marginRight: Spacing.md },
+                    ]}
+                  />
+                  <ThemedText style={styles.address} numberOfLines={1}>
+                    {activeRide.pickupLocation.address}
+                  </ThemedText>
+                </View>
+
+                {/* Vias */}
+                {(activeRide.vias || []).map((via, index) => (
+                  <React.Fragment key={`tracking-via-${index}`}>
+                    <View
+                      style={[
+                        styles.routeLine,
+                        { backgroundColor: theme.border, marginLeft: 4, height: 16, marginVertical: 2 },
+                      ]}
+                    />
+                    <View style={styles.routeRow}>
+                      <View
+                        style={[
+                          styles.routeDot,
+                          { backgroundColor: "#F59E0B", marginRight: Spacing.md },
+                        ]}
+                      />
+                      <ThemedText style={styles.address} numberOfLines={1}>
+                        Via {index + 1}: {via.address}
+                      </ThemedText>
+                    </View>
+                  </React.Fragment>
+                ))}
+
+                {/* Dropoff Row */}
                 <View
                   style={[
-                    styles.routeDot,
-                    { backgroundColor: UTOColors.success },
+                    styles.routeLine,
+                    { backgroundColor: theme.border, marginLeft: 4, height: 16, marginVertical: 2 },
                   ]}
                 />
-                <View
-                  style={[styles.routeLine, { backgroundColor: theme.border }]}
-                />
-                <View
-                  style={[
-                    styles.routeDot,
-                    { backgroundColor: UTOColors.error },
-                  ]}
-                />
+                <View style={styles.routeRow}>
+                  <View
+                    style={[
+                      styles.routeDot,
+                      { backgroundColor: UTOColors.error, marginRight: Spacing.md },
+                    ]}
+                  />
+                  <ThemedText style={styles.address} numberOfLines={1}>
+                    {activeRide.dropoffLocation.address}
+                  </ThemedText>
+                </View>
+
               </View>
-              <View style={styles.addresses}>
-                <ThemedText style={styles.address} numberOfLines={1}>
-                  {activeRide.pickupLocation.address}
-                </ThemedText>
-                <ThemedText style={styles.address} numberOfLines={1}>
-                  {activeRide.dropoffLocation.address}
-                </ThemedText>
-              </View>
+
               <ThemedText style={styles.farePrice}>
                 {formatPrice(
                   activeRide.farePrice - (activeRide.discountAmount || 0),
@@ -2508,6 +2542,10 @@ const styles = StyleSheet.create({
   },
   tripDetails: { marginBottom: Spacing.lg },
   routeContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  routeRow: {
     flexDirection: "row",
     alignItems: "center",
   },

@@ -2465,7 +2465,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
         nearbyDrivers.forEach((driver) => {
           const d = Math.sqrt(
             Math.pow(driver.latitude - pickupLoc.latitude, 2) +
-              Math.pow(driver.longitude - pickupLoc.longitude, 2),
+            Math.pow(driver.longitude - pickupLoc.longitude, 2),
           );
           if (d < minDistance) {
             minDistance = d;
@@ -2509,17 +2509,17 @@ export default function RideRequestScreen({ navigation, route }: any) {
 
   const mapRegion = pickupLocation
     ? {
-        latitude: pickupLocation.latitude,
-        longitude: pickupLocation.longitude,
-        latitudeDelta: 0.02,
-        longitudeDelta: 0.02,
-      }
+      latitude: pickupLocation.latitude,
+      longitude: pickupLocation.longitude,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    }
     : {
-        latitude: 51.5074,
-        longitude: -0.1278,
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
-      };
+      latitude: 51.5074,
+      longitude: -0.1278,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+    };
 
   return (
     <View style={styles.container}>
@@ -2655,27 +2655,21 @@ export default function RideRequestScreen({ navigation, route }: any) {
                         prev.map((v) =>
                           v.id === via.id
                             ? {
-                                ...v,
-                                address:
-                                  loc.description || loc.mainText || v.address,
-                                latitude: loc.latitude,
-                                longitude: loc.longitude,
-                              }
+                              ...v,
+                              address:
+                                loc.description || loc.mainText || v.address,
+                              latitude: loc.latitude,
+                              longitude: loc.longitude,
+                            }
                             : v,
                         ),
                       );
                     }}
                     type="via"
-                  />
-                  <Pressable
-                    onPress={() =>
+                    onRemove={() =>
                       setVias((prev) => prev.filter((v) => v.id !== via.id))
                     }
-                    hitSlop={10}
-                    style={styles.viaRemoveBtn}
-                  >
-                    <MaterialIcons name="close" size={18} color="#9CA3AF" />
-                  </Pressable>
+                  />
                 </View>
               </React.Fragment>
             ))}
@@ -3614,7 +3608,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                       let resBody: any = {};
                       try {
                         resBody = await res.json();
-                      } catch (_) {}
+                      } catch (_) { }
                       Alert.alert(
                         "Error",
                         resBody.error || `Server error ${res.status}`,
