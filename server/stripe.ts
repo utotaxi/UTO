@@ -355,6 +355,7 @@ export async function chargeSavedCard(
   rideId: string,
   currency: string = "gbp",
   chargeType: "ride_fare" | "no_show_fee" | "cancellation_fee" = "no_show_fee",
+  idempotencyKey?: string,
 ): Promise<{ success: boolean; paymentIntentId?: string; error?: string }> {
   if (!stripe) {
     return { success: false, error: "Stripe is not configured" };
@@ -389,24 +390,27 @@ export async function chargeSavedCard(
     );
 
     // 2. Create and immediately confirm a PaymentIntent off-session
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Stripe uses pence/cents
-      currency,
-      customer: stripeCustomerId,
-      payment_method: paymentMethodId,
-      off_session: true,
-      confirm: true,
-      description:
-        chargeType === "ride_fare"
-          ? `Ride fare for ride ${rideId}`
-          : chargeType === "cancellation_fee"
-            ? `Cancellation fee for ride ${rideId}`
-            : `No-show cancellation fee for ride ${rideId}`,
-      metadata: {
-        ride_id: rideId,
-        charge_type: chargeType,
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: Math.round(amount * 100), // Stripe uses pence/cents
+        currency,
+        customer: stripeCustomerId,
+        payment_method: paymentMethodId,
+        off_session: true,
+        confirm: true,
+        description:
+          chargeType === "ride_fare"
+            ? `Ride fare for ride ${rideId}`
+            : chargeType === "cancellation_fee"
+              ? `Cancellation fee for ride ${rideId}`
+              : `No-show cancellation fee for ride ${rideId}`,
+        metadata: {
+          ride_id: rideId,
+          charge_type: chargeType,
+        },
       },
-    });
+      idempotencyKey ? { idempotencyKey } : undefined,
+    );
 
     if (paymentIntent.status === "succeeded") {
       console.log(

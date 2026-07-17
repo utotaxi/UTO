@@ -1279,12 +1279,38 @@ export function setupSocketIO(httpServer: HTTPServer) {
     const heap = new MinHeap();
     const addedDriverIds = new Set<string>();
 
-    const { data: onlineDrivers, error: driversErr } = await supabase
-      .from("drivers")
-      .select(
-        "id, current_latitude, current_longitude, is_available, vehicle_type",
-      )
-      .eq("is_online", true);
+    const [driversResult, activeRideResult] = await Promise.all([
+      supabase
+        .from("drivers")
+        .select(
+          "id, current_latitude, current_longitude, is_available, vehicle_type",
+        )
+        .eq("is_online", true)
+        .eq("is_available", true),
+      supabase
+        .from("rides")
+        .select("driver_id")
+        .in("status", [
+          "accepted",
+          "arriving",
+          "arrived",
+          "at_pickup",
+          "in_progress",
+        ])
+        .not("driver_id", "is", null),
+    ]);
+    const { data: onlineDrivers, error: driversErr } = driversResult;
+    const busyDriverIds = new Set(
+      (activeRideResult.data || [])
+        .map((ride: any) => ride.driver_id)
+        .filter(Boolean),
+    );
+    if (activeRideResult.error) {
+      console.warn(
+        `⚠️ Could not load active drivers while dispatching ride ${rideData.id}; availability flags will still be enforced:`,
+        activeRideResult.error.message,
+      );
+    }
 
     if (driversErr) {
       console.error(
@@ -1296,6 +1322,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     if (onlineDrivers && onlineDrivers.length > 0) {
       for (const driver of onlineDrivers) {
+        if (busyDriverIds.has(driver.id)) {
+          console.log(
+            `   ⏭️ Skipping driver ${driver.id} — already handling an active ride`,
+          );
+          continue;
+        }
         if (declinedBy.has(driver.id)) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — already declined or cancelled for ride ${rideData.id}`,
@@ -1358,18 +1390,25 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     for (const [driverId, socketId] of connectedDrivers) {
       if (addedDriverIds.has(driverId) || declinedBy.has(driverId)) continue;
+      if (busyDriverIds.has(driverId)) continue;
 
       let vehicleOk = true;
       try {
         const { data: driverRow } = await supabase
           .from("drivers")
-          .select("vehicle_type")
+          .select("vehicle_type, is_online, is_available")
           .eq("id", driverId)
           .maybeSingle();
 
         if (!driverRow) {
           console.log(
             `   ⏭️ Skipping socket driver ${driverId} — no matching drivers row`,
+          );
+          continue;
+        }
+        if (!driverRow.is_online || !driverRow.is_available) {
+          console.log(
+            `   ⏭️ Skipping socket driver ${driverId} — offline or unavailable`,
           );
           continue;
         }
@@ -1556,6 +1595,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
       );
       return false;
     }
+
+    await supabase
+      .from("drivers")
+      .update({ is_available: false })
+      .eq("id", actualDriverId);
 
     // Register in-memory state so all live status updates flow normally
     const riderSocketId = connectedRiders.get(rideData.riderId) || "";
@@ -1757,6 +1801,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
         };
         if (ride.driver_id) {
           io.to(`driver:${ride.driver_id}`).emit("ride:update", cancelUpdate);
+          await supabase
+            .from("drivers")
+            .update({ is_available: true })
+            .eq("id", ride.driver_id);
         }
         const rideInfo = activeRides.get(rideId);
         if (rideInfo?.driverSocketId) {
@@ -1881,12 +1929,26 @@ export function setupSocketIO(httpServer: HTTPServer) {
       }
 
       try {
-        // Set driver as online AND available when they connect, and update last seen
+        // Reconnecting/backgrounding must not make a driver available while
+        // they still own an active ride.
+        const { data: activeRide } = await supabase
+          .from("rides")
+          .select("id")
+          .eq("driver_id", connectedDriverId)
+          .in("status", [
+            "accepted",
+            "arriving",
+            "arrived",
+            "at_pickup",
+            "in_progress",
+          ])
+          .limit(1)
+          .maybeSingle();
         const { error } = await supabase
           .from("drivers")
           .update({
             is_online: true,
-            is_available: true,
+            is_available: !activeRide,
             last_seen_at: new Date().toISOString(),
           })
           .eq("id", connectedDriverId);
@@ -1894,7 +1956,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.error("❌ Error updating driver status on connect:", error);
         } else {
           console.log(
-            `✅ Driver ${connectedDriverId} marked online + available in DB`,
+            `✅ Driver ${connectedDriverId} marked online (${activeRide ? "busy" : "available"}) in DB`,
           );
         }
       } catch (error) {
@@ -2296,6 +2358,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
             const declinedBy = rideInfo?.declinedBy || new Set<string>();
             if (actualDriverId) {
               declinedBy.add(actualDriverId);
+              await supabase
+                .from("drivers")
+                .update({ is_available: true })
+                .eq("id", actualDriverId);
             }
 
             // Remove the current driver assignment and reset the ride to pending.
@@ -2558,6 +2624,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
             rideId: data.rideId,
           });
           return;
+        }
+
+        const { error: availabilityError } = await supabase
+          .from("drivers")
+          .update({ is_available: false })
+          .eq("id", actualDriverId);
+        if (availabilityError) {
+          console.error(
+            `❌ Failed to mark driver ${actualDriverId} unavailable after accepting ride ${data.rideId}:`,
+            availabilityError.message,
+          );
         }
 
         // Cancel the dispatch queue — ride is taken
@@ -3224,19 +3301,39 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   discount,
                 );
                 const riderId = cancelledRide.rider_id;
-                const rideInfo = activeRides.get(update.rideId);
-                const walletDeductionAlreadyTaken = Math.max(
-                  0,
-                  Number(rideInfo?.rideData?.walletDeduction || 0),
-                );
-                const walletAdjustmentAmount = Number(
-                  (cancellationFeeAmount - walletDeductionAlreadyTaken).toFixed(
-                    2,
-                  ),
-                );
+                // Wallet funding is only debited when a ride completes. Nothing
+                // was collected at booking time, so cancellation must collect
+                // the entire coupon-adjusted payable fare.
+                const walletAdjustmentAmount = cancellationFeeAmount;
                 const walletDebitAmount = Math.max(0, walletAdjustmentAmount);
 
                 if (riderId && cancellationFeeAmount > 0) {
+                  // Atomically claim fee processing before making an external
+                  // payment. Concurrent/retried cancel events cannot both pass
+                  // this conditional update and double-charge the rider.
+                  const { data: feeClaim, error: feeClaimError } =
+                    await supabase
+                      .from("rides")
+                      .update({ cancellation_fee: cancellationFeeAmount })
+                      .eq("id", update.rideId)
+                      .neq("status", "cancelled")
+                      .or("cancellation_fee.is.null,cancellation_fee.eq.0")
+                      .select("id")
+                      .maybeSingle();
+                  if (feeClaimError) {
+                    console.error(
+                      `❌ Could not atomically claim rider cancellation fee for ride ${update.rideId}:`,
+                      feeClaimError.message,
+                    );
+                    return;
+                  }
+                  if (!feeClaim) {
+                    console.log(
+                      `⏭️ Cancellation fee processing already claimed for ride ${update.rideId}`,
+                    );
+                    return;
+                  }
+
                   (update as any).cancellationFee = cancellationFeeAmount;
                   (update as any).chargedAmount = walletDebitAmount;
                   (update as any).walletAdjustment = walletAdjustmentAmount;
@@ -3289,6 +3386,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                         update.rideId,
                         "gbp",
                         "cancellation_fee",
+                        `cancel_fee_${update.rideId}`,
                       );
                       cardCaptureSuccess = chargeResult.success;
                       capturedPaymentIntentId = chargeResult.paymentIntentId;
@@ -4473,7 +4571,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 await supabase
                   .from("drivers")
                   .update({
-                    is_available: true,
                     last_seen_at: new Date().toISOString(),
                   })
                   .eq("id", driverId);

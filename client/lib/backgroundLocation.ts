@@ -9,6 +9,7 @@ import { getSocket } from "./socket";
 const LOCATION_TASK_NAME = "driver-background-location-task";
 const BG_DRIVER_ID_KEY = "@uto_bg_driver_id";
 const BG_NOTIFIED_ASSIGNED_KEY = "@uto_bg_notified_assigned";
+const BG_NOTIFIED_RIDE_KEY = "@uto_bg_notified_ride";
 
 export async function setBackgroundDriverId(driverId: string | null) {
   try {
@@ -86,6 +87,62 @@ async function maybeNotifyPendingAssigned(pending: any) {
   }
 }
 
+async function maybeNotifyPendingRide(pending: any) {
+  if (!pending?.id || AppState.currentState === "active") return;
+
+  try {
+    const rideId = String(pending.id);
+    if ((await AsyncStorage.getItem(BG_NOTIFIED_RIDE_KEY)) === rideId) return;
+
+    const { claimNotification } = await import("./notificationDedupe");
+    if (!claimNotification(`driver:ride_request:${rideId}:once`)) return;
+
+    const Notifications = await import("expo-notifications");
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync("uto-rides-v2", {
+        name: "Ride Requests",
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 150, 250],
+        lightColor: "#F7C948",
+        sound: "default",
+      });
+    }
+
+    const pickup =
+      pending.pickupAddress || pending.pickup_address || "your area";
+    const fare = Number(
+      pending.farePrice ??
+        pending.estimatedPrice ??
+        pending.estimated_fare ??
+        0,
+    );
+    const fareLabel = fare > 0 ? ` — £${fare.toFixed(2)}` : "";
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "🚗 New Ride Request",
+        body: `Pickup near ${pickup}${fareLabel}. Open the app to respond.`,
+        data: {
+          type: "ride_request",
+          rideId,
+          audience: "driver",
+          target: "DriverHome",
+          screen: "DriverHome",
+        },
+        sound: "default",
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === "android" ? { channelId: "uto-rides-v2" } : {}),
+      },
+      trigger: null,
+    });
+
+    await AsyncStorage.setItem(BG_NOTIFIED_RIDE_KEY, rideId);
+    console.log("📢 Background local notification for ASAP ride", rideId);
+  } catch (err) {
+    console.warn("⚠️ Background ASAP-ride notification failed:", err);
+  }
+}
+
 export async function defineBackgroundLocationTask() {
   TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
     if (error) {
@@ -134,6 +191,9 @@ export async function defineBackgroundLocationTask() {
             const body = await response.json();
             if (body?.pendingAssignedBooking) {
               await maybeNotifyPendingAssigned(body.pendingAssignedBooking);
+            }
+            if (body?.pendingRideRequest) {
+              await maybeNotifyPendingRide(body.pendingRideRequest);
             }
             // Do not clear dedupe when empty — prevents re-flood if the query
             // briefly returns null between heartbeats.
@@ -216,6 +276,7 @@ export async function stopBackgroundLocationTracking() {
     }
     await setBackgroundDriverId(null);
     await AsyncStorage.removeItem(BG_NOTIFIED_ASSIGNED_KEY);
+    await AsyncStorage.removeItem(BG_NOTIFIED_RIDE_KEY);
   } catch (error) {
     console.error("Error stopping background location:", error);
   }

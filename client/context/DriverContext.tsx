@@ -324,6 +324,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const isOnlineRef = useRef(isOnline);
   const activeRideRequestRef = useRef(activeRideRequest);
+  const activeRideRef = useRef(activeRide);
 
   useEffect(() => {
     isOnlineRef.current = isOnline;
@@ -332,6 +333,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     activeRideRequestRef.current = activeRideRequest;
   }, [activeRideRequest]);
+
+  useEffect(() => {
+    activeRideRef.current = activeRide;
+  }, [activeRide]);
 
   useEffect(() => {
     if (user) {
@@ -802,9 +807,14 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                 console.warn("⚠️ Post no-show refreshData failed:", err),
               );
             }, 2000);
-          } else if (update.status === "cancelled" && update.rideId) {
-            // Even if we somehow lost local active-ride state, still surface the popup
-            // so the driver is not stuck on a cancelled ride screen.
+          } else if (
+            update.status === "cancelled" &&
+            update.rideId &&
+            activeRideRef.current?.id === update.rideId
+          ) {
+            // Only clear the driver's restored active trip when the cancelled
+            // event is for that exact ride. Cancellation events are broadcast
+            // to clear offer cards and must never wipe an unrelated live trip.
             setRideCancelledByRider(true);
             setActiveRideRequest(null);
             setActiveRide(null);

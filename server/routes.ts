@@ -843,15 +843,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ error: "latitude and longitude are required" });
       }
 
-      // Update driver's current location + heartbeat so backgrounded online
-      // drivers remain eligible for dispatch.
+      // Update the location heartbeat without changing availability. Accepting
+      // a ride marks the driver unavailable until that ride becomes terminal.
       const { data: driver, error: driverUpdateErr } = await supabase
         .from("drivers")
         .update({
           current_latitude: latitude,
           current_longitude: longitude,
           last_seen_at: new Date().toISOString(),
-          is_available: true,
         })
         .eq("id", driverId)
         .select("id")
@@ -962,7 +961,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      res.json({ success: true, pendingAssignedBooking });
+      // Also recover the driver's current sequential ASAP offer. This lets the
+      // background task show a local alert when Expo push delivery was missed.
+      let pendingRideRequest: any = null;
+      try {
+        pendingRideRequest =
+          (await scheduledRideHooks.getPendingDispatchForDriver?.(driverId)) ||
+          null;
+      } catch (pendingRideErr) {
+        console.warn(
+          "⚠️ Could not load pending ASAP offer for location heartbeat:",
+          pendingRideErr,
+        );
+      }
+
+      res.json({
+        success: true,
+        pendingAssignedBooking,
+        pendingRideRequest,
+      });
     } catch (error) {
       console.error("Error updating driver location:", error);
       res.status(500).json({ error: "Failed to update location" });
