@@ -860,34 +860,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ error: "latitude and longitude are required" });
       }
 
-      // Update the location heartbeat without changing availability. Accepting
-      // a ride marks the driver unavailable until that ride becomes terminal.
+      // Clients may send drivers.id OR users.id — resolve to the drivers table id
+      // so location always lands on the row dispatch uses for 5-mile matching.
+      let resolvedDriverId = String(driverId);
+      let resolvedUserId: string | null = null;
+      try {
+        const { data: byId } = await supabase
+          .from("drivers")
+          .select("id, user_id")
+          .eq("id", resolvedDriverId)
+          .maybeSingle();
+        if (byId?.id) {
+          resolvedDriverId = byId.id;
+          resolvedUserId = byId.user_id || null;
+        } else {
+          const { data: byUser } = await supabase
+            .from("drivers")
+            .select("id, user_id")
+            .eq("user_id", resolvedDriverId)
+            .maybeSingle();
+          if (byUser?.id) {
+            resolvedDriverId = byUser.id;
+            resolvedUserId = byUser.user_id || String(driverId);
+          }
+        }
+      } catch (resolveErr) {
+        console.warn(
+          "⚠️ Could not resolve driver id for location update:",
+          resolveErr,
+        );
+      }
+
+      // Heartbeat: keep the driver online + store latest coords. Availability is
+      // still derived from live ride state during dispatch, but is_online must
+      // stay true while location updates are flowing or matching will miss them.
       const { data: driver, error: driverUpdateErr } = await supabase
         .from("drivers")
         .update({
           current_latitude: latitude,
           current_longitude: longitude,
           last_seen_at: new Date().toISOString(),
+          is_online: true,
         })
-        .eq("id", driverId)
+        .eq("id", resolvedDriverId)
         .select("id")
         .maybeSingle();
 
       if (driverUpdateErr || !driver) {
-        // Fallback to storage helper if direct update failed (e.g. missing column)
-        const fallback = await storage.updateDriver(driverId, {
-          currentLatitude: latitude,
-          currentLongitude: longitude,
-        });
-        if (!fallback) {
-          return res.status(404).json({ error: "Driver not found" });
+        // Fallback: try by user_id when the client sent an auth user id
+        const byUser = await supabase
+          .from("drivers")
+          .update({
+            current_latitude: latitude,
+            current_longitude: longitude,
+            last_seen_at: new Date().toISOString(),
+            is_online: true,
+          })
+          .eq("user_id", String(driverId))
+          .select("id")
+          .maybeSingle();
+        if (byUser.error || !byUser.data) {
+          const fallback = await storage.updateDriver(resolvedDriverId, {
+            currentLatitude: latitude,
+            currentLongitude: longitude,
+            isOnline: true,
+          });
+          if (!fallback) {
+            return res.status(404).json({ error: "Driver not found" });
+          }
+        } else {
+          resolvedDriverId = byUser.data.id;
         }
       }
 
       // 2. Insert into location history (best-effort — table may not exist yet)
       try {
         await supabase.from("driver_locations").insert({
-          driver_id: driverId,
+          driver_id: resolvedDriverId,
           latitude,
           longitude,
           heading: heading ?? null,
@@ -902,11 +951,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // 3. Broadcast location to riders with active rides
       try {
-        const activeRides = await storage.getRidesByDriver(driverId);
+        const activeRides = await storage.getRidesByDriver(resolvedDriverId);
         for (const ride of activeRides) {
           if (["accepted", "arriving", "in_progress"].includes(ride.status)) {
             io.to(`rider:${ride.riderId}`).emit("driver:location", {
-              driverId,
+              driverId: resolvedDriverId,
               latitude,
               longitude,
               heading,
@@ -925,7 +974,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // can surface a local notification when Expo push was missed.
       let pendingAssignedBooking: any = null;
       try {
-        const matchOr = `assigned_driver_id.eq.${driverId},driver_id.eq.${driverId}`;
+        const matchIds = Array.from(
+          new Set(
+            [resolvedDriverId, resolvedUserId, String(driverId)].filter(
+              Boolean,
+            ),
+          ),
+        );
+        const matchOr = matchIds
+          .flatMap((id) => [`assigned_driver_id.eq.${id}`, `driver_id.eq.${id}`])
+          .join(",");
         const pendingStatuses = ["scheduled", "marketplace", "assigned"];
         const [laterRes, webRes] = await Promise.all([
           supabase
@@ -955,8 +1013,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             source_table: "web_booker",
           })),
         ].filter((r: any) => {
-          const assigned = r.assigned_driver_id || r.driver_id;
-          return assigned && String(assigned) === String(driverId);
+          const assigned = String(r.assigned_driver_id || r.driver_id || "");
+          return matchIds.some((id) => String(id) === assigned);
         });
         if (rows.length > 0) {
           const row = rows[0];
@@ -983,8 +1041,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let pendingRideRequest: any = null;
       try {
         pendingRideRequest =
-          (await scheduledRideHooks.getPendingDispatchForDriver?.(driverId)) ||
-          null;
+          (await scheduledRideHooks.getPendingDispatchForDriver?.(
+            resolvedDriverId,
+          )) || null;
       } catch (pendingRideErr) {
         console.warn(
           "⚠️ Could not load pending ASAP offer for location heartbeat:",

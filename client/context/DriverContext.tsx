@@ -1353,6 +1353,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     // Sync online state to the server. Going online (re)registers the driver
     // socket so they receive ride requests; going offline explicitly tells the
     // server to stop dispatching. Backgrounding the app does NOT go offline.
+    // Prefer drivers-table id; user.id still works because the server resolves it.
     const driverId = driverProfile?.id || user?.id;
     if (!driverId) return;
     try {
@@ -1366,8 +1367,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           );
         }
         // Keep location + push delivery alive when the driver leaves the app.
-        startBackgroundLocationTracking(driverId).catch((err) =>
-          console.warn("⚠️ Failed to start background location:", err),
+        // Prefer the drivers-table id for location heartbeats when available.
+        startBackgroundLocationTracking(driverProfile?.id || driverId).catch(
+          (err) =>
+            console.warn("⚠️ Failed to start background location:", err),
         );
       } else {
         goOffline(driverId);

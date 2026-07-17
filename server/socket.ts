@@ -1281,10 +1281,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
     riderSocketId: string,
     declinedBy: Set<string>,
   ) {
-    const pickupLat =
-      rideData.pickupLocation?.latitude || rideData.pickupLatitude || 0;
-    const pickupLng =
-      rideData.pickupLocation?.longitude || rideData.pickupLongitude || 0;
+    const pickupLat = Number(
+      rideData.pickupLocation?.latitude ?? rideData.pickupLatitude ?? 0,
+    );
+    const pickupLng = Number(
+      rideData.pickupLocation?.longitude ?? rideData.pickupLongitude ?? 0,
+    );
+    const hasValidPickup =
+      Number.isFinite(pickupLat) &&
+      Number.isFinite(pickupLng) &&
+      !(pickupLat === 0 && pickupLng === 0);
 
     const requestedType = normalizeVehicleType(
       rideData.rideType ||
@@ -1323,9 +1329,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
         .not("driver_id", "is", null),
     ]);
     const { data: onlineDrivers, error: driversErr } = driversResult;
-    // A driver counts as busy only when their active ride is RECENT. A ride left
-    // sitting in an active status for hours is almost certainly stale/abandoned
-    // and must not sideline the driver forever.
+    // A driver counts as busy only when their active ride is RECENT and has a
+    // known timestamp. Missing timestamps on abandoned rows must NOT sideline
+    // an otherwise free online driver forever.
     const BUSY_RIDE_MAX_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
     const dispatchNow = Date.now();
     const busyDriverIds = new Set(
@@ -1334,8 +1340,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
           const ts = new Date(
             ride.accepted_at || ride.requested_at || ride.created_at || 0,
           ).getTime();
-          // Unknown timestamp → treat as busy (safer than double-offering a live trip).
-          if (!Number.isFinite(ts) || ts <= 0) return true;
+          // No usable timestamp → treat as stale/abandoned, not busy.
+          if (!Number.isFinite(ts) || ts <= 0) return false;
           return dispatchNow - ts <= BUSY_RIDE_MAX_AGE_MS;
         })
         .map((ride: any) => ride.driver_id)
@@ -1355,6 +1361,61 @@ export function setupSocketIO(httpServer: HTTPServer) {
       );
       return null;
     }
+
+    if (!hasValidPickup) {
+      console.warn(
+        `⚠️ Ride ${rideData.id} has invalid pickup coords (${pickupLat}, ${pickupLng}) — cannot apply 5-mile matching`,
+      );
+      return null;
+    }
+
+    console.log(
+      `🧭 Matching ride ${rideData.id}: pickup=(${pickupLat.toFixed(5)}, ${pickupLng.toFixed(5)}), onlineDrivers=${onlineDrivers?.length || 0}, busy=${busyDriverIds.size}, vehicle=${requestedType}`,
+    );
+
+    const resolveDistanceMiles = async (
+      driverId: string,
+      rowLat?: any,
+      rowLng?: any,
+      driverSocketId?: string,
+    ): Promise<number | null> => {
+      const fromRowLat = Number(rowLat);
+      const fromRowLng = Number(rowLng);
+      if (
+        Number.isFinite(fromRowLat) &&
+        Number.isFinite(fromRowLng) &&
+        !(fromRowLat === 0 && fromRowLng === 0)
+      ) {
+        return haversineDistanceMiles(
+          pickupLat,
+          pickupLng,
+          fromRowLat,
+          fromRowLng,
+        );
+      }
+
+      const driverLocation = await getLatestDriverLocation(
+        rideData.id,
+        driverId,
+        driverSocketId,
+      );
+      if (
+        driverLocation?.latitude == null ||
+        driverLocation?.longitude == null
+      ) {
+        return null;
+      }
+      const lat = Number(driverLocation.latitude);
+      const lng = Number(driverLocation.longitude);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        (lat === 0 && lng === 0)
+      ) {
+        return null;
+      }
+      return haversineDistanceMiles(pickupLat, pickupLng, lat, lng);
+    };
 
     if (onlineDrivers && onlineDrivers.length > 0) {
       for (const driver of onlineDrivers) {
@@ -1383,30 +1444,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
           continue;
         }
 
-        // Enforce 5-mile radius limit (RADIUS_MILES = 5)
-        let dist = 999;
-        if (pickupLat && pickupLng) {
-          const driverLocation = await getLatestDriverLocation(
-            rideData.id,
-            driver.id,
-            driverSocketId,
+        const dist = await resolveDistanceMiles(
+          driver.id,
+          driver.current_latitude,
+          driver.current_longitude,
+          driverSocketId,
+        );
+        if (dist == null) {
+          console.log(
+            `   ⏭️ Skipping driver ${driver.id} — no usable location for 5-mile check`,
           );
-          if (
-            driverLocation?.latitude != null &&
-            driverLocation?.longitude != null
-          ) {
-            dist = haversineDistanceMiles(
-              pickupLat,
-              pickupLng,
-              driverLocation.latitude,
-              driverLocation.longitude,
-            );
-          }
+          continue;
         }
 
         if (dist > RADIUS_MILES) {
           console.log(
-            `   ⏭️ Skipping driver ${driver.id} — distance ${dist < 999 ? dist.toFixed(2) + " mi" : "invalid/unknown"} exceeds 5-mile radius limit (${RADIUS_MILES} mi)`,
+            `   ⏭️ Skipping driver ${driver.id} — distance ${dist.toFixed(2)} mi exceeds 5-mile radius limit (${RADIUS_MILES} mi)`,
           );
           continue;
         }
@@ -1429,10 +1482,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
       if (busyDriverIds.has(driverId)) continue;
 
       let vehicleOk = true;
+      let rowLat: any = null;
+      let rowLng: any = null;
       try {
         const { data: driverRow } = await supabase
           .from("drivers")
-          .select("vehicle_type, is_online")
+          .select(
+            "vehicle_type, is_online, current_latitude, current_longitude",
+          )
           .eq("id", driverId)
           .maybeSingle();
 
@@ -1448,6 +1505,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
           );
           continue;
         }
+        rowLat = driverRow.current_latitude;
+        rowLng = driverRow.current_longitude;
 
         const driverVehicle = normalizeVehicleType(
           driverRow?.vehicle_type || "saloon",
@@ -1463,29 +1522,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
       }
       if (!vehicleOk) continue;
 
-      let dist = 999;
-      if (pickupLat && pickupLng) {
-        const driverLocation = await getLatestDriverLocation(
-          rideData.id,
-          driverId,
-          socketId,
+      const dist = await resolveDistanceMiles(
+        driverId,
+        rowLat,
+        rowLng,
+        socketId,
+      );
+      if (dist == null) {
+        console.log(
+          `   ⏭️ Skipping socket driver ${driverId} — no usable location for 5-mile check`,
         );
-        if (
-          driverLocation?.latitude != null &&
-          driverLocation?.longitude != null
-        ) {
-          dist = haversineDistanceMiles(
-            pickupLat,
-            pickupLng,
-            driverLocation.latitude,
-            driverLocation.longitude,
-          );
-        }
+        continue;
       }
 
       if (dist > RADIUS_MILES) {
         console.log(
-          `   ⏭️ Skipping socket driver ${driverId} — distance ${dist < 999 ? dist.toFixed(2) + " mi" : "invalid/unknown"} exceeds 5-mile radius limit (${RADIUS_MILES} mi)`,
+          `   ⏭️ Skipping socket driver ${driverId} — distance ${dist.toFixed(2)} mi exceeds 5-mile radius limit (${RADIUS_MILES} mi)`,
         );
         continue;
       }
@@ -1498,6 +1550,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
     }
 
     if (heap.size === 0) {
+      console.log(
+        `🚫 No eligible drivers for ride ${rideData.id} after filters (online=${onlineDrivers?.length || 0}, radius=${RADIUS_MILES} mi)`,
+      );
       return null;
     }
 
@@ -2163,6 +2218,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             current_latitude: normalizedLocation.latitude,
             current_longitude: normalizedLocation.longitude,
             last_seen_at: new Date().toISOString(),
+            is_online: true,
           })
           .eq("id", actualDriverId);
 
