@@ -1279,17 +1279,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
     const heap = new MinHeap();
     const addedDriverIds = new Set<string>();
 
+    // Match ANY online driver in range. "Available" is derived from real ride
+    // state below — never from the drivers.is_available flag. That flag can get
+    // stuck false (e.g. a stale/abandoned ride row left over from a previous
+    // session marks the driver busy on reconnect and nothing resets it), which
+    // would silently exclude an otherwise-free online driver from every future
+    // dispatch. Requirement: online + within radius must always be offerable.
     const [driversResult, activeRideResult] = await Promise.all([
       supabase
         .from("drivers")
         .select(
           "id, current_latitude, current_longitude, is_available, vehicle_type",
         )
-        .eq("is_online", true)
-        .eq("is_available", true),
+        .eq("is_online", true),
       supabase
         .from("rides")
-        .select("driver_id")
+        .select("driver_id, accepted_at, requested_at, created_at")
         .in("status", [
           "accepted",
           "arriving",
@@ -1300,14 +1305,27 @@ export function setupSocketIO(httpServer: HTTPServer) {
         .not("driver_id", "is", null),
     ]);
     const { data: onlineDrivers, error: driversErr } = driversResult;
+    // A driver counts as busy only when their active ride is RECENT. A ride left
+    // sitting in an active status for hours is almost certainly stale/abandoned
+    // and must not sideline the driver forever.
+    const BUSY_RIDE_MAX_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
+    const dispatchNow = Date.now();
     const busyDriverIds = new Set(
       (activeRideResult.data || [])
+        .filter((ride: any) => {
+          const ts = new Date(
+            ride.accepted_at || ride.requested_at || ride.created_at || 0,
+          ).getTime();
+          // Unknown timestamp → treat as busy (safer than double-offering a live trip).
+          if (!Number.isFinite(ts) || ts <= 0) return true;
+          return dispatchNow - ts <= BUSY_RIDE_MAX_AGE_MS;
+        })
         .map((ride: any) => ride.driver_id)
         .filter(Boolean),
     );
     if (activeRideResult.error) {
       console.warn(
-        `⚠️ Could not load active drivers while dispatching ride ${rideData.id}; availability flags will still be enforced:`,
+        `⚠️ Could not load active drivers while dispatching ride ${rideData.id}; only online + range filters will apply:`,
         activeRideResult.error.message,
       );
     }
@@ -1396,7 +1414,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
       try {
         const { data: driverRow } = await supabase
           .from("drivers")
-          .select("vehicle_type, is_online, is_available")
+          .select("vehicle_type, is_online")
           .eq("id", driverId)
           .maybeSingle();
 
@@ -1406,9 +1424,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
           );
           continue;
         }
-        if (!driverRow.is_online || !driverRow.is_available) {
+        if (!driverRow.is_online) {
           console.log(
-            `   ⏭️ Skipping socket driver ${driverId} — offline or unavailable`,
+            `   ⏭️ Skipping socket driver ${driverId} — marked offline`,
           );
           continue;
         }
