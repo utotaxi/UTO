@@ -69,13 +69,15 @@ async function updateDeductionWithFallback(
 async function insertDeductionWithFallback(
   supabase: { from: (table: string) => any },
   payload: Record<string, any>,
-): Promise<void> {
+): Promise<string | undefined> {
   const nextPayload: Record<string, any> = { ...payload };
   for (let attempt = 0; attempt < 2; attempt++) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("driver_deductions")
-      .insert(nextPayload);
-    if (!error) return;
+      .insert(nextPayload)
+      .select("id")
+      .single();
+    if (!error) return data?.id;
 
     const missingColumn = getMissingSchemaColumn(error);
     if (missingColumn && missingColumn in nextPayload) {
@@ -88,9 +90,19 @@ async function insertDeductionWithFallback(
 
 export async function findExistingDriverPenaltyDeduction(
   supabase: { from: (table: string) => any },
-  params: { driverId: string; reason: string; rideId?: string },
+  params: {
+    driverId: string;
+    reason: string;
+    rideId?: string;
+    matchAnyReasonForRide?: boolean;
+  },
 ): Promise<{ id: string } | null> {
-  const { driverId, reason, rideId } = params;
+  const {
+    driverId,
+    reason,
+    rideId,
+    matchAnyReasonForRide = true,
+  } = params;
 
   const { data: byReason, error: reasonErr } = await supabase
     .from("driver_deductions")
@@ -103,7 +115,7 @@ export async function findExistingDriverPenaltyDeduction(
   if (byReason?.id) return { id: byReason.id };
 
   // Fallback: any prior row whose reason mentions this ride id (covers label drift).
-  if (rideId) {
+  if (rideId && matchAnyReasonForRide) {
     const { data: byRide, error: rideErr } = await supabase
       .from("driver_deductions")
       .select("id, reason")
@@ -133,13 +145,24 @@ export async function upsertDriverPenaltyDeduction(
     reason: string;
     createdAt?: string;
     rideId?: string;
+    /** Credits use an exact reason; they must not match a penalty for the same ride. */
+    matchAnyReasonForRide?: boolean;
   },
 ): Promise<{ created: boolean; id?: string }> {
-  const { driverId, amount, type, reason, createdAt, rideId } = params;
+  const {
+    driverId,
+    amount,
+    type,
+    reason,
+    createdAt,
+    rideId,
+    matchAnyReasonForRide,
+  } = params;
   const existing = await findExistingDriverPenaltyDeduction(supabase, {
     driverId,
     reason,
     rideId,
+    matchAnyReasonForRide,
   });
 
   const driverUserId = await resolveDriverUserId(supabase, driverId);
@@ -166,6 +189,6 @@ export async function upsertDriverPenaltyDeduction(
   }
 
   payload.created_at = createdAt || new Date().toISOString();
-  await insertDeductionWithFallback(supabase, payload);
-  return { created: true };
+  const id = await insertDeductionWithFallback(supabase, payload);
+  return { created: true, id };
 }

@@ -477,6 +477,83 @@ interface DispatchState {
 }
 
 const dispatchQueues = new Map<string, DispatchState>();
+const riderCancellationCreditLocks = new Map<string, Promise<boolean>>();
+
+/**
+ * Record and apply a rider-cancellation earnings credit exactly once.
+ * The per-ride lock prevents duplicate socket events from incrementing earnings
+ * twice. If the earnings update fails, remove the new ledger row so a later
+ * reconciliation/event can retry instead of leaving a false "already credited"
+ * marker.
+ */
+async function ensureRiderCancellationEarningsCredit(
+  rideId: string,
+  driverId: string,
+  amount: number,
+): Promise<boolean> {
+  const key = `${driverId}:${rideId}`;
+  const inFlight = riderCancellationCreditLocks.get(key);
+  if (inFlight) return inFlight;
+
+  const task = (async () => {
+    const creditReason = formatRiderCancellationFeeCredit(rideId);
+    const creditResult = await upsertDriverPenaltyDeduction(supabase, {
+      driverId,
+      amount: Math.abs(amount),
+      type: DRIVER_DEDUCTION_TYPE.COMMISSION,
+      reason: creditReason,
+      rideId,
+      matchAnyReasonForRide: false,
+    });
+
+    if (!creditResult.created) {
+      console.log(
+        `⏭️ Cancel fee credit already recorded for ride ${rideId} — skipping duplicate earnings bump`,
+      );
+      return true;
+    }
+
+    try {
+      const { data: driverData, error: driverFetchErr } = await supabase
+        .from("drivers")
+        .select("total_earnings")
+        .eq("id", driverId)
+        .single();
+      if (driverFetchErr || !driverData) {
+        throw driverFetchErr || new Error(`Driver ${driverId} not found`);
+      }
+
+      const currentEarnings = Number(driverData.total_earnings || 0);
+      const newEarnings = Number((currentEarnings + amount).toFixed(2));
+      const { error: driverEarningsErr } = await supabase
+        .from("drivers")
+        .update({ total_earnings: newEarnings })
+        .eq("id", driverId);
+      if (driverEarningsErr) throw driverEarningsErr;
+
+      console.log(
+        `💰 Credited driver ${driverId} £${amount.toFixed(2)} cancel fee for ride ${rideId} (${currentEarnings} → ${newEarnings})`,
+      );
+      return true;
+    } catch (error) {
+      // Roll back only the ledger row created by this attempt. This allows a
+      // later retry to apply both the ledger credit and total_earnings together.
+      let rollback = supabase
+        .from("driver_deductions")
+        .delete()
+        .eq("driver_id", driverId)
+        .eq("reason", creditReason);
+      if (creditResult.id) rollback = rollback.eq("id", creditResult.id);
+      await rollback;
+      throw error;
+    }
+  })().finally(() => {
+    riderCancellationCreditLocks.delete(key);
+  });
+
+  riderCancellationCreditLocks.set(key, task);
+  return task;
+}
 
 // Track arrived-at-pickup timers so we can auto-cancel if rider doesn't board
 // No longer tracking arrived timers server-side as the driver manually initiates No Show after 10 min
@@ -2074,29 +2151,50 @@ export function setupSocketIO(httpServer: HTTPServer) {
     socket.on(
       "ride:declined",
       async (data: { rideId: string; rideData?: any; driverId?: string }) => {
+        const decliningDriverId = await resolveDriverTableId(
+          data.driverId || getDriverIdForSocket(socket.id),
+        );
         console.log(
           "❌ Ride declined by driver:",
-          data.driverId,
+          decliningDriverId || data.driverId,
           "for ride:",
           data.rideId,
         );
         const rideInfo = activeRides.get(data.rideId);
         const dispState = dispatchQueues.get(data.rideId);
 
-        if (rideInfo && data.driverId) {
-          rideInfo.declinedBy.add(data.driverId);
+        if (!decliningDriverId) {
+          console.warn(
+            `⚠️ Ignoring decline for ride ${data.rideId} — driver identity could not be resolved`,
+          );
+          return;
+        }
+
+        // Ignore late/stale decline taps after this offer already moved to a
+        // different driver. Otherwise one old notification could skip the
+        // driver who currently has the live offer.
+        if (
+          dispState?.currentDriverId &&
+          dispState.currentDriverId !== decliningDriverId
+        ) {
+          console.log(
+            `⏭️ Ignoring stale decline from ${decliningDriverId} for ride ${data.rideId}; current offer belongs to ${dispState.currentDriverId}`,
+          );
+          return;
+        }
+
+        if (rideInfo) {
+          rideInfo.declinedBy.add(decliningDriverId);
         }
 
         // Advance the dispatch queue to the next nearest driver
         if (dispState) {
           if (dispState.timer) clearTimeout(dispState.timer);
-          if (data.driverId) {
-            dispState.declinedBy.add(data.driverId);
-          }
+          dispState.declinedBy.add(decliningDriverId);
           console.log(
-            `⏭️ Driver ${data.driverId} declined — dispatching to next nearest driver`,
+            `⏭️ Driver ${decliningDriverId} declined — dispatching to next nearest driver`,
           );
-          dispatchToNextDriver(data.rideId);
+          await dispatchToNextDriver(data.rideId);
         }
       },
     );
@@ -2419,16 +2517,56 @@ export function setupSocketIO(httpServer: HTTPServer) {
           );
         }
 
-        // Cancel the dispatch queue — ride is taken
         const dispState = dispatchQueues.get(data.rideId);
-        if (dispState) {
-          if (dispState.timer) clearTimeout(dispState.timer);
-          dispState.cancelled = true;
-          dispatchQueues.delete(data.rideId);
+        if (
+          !dispState ||
+          dispState.cancelled ||
+          dispState.currentDriverId !== actualDriverId
+        ) {
           console.log(
-            `🛑 Dispatch queue cancelled for ride ${data.rideId} — accepted by ${data.driverId}`,
+            `⏭️ Rejecting stale/unauthorized accept for ride ${data.rideId} from ${actualDriverId}; current offer=${dispState?.currentDriverId || "none"}`,
           );
+          io.to(`driver:${actualDriverId}`).emit("ride:expired", {
+            rideId: data.rideId,
+          });
+          return;
         }
+
+        // Claim the ride atomically while it is still pending and unassigned.
+        // This prevents delayed push taps or simultaneous accepts from taking a
+        // ride that has already moved to/been accepted by another driver.
+        const acceptedAt = new Date().toISOString();
+        const { data: acceptedRide, error: acceptUpdateError } = await supabase
+          .from("rides")
+          .update({
+            driver_id: actualDriverId,
+            status: "accepted",
+            accepted_at: acceptedAt,
+          })
+          .eq("id", data.rideId)
+          .eq("status", "pending")
+          .is("driver_id", null)
+          .select("*")
+          .maybeSingle();
+
+        if (acceptUpdateError || !acceptedRide) {
+          console.warn(
+            `⚠️ Ride ${data.rideId} could not be claimed by ${actualDriverId}; it is no longer pending`,
+            acceptUpdateError?.message || "",
+          );
+          io.to(`driver:${actualDriverId}`).emit("ride:expired", {
+            rideId: data.rideId,
+          });
+          return;
+        }
+
+        // Cancel the dispatch queue — ride is taken
+        if (dispState.timer) clearTimeout(dispState.timer);
+        dispState.cancelled = true;
+        dispatchQueues.delete(data.rideId);
+        console.log(
+          `🛑 Dispatch queue cancelled for ride ${data.rideId} — accepted by ${data.driverId}`,
+        );
 
         // Broadcast ride:expired to ALL other online drivers so they clear this ride
         // from their screens (broadcast model — all drivers saw it, only one can take it)
@@ -2463,28 +2601,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         try {
-          const acceptedAt = new Date().toISOString();
-          const updatePayload: Record<string, any> = {
-            driver_id: actualDriverId,
-            status: "accepted",
-            accepted_at: acceptedAt,
-          };
-
-          const { error: acceptUpdateError } = await supabase
-            .from("rides")
-            .update(updatePayload)
-            .eq("id", data.rideId);
-
-          if (acceptUpdateError) {
-            console.error(
-              "❌ Failed to update ride on accept:",
-              acceptUpdateError,
-            );
-          } else {
-            console.log(
-              `✅ Ride ${data.rideId} driver_id=${actualDriverId} saved to Supabase on accept`,
-            );
-          }
+          console.log(
+            `✅ Ride ${data.rideId} driver_id=${actualDriverId} saved to Supabase on accept`,
+          );
 
           // If this live ride came from a scheduled booking, mark the booking accepted too
           if (isScheduledLiveRideId(data.rideId)) {
@@ -2499,11 +2618,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
             });
           }
 
-          const { data: ride } = await supabase
-            .from("rides")
-            .select("*")
-            .eq("id", data.rideId)
-            .single();
+          const ride = acceptedRide;
 
           if (ride) {
             const driverLocation = await getLatestDriverLocation(
@@ -3078,6 +3193,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 console.log(
                   `⏭️ Rider cancel fee already recorded for ride ${update.rideId} (£${existingCancelFee.toFixed(2)}) — skipping duplicate`,
                 );
+                // Reconcile an older/partial cancellation where the rider fee
+                // was stored but the driver's earnings credit was not.
+                if (cancelledRide.driver_id) {
+                  try {
+                    await ensureRiderCancellationEarningsCredit(
+                      update.rideId,
+                      cancelledRide.driver_id,
+                      existingCancelFee,
+                    );
+                  } catch (creditErr) {
+                    console.error(
+                      `❌ Failed to reconcile cancellation earnings for ride ${update.rideId}:`,
+                      creditErr,
+                    );
+                  }
+                }
               } else if (cancelledRide && shouldChargeCancellationFee) {
                 // Always base rider cancel fee on the coupon-adjusted fare.
                 // Prefer estimated_price (pre-discount) + discount_amount so we
@@ -3255,67 +3386,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
                     }
                   }
 
-                  // Credit driver earnings with the payable cancellation fee (with/without coupon).
-                  // Record a one-time earnings credit row so Earnings UI stays in sync.
+                  // Credit the entire payable fare to the assigned driver.
                   if (cancelledRide.driver_id) {
                     try {
-                      const creditReason = formatRiderCancellationFeeCredit(
+                      await ensureRiderCancellationEarningsCredit(
                         update.rideId,
+                        cancelledRide.driver_id,
+                        cancellationFeeAmount,
                       );
-                      const creditResult = await upsertDriverPenaltyDeduction(
-                        supabase,
-                        {
-                          driverId: cancelledRide.driver_id,
-                          amount: Math.abs(cancellationFeeAmount),
-                          type: DRIVER_DEDUCTION_TYPE.COMMISSION,
-                          reason: creditReason,
-                          rideId: update.rideId,
-                        },
-                      );
-
-                      if (creditResult?.created) {
-                        const { data: driverData, error: driverFetchErr } =
-                          await supabase
-                            .from("drivers")
-                            .select("total_earnings")
-                            .eq("id", cancelledRide.driver_id)
-                            .single();
-
-                        if (driverFetchErr) {
-                          console.error(
-                            `❌ Failed to fetch driver ${cancelledRide.driver_id} for cancel credit:`,
-                            driverFetchErr,
-                          );
-                        } else {
-                          const currentEarnings = Number(
-                            driverData?.total_earnings || 0,
-                          );
-                          const newEarnings = Number(
-                            (currentEarnings + cancellationFeeAmount).toFixed(
-                              2,
-                            ),
-                          );
-                          const { error: driverEarningsErr } = await supabase
-                            .from("drivers")
-                            .update({ total_earnings: newEarnings })
-                            .eq("id", cancelledRide.driver_id);
-
-                          if (driverEarningsErr) {
-                            console.error(
-                              `❌ Failed to credit driver earnings on rider cancel for ${update.rideId}:`,
-                              driverEarningsErr,
-                            );
-                          } else {
-                            console.log(
-                              `💰 Credited driver ${cancelledRide.driver_id} £${cancellationFeeAmount.toFixed(2)} cancel fee for ride ${update.rideId} (${currentEarnings} → ${newEarnings})`,
-                            );
-                          }
-                        }
-                      } else {
-                        console.log(
-                          `⏭️ Cancel fee credit already recorded for ride ${update.rideId} — skipping duplicate earnings bump`,
-                        );
-                      }
                     } catch (earningsErr) {
                       console.error(
                         "❌ Failed to update driver earnings on cancellation:",

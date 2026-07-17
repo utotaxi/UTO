@@ -2497,18 +2497,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!driverIdOrUserId) return null;
     const byId = await storage.getDriver(driverIdOrUserId);
     if (byId) {
+      const driverUser = byId.userId
+        ? await storage.getUser(byId.userId)
+        : null;
       return {
         tableId: byId.id,
-        userId: byId.userId || byId.user_id || null,
-        fullName: byId.fullName || byId.full_name || null,
+        userId: byId.userId || null,
+        fullName: driverUser?.fullName || null,
       };
     }
     const byUser = await storage.getDriverByUserId(driverIdOrUserId);
     if (byUser) {
+      const driverUser = byUser.userId
+        ? await storage.getUser(byUser.userId)
+        : null;
       return {
         tableId: byUser.id,
-        userId: byUser.userId || byUser.user_id || driverIdOrUserId,
-        fullName: byUser.fullName || byUser.full_name || null,
+        userId: byUser.userId || driverIdOrUserId,
+        fullName: driverUser?.fullName || null,
       };
     }
     return {
@@ -5426,9 +5432,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const status = String(booking.status || "").toLowerCase();
         if (status !== "scheduled" && status !== "driver_accepted")
           return false;
-        // Never reactivate cancelled/completed bookings (defensive — status filter above
-        // should already exclude these, but keep hard block for safety).
-        if (status === "cancelled" || status === "completed") return false;
         if (!booking.rider_id || !booking.pickup_at) return false;
 
         const pickupTs = pickupTimestamp(booking);

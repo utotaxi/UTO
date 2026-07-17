@@ -564,15 +564,12 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     if (!isOnlineRef.current || activeRideRequestRef.current) return;
 
-    const isNewOffer =
-      !activeRideRequestRef.current ||
-      activeRideRequestRef.current.id !== mappedRequest.id;
     setActiveRideRequest(mappedRequest);
     setRideState("incoming");
 
     // Alert at most once per ride — opening the app / pending-dispatch must not re-flood.
     const requestKey = `driver:ride_request:${mappedRequest.id}:once`;
-    if (isNewOffer && claimNotification(requestKey)) {
+    if (claimNotification(requestKey)) {
       playRideAlert();
       sendLocalNotification(
         "🚕 New Ride Request",
@@ -649,17 +646,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (currentMode !== "driver") return;
-    const unsubscribe = onRideRequestNotification((rideId, ride) => {
+    const unsubscribe = onRideRequestNotification((rideId) => {
       console.log("📲 Ride request push received:", rideId);
-      if (ride && (ride.id || rideId)) {
-        handleRidePayload({ ...ride, id: ride.id || rideId });
-      }
+      // Never trust an embedded push payload as the live offer: it may arrive
+      // after the sequential dispatch timeout moved the ride to another driver.
+      // Restore only the server-confirmed current pending dispatch.
       fetchPendingDispatch().catch((err) =>
         console.warn("⚠️ Pending dispatch refresh failed:", err),
       );
     });
     return unsubscribe;
-  }, [currentMode, fetchPendingDispatch, handleRidePayload]);
+  }, [currentMode, fetchPendingDispatch]);
 
   useEffect(() => {
     if (currentMode !== "driver") return;
