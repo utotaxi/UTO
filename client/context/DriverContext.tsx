@@ -1180,44 +1180,46 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         setActiveRide(rideTrip);
         await saveActiveRide(rideTrip);
 
-        // ───── CONVERT ACTIVE RIDE TO RIDE REQUEST FOR UI DISPLAY ─────
-        // This ensures Phase 2 UI displays even when app is reopened
-        if (!activeRideRequest) {
-          const rideRequest: RideRequest = {
-            id: activeRideData.id,
-            riderName: activeRideData.riderName || "Rider",
-            riderPhone: activeRideData.riderPhone || "",
-            pickupAddress: activeRideData.pickupAddress || "Pickup",
-            dropoffAddress: activeRideData.dropoffAddress || "Dropoff",
-            pickupLatitude: activeRideData.pickupLatitude || 0,
-            pickupLongitude: activeRideData.pickupLongitude || 0,
-            dropoffLatitude: activeRideData.dropoffLatitude || 0,
-            dropoffLongitude: activeRideData.dropoffLongitude || 0,
-            estimatedFare: payableFare,
-            distanceMiles: activeRideData.distance || 0,
-            durationMinutes: activeRideData.estimatedDuration || 0,
-            pickupDistance: 0,
-            otp: activeRideData.otp,
-            paymentMethod: "card",
-            walletDeduction: activeRideData.walletDeduction || 0,
-            expectedCollectAmount:
-              activeRideData.expectedCollectAmount !== undefined
-                ? activeRideData.expectedCollectAmount
-                : payableFare,
-            discountAmount: Number(activeRideData.discountAmount || 0),
-          };
-          setActiveRideRequest(rideRequest);
-          // Infer rideState from the server's ride status
-          const serverStatus = activeRideData.status || "accepted";
-          let inferredState: DriverRideState = "accepted";
-          if (serverStatus === "at_pickup" || serverStatus === "arrived")
-            inferredState = "at_pickup";
-          else if (serverStatus === "in_progress")
-            inferredState = "in_progress";
-          setRideState(inferredState);
-        }
+        // Always replace cached state with the server-authoritative active ride.
+        const rideRequest: RideRequest = {
+          id: activeRideData.id,
+          riderName: activeRideData.riderName || "Rider",
+          riderPhone: activeRideData.riderPhone || "",
+          pickupAddress: activeRideData.pickupAddress || "Pickup",
+          dropoffAddress: activeRideData.dropoffAddress || "Dropoff",
+          pickupLatitude: activeRideData.pickupLatitude || 0,
+          pickupLongitude: activeRideData.pickupLongitude || 0,
+          dropoffLatitude: activeRideData.dropoffLatitude || 0,
+          dropoffLongitude: activeRideData.dropoffLongitude || 0,
+          estimatedFare: payableFare,
+          distanceMiles: activeRideData.distance || 0,
+          durationMinutes: activeRideData.estimatedDuration || 0,
+          pickupDistance: 0,
+          otp: activeRideData.otp,
+          paymentMethod: "card",
+          walletDeduction: activeRideData.walletDeduction || 0,
+          expectedCollectAmount:
+            activeRideData.expectedCollectAmount !== undefined
+              ? activeRideData.expectedCollectAmount
+              : payableFare,
+          discountAmount: Number(activeRideData.discountAmount || 0),
+        };
+        setActiveRideRequest(rideRequest);
+        const serverStatus = activeRideData.status || "accepted";
+        let inferredState: DriverRideState = "accepted";
+        if (serverStatus === "at_pickup" || serverStatus === "arrived")
+          inferredState = "at_pickup";
+        else if (serverStatus === "in_progress")
+          inferredState = "in_progress";
+        setRideState(inferredState);
       } else {
         setActiveRide(null);
+        // Android backup can restore AsyncStorage even after reinstall. Clear a
+        // cached accepted/PIN screen when the server says no active ride exists.
+        if (rideState !== "incoming") {
+          setActiveRideRequest(null);
+          setRideState("none");
+        }
         await saveActiveRide(null);
       }
     } catch (err) {
@@ -1248,6 +1250,36 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           }
           const data = await res.json();
           const ride = data.ride;
+          const restorableStatuses = new Set([
+            "accepted",
+            "arriving",
+            "arrived",
+            "at_pickup",
+            "in_progress",
+          ]);
+          const serverStatus = String(ride?.status || "").toLowerCase();
+          const assignedDriverId = String(
+            ride?.driverId || ride?.driver_id || "",
+          );
+          const currentDriverId = String(driverProfile?.id || "");
+
+          if (
+            !ride ||
+            !restorableStatuses.has(serverStatus) ||
+            (assignedDriverId &&
+              currentDriverId &&
+              assignedDriverId !== currentDriverId)
+          ) {
+            console.log(
+              `🧹 Removing cached ride ${activeRide.id}; server status=${serverStatus || "missing"}`,
+            );
+            setActiveRide(null);
+            setActiveRideRequest(null);
+            setRideState("none");
+            await saveActiveRide(null);
+            return;
+          }
+
           const payableFare = getDiscountedFare(
             ride.finalPrice || ride.estimatedPrice || activeRide.farePrice || 0,
             ride.finalPrice ? 0 : ride.discountAmount || 0,
@@ -1284,7 +1316,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           setActiveRideRequest(rideRequest);
 
           // Infer rideState from the server's ride status
-          const serverStatus = ride.status || "accepted";
           let inferredState: DriverRideState = "accepted";
           if (serverStatus === "at_pickup" || serverStatus === "arrived")
             inferredState = "at_pickup";
@@ -1302,7 +1333,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
       restoreActiveRideRequest();
     }
-  }, [activeRide, activeRideRequest, isLoading]);
+  }, [activeRide, activeRideRequest, isLoading, driverProfile?.id]);
 
   const setIsOnline = async (online: boolean) => {
     setIsOnlineState(online);

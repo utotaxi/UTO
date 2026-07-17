@@ -2,7 +2,11 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { storage } from "./storage";
-import { setupSocketIO, scheduledRideHooks } from "./socket";
+import {
+  extractScheduledBookingId,
+  setupSocketIO,
+  scheduledRideHooks,
+} from "./socket";
 import {
   authorizeSavedCard,
   capturePaymentIntent,
@@ -1015,7 +1019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           "arriving",
           "at_pickup",
         ];
-        const { data: rides, error: ridesErr } = await supabase
+        const { data: rideRows, error: ridesErr } = await supabase
           .from("rides")
           .select("*")
           .eq("driver_id", resolvedDriverId)
@@ -1029,6 +1033,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .json({ error: "Failed to fetch active rides" });
         }
 
+        // A stale DB status must never lock a driver into an old ride after
+        // reinstall/login. Terminal timestamps take precedence over status,
+        // and non-terminal rides are only restorable for a bounded period.
+        const nowMs = Date.now();
+        const ACCEPTED_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+        const IN_PROGRESS_MAX_AGE_MS = 18 * 60 * 60 * 1000;
+        const validRides: any[] = [];
+
+        const closeStaleRide = async (
+          ride: any,
+          status: "cancelled" | "completed",
+          reason: string,
+        ) => {
+          const payload: Record<string, any> =
+            status === "completed"
+              ? { status: "completed" }
+              : {
+                  status: "cancelled",
+                  cancelled_at: ride.cancelled_at || new Date().toISOString(),
+                  cancelled_by: ride.cancelled_by || "system",
+                  cancellation_fee: 0,
+                  cancellation_reason: reason,
+                };
+
+          let cleanup = await supabase
+            .from("rides")
+            .update(payload)
+            .eq("id", ride.id)
+            .in("status", activeStatuses);
+
+          // Older schemas can lack optional cancellation columns.
+          if (cleanup.error) {
+            cleanup = await supabase
+              .from("rides")
+              .update(
+                status === "completed"
+                  ? { status: "completed" }
+                  : {
+                      status: "cancelled",
+                      cancelled_at:
+                        ride.cancelled_at || new Date().toISOString(),
+                    },
+              )
+              .eq("id", ride.id)
+              .in("status", activeStatuses);
+          }
+
+          if (cleanup.error) {
+            console.warn(
+              `⚠️ Could not close stale active ride ${ride.id}:`,
+              cleanup.error.message,
+            );
+            return;
+          }
+
+          const bookingId = extractScheduledBookingId(ride.id);
+          if (bookingId) {
+            for (const table of ["later_bookings", "web_booker"] as const) {
+              try {
+                await supabase
+                  .from(table)
+                  .update({
+                    status,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", bookingId);
+              } catch (_) {
+                // The ride row is already closed; booking sync is best-effort.
+              }
+            }
+          }
+
+          io.to(`driver:${resolvedDriverId}`).emit("ride:update", {
+            rideId: ride.id,
+            status,
+            cancelledBy: status === "cancelled" ? "system" : undefined,
+          });
+          console.log(
+            `🧹 Closed stale driver ride ${ride.id} as ${status}: ${reason}`,
+          );
+        };
+
+        for (const ride of rideRows || []) {
+          if (ride.completed_at) {
+            await closeStaleRide(
+              ride,
+              "completed",
+              "completed_timestamp_present",
+            );
+            continue;
+          }
+          if (ride.cancelled_at) {
+            await closeStaleRide(
+              ride,
+              "cancelled",
+              "cancelled_timestamp_present",
+            );
+            continue;
+          }
+
+          const status = String(ride.status || "").toLowerCase();
+          const anchorValue =
+            status === "in_progress"
+              ? ride.started_at ||
+                ride.accepted_at ||
+                ride.requested_at ||
+                ride.created_at
+              : ride.accepted_at || ride.requested_at || ride.created_at;
+          const anchorMs = anchorValue
+            ? new Date(anchorValue).getTime()
+            : Number.NaN;
+          const maxAgeMs =
+            status === "in_progress"
+              ? IN_PROGRESS_MAX_AGE_MS
+              : ACCEPTED_MAX_AGE_MS;
+          const isStale =
+            !Number.isFinite(anchorMs) ||
+            anchorMs <= 0 ||
+            nowMs - anchorMs > maxAgeMs;
+
+          if (isStale) {
+            await closeStaleRide(
+              ride,
+              "cancelled",
+              "stale_active_ride_auto_closed",
+            );
+            continue;
+          }
+
+          // A driver can have only one active ride. Keep the newest valid row
+          // and close any older duplicate assignments.
+          if (validRides.length > 0) {
+            await closeStaleRide(
+              ride,
+              "cancelled",
+              "superseded_duplicate_active_ride",
+            );
+            continue;
+          }
+
+          validRides.push(ride);
+        }
+
+        const rides = validRides;
         const riderIds = Array.from(
           new Set(
             (rides || [])
