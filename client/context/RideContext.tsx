@@ -1162,6 +1162,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
     try {
       cleanup = onRideUpdate((update) => {
+        // Defense-in-depth data isolation: never act on an update that belongs to
+        // a DIFFERENT rider's ride. The server routes ride:update to this rider's
+        // own room, but if any stray/broadcast event arrives, ignore it when its
+        // rideId doesn't match our active (or just-cancelled) ride. This prevents
+        // another rider's cancellation from leaking here or clearing our ride.
+        const myRideId =
+          activeRideRef.current?.id ||
+          pendingCancelledRideRef.current?.id ||
+          null;
+        if (update.rideId && myRideId && update.rideId !== myRideId) {
+          return;
+        }
         if (
           update.status === "completed" ||
           update.status === "payment_collected" ||

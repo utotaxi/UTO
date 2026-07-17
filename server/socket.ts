@@ -192,9 +192,13 @@ async function syncScheduledBookingForRide(
           `🔄 Synced scheduled booking in ${table} (live ride ${rideId}) → ${status}`,
         );
         try {
+          // Minimal signal only — never broadcast the full booking row (rider
+          // PII, addresses, fares, PIN) to every connected client.
           io.emit("later-booking:update", {
             type: "live_status",
-            booking: { ...data[0], source_table: table },
+            bookingId: data[0]?.id ?? null,
+            sourceTable: table,
+            status: data[0]?.status ?? null,
           });
         } catch (_) {
           /* non-critical */
@@ -294,9 +298,12 @@ async function releaseScheduledBookingAssignment(rideId: string) {
           `🔁 Released scheduled booking assignment in ${table} (live ride ${rideId})`,
         );
         try {
+          // Minimal signal only — no PII broadcast.
           io.emit("later-booking:update", {
             type: "released",
-            booking: { ...data[0], source_table: table },
+            bookingId: data[0]?.id ?? null,
+            sourceTable: table,
+            status: data[0]?.status ?? null,
           });
         } catch (_) {
           /* non-critical */
@@ -723,6 +730,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
     }
 
     return null;
+  };
+
+  // Clear a stale incoming ride card on driver screens WITHOUT leaking the
+  // ride payload. Only connected drivers receive this; riders never do, so one
+  // ride's cancellation can no longer expose fees/rider info to other users or
+  // wipe another rider's active ride. Carries just the rideId.
+  const notifyDriversRideExpired = (rideId: string) => {
+    if (!rideId) return;
+    for (const [driverId] of connectedDrivers) {
+      io.to(`driver:${driverId}`).emit("ride:expired", { rideId });
+    }
   };
 
   // ─── dispatchToNextDriver ──────────────────────────────────────────────
@@ -2559,13 +2577,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 payment_status: paymentStatusUpdate,
               })
               .eq("id", data.rideId);
-            io.emit("ride:update", {
-              rideId: data.rideId,
-              status: "cancelled_no_drivers",
-              cancellationFee: 0,
-              chargedVia: "none",
-              cancelledBy: "driver",
-            });
+            // Rider already notified via their room above. Only clear driver cards
+            // (no payload) instead of broadcasting the update to every client.
+            notifyDriversRideExpired(data.rideId);
 
             // If this was a scheduled booking, release it back to the pool so
             // other drivers can pick it up on the next activation cycle.
@@ -3703,8 +3717,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
             if (resolvedDriverId) {
               io.to(`driver:${resolvedDriverId}`).emit("ride:update", update);
             }
-            // Also broadcast so any driver still showing the incoming card clears it
-            socket.broadcast.emit("ride:update", update);
+            // Clear the incoming card on any OTHER driver still showing it — via a
+            // minimal ride:expired (no payload). Never broadcast the full update.
+            notifyDriversRideExpired(update.rideId);
             console.log(
               `📢 Forwarding cancellation of ride ${update.rideId} to driver(s)`,
             );
@@ -3734,12 +3749,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 );
               }
               if (update.status === "cancelled") {
-                socket.broadcast.emit("ride:update", update);
+                notifyDriversRideExpired(update.rideId);
               }
             }
           } catch (_) {
-            // Last resort: broadcast to all (only hits cancelled/completed which are low frequency)
-            io.emit("ride:update", update);
+            // Last resort: clear driver cards only (no payload). Do NOT broadcast
+            // the full update to every client — that leaks ride data to other users.
+            notifyDriversRideExpired(update.rideId);
           }
         }
 

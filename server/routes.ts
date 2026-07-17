@@ -41,6 +41,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   const io = setupSocketIO(httpServer);
 
+  // Broadcast a scheduled-booking change WITHOUT leaking rider PII (name, phone,
+  // addresses, fares, PIN) to every connected client. Consumers only need the
+  // change type to trigger a re-fetch from their own access-scoped endpoint, so
+  // we send just a minimal signal instead of the full booking row.
+  const emitLaterBookingSignal = (type: string, booking: any) => {
+    try {
+      io.emit("later-booking:update", {
+        type,
+        bookingId: booking?.id ?? null,
+        sourceTable: booking?.source_table ?? null,
+        status: booking?.status ?? null,
+      });
+    } catch (_) {
+      /* non-critical */
+    }
+  };
+
   const withResolvedUserRole = async (user: any) => {
     if (!user?.id) return user;
     if (String(user.role || "").toLowerCase() === "both") return user;
@@ -2666,7 +2683,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Always refresh marketplace UIs first — even if nobody has a push token yet.
       try {
-        io.emit("later-booking:update", { type: "created", booking });
+        emitLaterBookingSignal("created", booking);
         io.emit("later-booking:marketplace", { type: "created", booking });
       } catch (socketErr) {
         console.warn(
@@ -2782,10 +2799,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       rideId: bookingForClient?.id,
     };
     try {
-      io.emit("later-booking:update", payload);
-      // Broadcast + room emit so the assigned driver still gets it if they connected
+      // Minimal broadcast to refresh marketplace/upcoming lists (no PII).
+      emitLaterBookingSignal("assigned", bookingForClient);
+      // The full booking goes ONLY to the assigned driver's own rooms — never
+      // broadcast to every client. Emit to both id forms in case they joined
       // with userId or tableId, or briefly missed the room join.
-      io.emit("later-booking:assigned", payload);
       if (identity.tableId)
         io.to(`driver:${identity.tableId}`).emit(
           "later-booking:assigned",
@@ -4247,12 +4265,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
 
-        io.emit("later-booking:update", {
-          type: "activated",
-          booking: stripPinForDrivers({
-            ...enriched,
-            live_ride_id: liveRideId,
-          }),
+        emitLaterBookingSignal("activated", {
+          ...enriched,
+          live_ride_id: liveRideId,
         });
 
         console.log(
@@ -4389,10 +4404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const [enrichedBooking] = (
           await attachRiderDetails([normalizedBooking])
         ).map(stripPinForDrivers);
-        io.emit("later-booking:update", {
-          type: "accepted",
-          booking: enrichedBooking,
-        });
+        emitLaterBookingSignal("accepted", enrichedBooking);
         res.json({ booking: enrichedBooking });
       } catch (error: any) {
         res
@@ -4645,14 +4657,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Respond first so the declining driver UI feels instant, then notify others.
         res.json({ booking: releasedBooking });
 
-        io.emit("later-booking:update", {
-          type: "declined",
-          booking: releasedBooking,
-        });
-        io.emit("later-booking:update", {
-          type: "created",
-          booking: releasedBooking,
-        });
+        emitLaterBookingSignal("declined", releasedBooking);
+        emitLaterBookingSignal("created", releasedBooking);
         notifyDriversAboutMarketplaceBooking(releasedBooking)
           .then((sent) => {
             if (sent) announcedMarketplaceBookingKeys.add(marketplaceKey);
@@ -5138,10 +5144,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           data,
           sourceTable,
         );
-        io.emit("later-booking:update", {
-          type: cancelledBy === "driver" ? "released" : "cancelled",
-          booking: normalizedUpdatedBooking,
-        });
+        emitLaterBookingSignal(
+          cancelledBy === "driver" ? "released" : "cancelled",
+          normalizedUpdatedBooking,
+        );
         res.json({
           booking: normalizedUpdatedBooking,
           withinThreeHours,
@@ -5632,12 +5638,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             await scheduledRideHooks.dispatchScheduledRide?.(rideData);
           }
 
-          io.emit("later-booking:update", {
-            type: "activated",
-            booking: {
-              ...stripPinForDrivers(booking),
-              live_ride_id: liveRideId,
-            },
+          emitLaterBookingSignal("activated", {
+            ...booking,
+            live_ride_id: liveRideId,
           });
         } catch (activationErr) {
           console.error(
