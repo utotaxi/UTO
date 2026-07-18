@@ -142,9 +142,11 @@ export const api = {
 
     async sendResetOtp(
       email: string,
+      redirectTo?: string,
     ): Promise<{ success: boolean; message: string }> {
       const res = await apiRequest("POST", "/api/auth/send-reset-otp", {
         email,
+        redirectTo,
       });
       return await res.json();
     },
@@ -156,6 +158,15 @@ export const api = {
       const res = await apiRequest("POST", "/api/auth/verify-reset-otp", {
         email,
         code,
+      });
+      return await res.json();
+    },
+
+    async confirmRecovery(
+      accessToken: string,
+    ): Promise<{ success: boolean; email?: string; message: string }> {
+      const res = await apiRequest("POST", "/api/auth/confirm-recovery", {
+        accessToken,
       });
       return await res.json();
     },

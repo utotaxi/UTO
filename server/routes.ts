@@ -32,10 +32,19 @@ import {
 import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 import { supabase } from "./db";
 import { getDiscountedFare } from "../shared/fare";
-import { sendOTPEmail } from "./mailer";
+import {
+  ensureAuthUserForEmail,
+  sendSupabasePasswordResetEmail,
+  updateSupabaseAuthPassword,
+  verifySupabaseRecoveryAccessToken,
+  verifySupabaseRecoveryOtp,
+} from "./supabaseAuthMail";
 
-const resetCodes = new Map<string, { code: string; expiresAt: number }>();
-const verifiedEmails = new Map<string, number>();
+/** email → { expiresAt, authUserId? } after Supabase recovery verification */
+const verifiedEmails = new Map<
+  string,
+  { expiresAt: number; authUserId?: string }
+>();
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
@@ -510,34 +519,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/send-reset-otp", async (req: Request, res: Response) => {
     try {
-      const { email } = req.body;
-      if (!email) {
+      const rawEmail = String(req.body?.email || "").trim();
+      if (!rawEmail) {
         return res.status(400).json({ error: "Email is required" });
       }
 
-      const user = await storage.getUserByEmail(email);
+      const emailKey = rawEmail.toLowerCase();
+
+      // Case-insensitive lookup — accounts may have been stored with mixed case.
+      let user = await storage.getUserByEmail(rawEmail);
+      if (!user && rawEmail !== emailKey) {
+        user = await storage.getUserByEmail(emailKey);
+      }
+      if (!user) {
+        const { data: byIlike } = await supabase
+          .from("users")
+          .select("*")
+          .ilike("email", emailKey)
+          .maybeSingle();
+        if (byIlike) {
+          user = {
+            id: byIlike.id,
+            email: byIlike.email,
+            fullName: byIlike.full_name,
+          } as any;
+        }
+      }
       if (!user) {
         return res
           .status(404)
           .json({ error: "No account found with this email" });
       }
 
-      // Generate 6-digit OTP
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+      // Password-reset emails are sent by Supabase Auth (dashboard SMTP / mailer).
+      await ensureAuthUserForEmail(emailKey, user.fullName);
 
-      resetCodes.set(email.toLowerCase().trim(), { code, expiresAt });
+      const redirectTo =
+        String(req.body?.redirectTo || "").trim() ||
+        "uto://auth/reset-password";
 
-      // Send the email (mocked or real)
-      await sendOTPEmail(email, code);
+      const sendResult = await sendSupabasePasswordResetEmail(
+        emailKey,
+        redirectTo,
+      );
+      if (!sendResult.success) {
+        console.error(
+          `❌ Password-reset email failed for ${emailKey}:`,
+          sendResult.error,
+        );
+        return res.status(503).json({
+          error:
+            sendResult.error ||
+            "Failed to send verification email. Please try again shortly.",
+          success: false,
+        });
+      }
 
       res.json({
         success: true,
-        message: `Verification code sent to ${email}`,
+        message: `Verification email sent to ${emailKey}`,
       });
     } catch (error) {
       console.error("Send OTP error:", error);
-      res.status(500).json({ error: "Failed to send verification code" });
+      res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to send verification code",
+      });
     }
   });
 
@@ -545,32 +594,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/auth/verify-reset-otp",
     async (req: Request, res: Response) => {
       try {
-        const { email, code } = req.body;
+        const email = String(req.body?.email || "")
+          .trim()
+          .toLowerCase();
+        const code = String(req.body?.code || "").trim();
         if (!email || !code) {
           return res.status(400).json({ error: "Email and code are required" });
         }
 
-        const key = email.toLowerCase().trim();
-        const stored = resetCodes.get(key);
-
-        if (!stored) {
-          return res
-            .status(400)
-            .json({ error: "No verification code requested for this email" });
+        const result = await verifySupabaseRecoveryOtp(email, code);
+        if (!result.success) {
+          return res.status(400).json({
+            error: result.error || "Invalid or expired verification code",
+          });
         }
 
-        if (Date.now() > stored.expiresAt) {
-          resetCodes.delete(key);
-          return res.status(400).json({ error: "Verification code expired" });
-        }
-
-        if (stored.code !== String(code).trim()) {
-          return res.status(400).json({ error: "Invalid verification code" });
-        }
-
-        // Code matches! Remove it and mark email as verified for the next 10 minutes
-        resetCodes.delete(key);
-        verifiedEmails.set(key, Date.now() + 10 * 60 * 1000);
+        verifiedEmails.set(email, {
+          expiresAt: Date.now() + 10 * 60 * 1000,
+          authUserId: result.authUserId,
+        });
 
         res.json({ success: true, message: "Verification successful" });
       } catch (error) {
@@ -580,9 +622,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
   );
 
+  // Magic-link recovery: client opens uto://… with access_token, then confirms here.
+  app.post(
+    "/api/auth/confirm-recovery",
+    async (req: Request, res: Response) => {
+      try {
+        const accessToken = String(req.body?.accessToken || "").trim();
+        if (!accessToken) {
+          return res.status(400).json({ error: "accessToken is required" });
+        }
+
+        const result = await verifySupabaseRecoveryAccessToken(accessToken);
+        if (!result.success) {
+          return res.status(400).json({
+            error: result.error || "Invalid or expired recovery link",
+          });
+        }
+
+        verifiedEmails.set(result.email, {
+          expiresAt: Date.now() + 10 * 60 * 1000,
+          authUserId: result.authUserId,
+        });
+
+        res.json({
+          success: true,
+          email: result.email,
+          message: "Recovery link verified",
+        });
+      } catch (error) {
+        console.error("Confirm recovery error:", error);
+        res.status(500).json({ error: "Failed to confirm recovery link" });
+      }
+    },
+  );
+
   app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
     try {
-      const { email, newPassword } = req.body;
+      const email = String(req.body?.email || "")
+        .trim()
+        .toLowerCase();
+      const { newPassword } = req.body;
 
       if (!email || !newPassword) {
         return res
@@ -590,26 +669,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ error: "Email and new password are required" });
       }
 
-      const key = email.toLowerCase().trim();
-      const verifiedExpiry = verifiedEmails.get(key);
-
-      if (!verifiedExpiry || Date.now() > verifiedExpiry) {
+      if (String(newPassword).length < 6) {
         return res
-          .status(403)
-          .json({
-            error: "Email verification is required before resetting password",
-          });
+          .status(400)
+          .json({ error: "Password must be at least 6 characters" });
       }
 
-      const user = await storage.getUserByEmail(email);
+      const verified = verifiedEmails.get(email);
+
+      if (!verified || Date.now() > verified.expiresAt) {
+        return res.status(403).json({
+          error: "Email verification is required before resetting password",
+        });
+      }
+
+      let user = await storage.getUserByEmail(email);
+      if (!user) {
+        const { data: byIlike } = await supabase
+          .from("users")
+          .select("id, email")
+          .ilike("email", email)
+          .maybeSingle();
+        if (byIlike) {
+          user = { id: byIlike.id, email: byIlike.email } as any;
+        }
+      }
       if (!user) {
         return res
           .status(404)
           .json({ error: "No account found with this email" });
       }
 
+      // Keep Auth + app password in sync (login still uses public.users.password).
+      let authUserId = verified.authUserId;
+      if (!authUserId) {
+        const authUser = await ensureAuthUserForEmail(email, user.fullName);
+        authUserId = authUser.id;
+      }
+      const authUpdate = await updateSupabaseAuthPassword(
+        authUserId,
+        String(newPassword),
+      );
+      if (!authUpdate.success) {
+        console.error(
+          "❌ Failed to update Supabase Auth password:",
+          authUpdate.error,
+        );
+        return res.status(500).json({
+          error: authUpdate.error || "Failed to update Auth password",
+        });
+      }
+
       await storage.updateUser(user.id, { password: newPassword });
-      verifiedEmails.delete(key); // Cleanup verification token after success
+      verifiedEmails.delete(email);
 
       res.json({ success: true });
     } catch (error) {

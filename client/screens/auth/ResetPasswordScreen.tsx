@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -12,12 +12,20 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as Linking from "expo-linking";
 
 import { ThemedText } from "@/components/ThemedText";
 import { UTOColors, Spacing, BorderRadius } from "@/constants/theme";
 import { api } from "@/lib/api";
 
 type ResetStep = "email" | "otp" | "password";
+
+function extractParam(url: string, key: string): string | null {
+  const hash = url.split("#")[1] || "";
+  const query = url.split("?")[1]?.split("#")[0] || "";
+  const params = new URLSearchParams(hash || query);
+  return params.get(key);
+}
 
 export default function ResetPasswordScreen({ navigation, route }: any) {
   const insets = useSafeAreaInsets();
@@ -32,6 +40,40 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
+
+  const handleRecoveryLink = useCallback(async (url: string) => {
+    const accessToken = extractParam(url, "access_token");
+    const type = extractParam(url, "type");
+    if (!accessToken) return;
+    if (type && type !== "recovery") return;
+
+    setIsLoading(true);
+    setError("");
+    try {
+      const res = await api.auth.confirmRecovery(accessToken);
+      if (res.success) {
+        if (res.email) setEmail(res.email);
+        setStep("password");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        setError(res.message || "Invalid or expired recovery link");
+      }
+    } catch (err: any) {
+      setError(err.message || "Invalid or expired recovery link");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const sub = Linking.addEventListener("url", ({ url }) => {
+      void handleRecoveryLink(url);
+    });
+    Linking.getInitialURL().then((url) => {
+      if (url) void handleRecoveryLink(url);
+    });
+    return () => sub.remove();
+  }, [handleRecoveryLink]);
 
   const handleSendOtp = async () => {
     if (!email) {
@@ -49,11 +91,16 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
     setError("");
 
     try {
-      const res = await api.auth.sendResetOtp(email);
+      const normalizedEmail = email.trim().toLowerCase();
+      setEmail(normalizedEmail);
+      const redirectTo = Linking.createURL("auth/reset-password");
+      const res = await api.auth.sendResetOtp(normalizedEmail, redirectTo);
       if (res.success) {
         setStep("otp");
       } else {
-        setError(res.message || "Failed to send verification code");
+        setError(
+          (res as any).error || res.message || "Failed to send verification code",
+        );
       }
     } catch (err: any) {
       setError(err.message || "Failed to send verification code");
@@ -150,9 +197,9 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
   const getHeaderSubtitle = () => {
     switch (step) {
       case "email":
-        return "Enter your email address to receive a verification code.";
+        return "Enter your email address. We'll send a verification code (or link) via Supabase Auth.";
       case "otp":
-        return `Enter the 6-digit code sent to ${email}`;
+        return `Enter the 6-digit code from the email sent to ${email}. If you opened the reset link instead, you can skip ahead automatically.`;
       case "password":
         return "Choose a strong password to secure your account.";
     }
