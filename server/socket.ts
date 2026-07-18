@@ -397,6 +397,11 @@ class MinHeap {
 const RADIUS_MILES = DEFAULT_DRIVER_RADIUS_MILES; // 5-mile radius for driver eligibility
 const DISPATCH_TIMEOUT_MS = 60000; // 60-second timeout when driver socket is connected
 const DISPATCH_TIMEOUT_BACKGROUND_MS = 120000; // 120-second timeout when driver is online but app is backgrounded
+/** How long to keep retrying when no eligible driver is found yet. */
+const NO_DRIVER_RETRY_MS = 90_000;
+const NO_DRIVER_RETRY_INTERVAL_MS = 10_000;
+/** Online drivers with a recent heartbeat but no GPS yet may still be offered. */
+const RECENT_DRIVER_SEEN_MS = 15 * 60 * 1000;
 const ARRIVED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes waiting for rider
 
 const normalizeVehicleType = (value: any): string => {
@@ -1199,17 +1204,60 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     // Build the dispatch state — populates a min-heap of eligible drivers
     // within RADIUS_MILES sorted by distance from pickup.
-    const newDispatchState = await buildDispatchState(
-      rideData,
-      riderSocketId,
-      declinedBy,
-    );
+    const startDispatchOrRetry = async (attempt: number = 0) => {
+      // Ride may have been cancelled by the rider while we were waiting.
+      if (!(await assertRideStillOfferable(rideData.id))) {
+        console.log(
+          `🛑 Stopping no-driver retries for ride ${rideData.id} — no longer offerable`,
+        );
+        return;
+      }
 
-    if (!newDispatchState) {
-      // No eligible drivers within radius
-      console.log(`🚫 No drivers available within ${RADIUS_MILES} miles — notifying rider`);
+      const declined =
+        activeRides.get(rideData.id)?.declinedBy || declinedBy;
+      const newDispatchState = await buildDispatchState(
+        rideData,
+        riderSocketId,
+        declined,
+      );
+
+      if (newDispatchState) {
+        dispatchQueues.set(rideData.id, newDispatchState);
+        console.log(
+          `🚗 Starting sequential dispatch for ride ${rideData.id} — ${newDispatchState.heap.size} eligible drivers within ${RADIUS_MILES} mi radius (attempt ${attempt + 1})`,
+        );
+        dispatchToNextDriver(rideData.id);
+        return;
+      }
+
+      const elapsed = attempt * NO_DRIVER_RETRY_INTERVAL_MS;
+      if (elapsed < NO_DRIVER_RETRY_MS) {
+        console.log(
+          `⏳ No eligible drivers yet for ride ${rideData.id} — retrying in ${NO_DRIVER_RETRY_INTERVAL_MS / 1000}s (attempt ${attempt + 1})`,
+        );
+        setTimeout(() => {
+          startDispatchOrRetry(attempt + 1).catch((err) =>
+            console.error(
+              `❌ Dispatch retry failed for ride ${rideData.id}:`,
+              err,
+            ),
+          );
+        }, NO_DRIVER_RETRY_INTERVAL_MS);
+        return;
+      }
+
+      // Exhausted retries — notify rider and cancel.
+      console.log(
+        `🚫 No drivers available within ${RADIUS_MILES} miles for ride ${rideData.id} after ${NO_DRIVER_RETRY_MS / 1000}s — notifying rider`,
+      );
       if (sourceSocketId) {
         io.to(sourceSocketId).emit("ride:update", {
+          rideId: rideData.id,
+          status: "cancelled_no_drivers",
+        });
+      }
+      if (rideData.riderId) {
+        io.to(`rider:${rideData.riderId}`).emit("ride:update", {
           rideId: rideData.id,
           status: "cancelled_no_drivers",
         });
@@ -1224,22 +1272,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
               cancelled_at: new Date().toISOString(),
             })
             .eq("id", rideData.id);
-          console.log(`✅ Ride ${rideData.id} marked cancelled in DB (no drivers within ${RADIUS_MILES} mi)`);
+          console.log(
+            `✅ Ride ${rideData.id} marked cancelled in DB (no drivers within ${RADIUS_MILES} mi)`,
+          );
         } catch (dbErr) {
-          console.error(`❌ Failed to cancel ride ${rideData.id} in DB:`, dbErr);
+          console.error(
+            `❌ Failed to cancel ride ${rideData.id} in DB:`,
+            dbErr,
+          );
         }
 
         await releaseScheduledBookingForRetry(rideData.id);
       }
-      return;
-    }
+    };
 
-    // Store dispatch state and start sequential offer to nearest driver
-    dispatchQueues.set(rideData.id, newDispatchState);
-    console.log(
-      `🚗 Starting sequential dispatch for ride ${rideData.id} — ${newDispatchState.heap.size} eligible drivers within ${RADIUS_MILES} mi radius`,
-    );
-    dispatchToNextDriver(rideData.id);
+    await startDispatchOrRetry(0);
   };
 
   const getCompatibleVehicleTypes = (rideType: string): string[] => {
@@ -1309,13 +1356,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
     // session marks the driver busy on reconnect and nothing resets it), which
     // would silently exclude an otherwise-free online driver from every future
     // dispatch. Requirement: online + within radius must always be offerable.
+    const recentSeenCutoff = new Date(
+      Date.now() - RECENT_DRIVER_SEEN_MS,
+    ).toISOString();
     const [driversResult, activeRideResult] = await Promise.all([
       supabase
         .from("drivers")
         .select(
-          "id, current_latitude, current_longitude, is_available, vehicle_type",
+          "id, current_latitude, current_longitude, is_available, vehicle_type, last_seen_at, is_online",
         )
-        .eq("is_online", true),
+        .or(`is_online.eq.true,last_seen_at.gte."${recentSeenCutoff}"`),
       supabase
         .from("rides")
         .select("driver_id, accepted_at, requested_at, created_at")
@@ -1451,6 +1501,28 @@ export function setupSocketIO(httpServer: HTTPServer) {
           driverSocketId,
         );
         if (dist == null) {
+          // GPS can lag a few seconds after going online. Keep recently-seen /
+          // socket-connected drivers eligible at the end of the queue so rides
+          // still match instead of failing with "no drivers".
+          const lastSeenMs = driver.last_seen_at
+            ? new Date(driver.last_seen_at).getTime()
+            : 0;
+          const recentlySeen =
+            Number.isFinite(lastSeenMs) &&
+            lastSeenMs > 0 &&
+            Date.now() - lastSeenMs <= RECENT_DRIVER_SEEN_MS;
+          if (driverSocketId || recentlySeen || driver.is_online) {
+            console.log(
+              `   📍 Driver ${driver.id}: no GPS yet — queueing as fallback candidate`,
+            );
+            heap.push({
+              driverId: driver.id,
+              distance: RADIUS_MILES,
+              socketId: driverSocketId || "",
+            });
+            addedDriverIds.add(driver.id);
+            continue;
+          }
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — no usable location for 5-mile check`,
           );
@@ -1499,11 +1571,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
           );
           continue;
         }
+        // Socket-connected drivers are treated as online even if the DB flag
+        // briefly lags behind the live connection.
         if (!driverRow.is_online) {
           console.log(
-            `   ⏭️ Skipping socket driver ${driverId} — marked offline`,
+            `   ℹ️ Socket driver ${driverId} DB is_online=false — still matching via live socket`,
           );
-          continue;
         }
         rowLat = driverRow.current_latitude;
         rowLng = driverRow.current_longitude;
@@ -1530,8 +1603,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
       );
       if (dist == null) {
         console.log(
-          `   ⏭️ Skipping socket driver ${driverId} — no usable location for 5-mile check`,
+          `   📍 Socket driver ${driverId}: no GPS yet — queueing as fallback candidate`,
         );
+        heap.push({ driverId, distance: RADIUS_MILES, socketId });
+        addedDriverIds.add(driverId);
         continue;
       }
 

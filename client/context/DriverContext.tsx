@@ -325,6 +325,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const isOnlineRef = useRef(isOnline);
   const activeRideRequestRef = useRef(activeRideRequest);
   const activeRideRef = useRef(activeRide);
+  const rideStateRef = useRef(rideState);
 
   useEffect(() => {
     isOnlineRef.current = isOnline;
@@ -337,6 +338,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     activeRideRef.current = activeRide;
   }, [activeRide]);
+
+  useEffect(() => {
+    rideStateRef.current = rideState;
+  }, [rideState]);
 
   useEffect(() => {
     if (user) {
@@ -567,7 +572,25 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!isOnlineRef.current || activeRideRequestRef.current) return;
+    // Only ignore offers when the driver is offline or already working a live
+    // accepted trip. A leftover/stale activeRideRequest (or a previous incoming
+    // card) must NEVER silently drop fresh server offers — that was blocking
+    // matching even when the server had dispatched the ride correctly.
+    if (!isOnlineRef.current) return;
+    const busyWorkingTrip = ["accepted", "at_pickup", "in_progress"].includes(
+      rideStateRef.current,
+    );
+    if (
+      busyWorkingTrip &&
+      activeRideRef.current &&
+      activeRideRef.current.id !== mappedRequest.id
+    ) {
+      console.warn(
+        "⚠️ Ignoring new ride offer — driver is busy on live trip",
+        activeRideRef.current.id,
+      );
+      return;
+    }
 
     setActiveRideRequest(mappedRequest);
     setRideState("incoming");
@@ -605,8 +628,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const fetchPendingDispatch = useCallback(async () => {
     const driverId = driverProfile?.id || user?.id;
-    if (!driverId || !isOnlineRef.current || activeRideRequestRef.current)
-      return;
+    if (!driverId || !isOnlineRef.current) return;
+    const busyWorkingTrip = ["accepted", "at_pickup", "in_progress"].includes(
+      rideStateRef.current,
+    );
+    if (busyWorkingTrip && activeRideRef.current) return;
 
     try {
       const res = await fetch(
