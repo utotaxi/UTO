@@ -121,15 +121,33 @@ const STALE_PENDING_RIDE_MS = 45 * 60 * 1000;
  */
 async function assertRideStillOfferable(rideId: string): Promise<boolean> {
   try {
+    // rides table has requested_at (not created_at). Selecting a missing column
+    // makes PostgREST error and previously blocked ALL dispatch.
     const { data: ride, error } = await supabase
       .from("rides")
-      .select("id, status, requested_at, created_at, cancelled_at")
+      .select("id, status, requested_at, cancelled_at")
       .eq("id", rideId)
       .maybeSingle();
+
+    // #region agent log
+    agentDebugLog(
+      "F",
+      "server/socket.ts:assertRideStillOfferable",
+      "Offerability check result",
+      {
+        rideId: String(rideId || "").slice(0, 20),
+        hasError: !!error,
+        errorCode: error?.code || null,
+        errorMessage: error?.message ? String(error.message).slice(0, 120) : null,
+        status: ride?.status || null,
+      },
+    );
+    // #endregion
 
     if (error || !ride) {
       console.warn(
         `⚠️ Offerability check: ride ${rideId} not found — blocking dispatch`,
+        error?.message || "",
       );
       return false;
     }
@@ -142,9 +160,7 @@ async function assertRideStillOfferable(rideId: string): Promise<boolean> {
       return false;
     }
 
-    const createdMs = new Date(
-      ride.requested_at || ride.created_at || 0,
-    ).getTime();
+    const createdMs = new Date(ride.requested_at || 0).getTime();
     if (
       Number.isFinite(createdMs) &&
       createdMs > 0 &&
@@ -158,7 +174,6 @@ async function assertRideStillOfferable(rideId: string): Promise<boolean> {
         .update({
           status: "cancelled",
           cancelled_at: new Date().toISOString(),
-          cancelled_by: "system",
           cancellation_reason: "stale_pending_auto_cancelled",
         })
         .eq("id", rideId)
@@ -1428,7 +1443,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         .or(`is_online.eq.true,last_seen_at.gte."${recentSeenCutoff}"`),
       supabase
         .from("rides")
-        .select("driver_id, accepted_at, requested_at, created_at")
+        .select("driver_id, accepted_at, requested_at")
         .in("status", [
           "accepted",
           "arriving",
@@ -1448,7 +1463,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
       (activeRideResult.data || [])
         .filter((ride: any) => {
           const ts = new Date(
-            ride.accepted_at || ride.requested_at || ride.created_at || 0,
+            ride.accepted_at || ride.requested_at || 0,
           ).getTime();
           // No usable timestamp → treat as stale/abandoned, not busy.
           if (!Number.isFinite(ts) || ts <= 0) return false;
@@ -2647,12 +2662,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
             try {
               const { data: ageRow } = await supabase
                 .from("rides")
-                .select("requested_at, created_at")
+                .select("requested_at")
                 .eq("id", data.rideId)
                 .maybeSingle();
-              const createdMs = new Date(
-                ageRow?.requested_at || ageRow?.created_at || 0,
-              ).getTime();
+              const createdMs = new Date(ageRow?.requested_at || 0).getTime();
               if (
                 Number.isFinite(createdMs) &&
                 createdMs > 0 &&
