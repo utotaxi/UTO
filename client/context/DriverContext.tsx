@@ -525,6 +525,29 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const handleRidePayload = useCallback((ride: any) => {
     const mappedRequest = mapRidePayload(ride);
+    // #region agent log
+    fetch("http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "853741",
+      },
+      body: JSON.stringify({
+        sessionId: "853741",
+        runId: "pre-fix",
+        hypothesisId: "E",
+        location: "DriverContext.tsx:handleRidePayload",
+        message: "Driver received ride payload",
+        data: {
+          rideId: ride?.id ? String(ride.id).slice(0, 12) : null,
+          isOnline: !!isOnlineRef.current,
+          rideState: rideStateRef.current,
+          hasActiveRide: !!activeRideRef.current,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     if (ride.scheduledPreAccepted) {
       if (
@@ -576,7 +599,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     // accepted trip. A leftover/stale activeRideRequest (or a previous incoming
     // card) must NEVER silently drop fresh server offers — that was blocking
     // matching even when the server had dispatched the ride correctly.
-    if (!isOnlineRef.current) return;
+    if (!isOnlineRef.current) {
+      // #region agent log
+      fetch("http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "853741",
+        },
+        body: JSON.stringify({
+          sessionId: "853741",
+          runId: "pre-fix",
+          hypothesisId: "E",
+          location: "DriverContext.tsx:handleRidePayload",
+          message: "Dropped offer — driver offline locally",
+          data: { rideId: ride?.id ? String(ride.id).slice(0, 12) : null },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      return;
+    }
     const busyWorkingTrip = ["accepted", "at_pickup", "in_progress"].includes(
       rideStateRef.current,
     );
@@ -589,6 +632,27 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         "⚠️ Ignoring new ride offer — driver is busy on live trip",
         activeRideRef.current.id,
       );
+      // #region agent log
+      fetch("http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "853741",
+        },
+        body: JSON.stringify({
+          sessionId: "853741",
+          runId: "pre-fix",
+          hypothesisId: "E",
+          location: "DriverContext.tsx:handleRidePayload",
+          message: "Dropped offer — busy on live trip",
+          data: {
+            rideId: ride?.id ? String(ride.id).slice(0, 12) : null,
+            activeRideId: String(activeRideRef.current.id).slice(0, 12),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       return;
     }
 

@@ -35,12 +35,12 @@ export function getSocket(): Socket {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Debug-Session-Id": "25c155",
+        "X-Debug-Session-Id": "853741",
       },
       body: JSON.stringify({
-        sessionId: "25c155",
-        runId: "post-fix",
-        hypothesisId: "D",
+        sessionId: "853741",
+        runId: "pre-fix",
+        hypothesisId: "E",
         location: "client/lib/socket.ts:getSocket",
         message: "Socket target selected",
         data: { serverUrl },

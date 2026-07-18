@@ -1,6 +1,8 @@
 //server/socket.ts
 
 import { Server as HTTPServer } from "http";
+import { appendFileSync } from "fs";
+import { join } from "path";
 import { Server, Socket } from "socket.io"; // ✅ CORRECT - Use socket.io for server
 import { supabase } from "./db";
 import { EventEmitter } from "events";
@@ -24,6 +26,48 @@ import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 
 export const serverRideEmitter = new EventEmitter();
 export let io: Server;
+
+// #region agent log
+const DEBUG_MATCH_LOGS: Array<Record<string, unknown>> = [];
+export function getDebugMatchLogs() {
+  return DEBUG_MATCH_LOGS.slice(-80);
+}
+function agentDebugLog(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown> = {},
+  runId: string = "pre-fix",
+) {
+  const entry = {
+    sessionId: "853741",
+    runId,
+    hypothesisId,
+    location,
+    message,
+    data,
+    timestamp: Date.now(),
+  };
+  DEBUG_MATCH_LOGS.push(entry);
+  if (DEBUG_MATCH_LOGS.length > 100) DEBUG_MATCH_LOGS.shift();
+  fetch("http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "853741",
+    },
+    body: JSON.stringify(entry),
+  }).catch(() => {});
+  try {
+    appendFileSync(
+      join(process.cwd(), "debug-853741.log"),
+      `${JSON.stringify(entry)}\n`,
+    );
+  } catch {
+    /* ignore local file write failures on remote hosts */
+  }
+}
+// #endregion
 
 // ─── Scheduled booking → live ride bridge ─────────────────────────────────
 // Populated inside setupSocketIO (needs access to the in-memory dispatch state).
@@ -874,6 +918,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
     console.log(
       `📡 Dispatching ride ${rideId} to nearest driver ${entry.driverId} (${entry.distance.toFixed(2)} mi away)`,
     );
+    // #region agent log
+    const roomSockets =
+      io.sockets.adapter.rooms.get(`driver:${entry.driverId}`)?.size || 0;
+    agentDebugLog(
+      "E",
+      "server/socket.ts:dispatchToNextDriver",
+      "Emitting ride:new to driver",
+      {
+        rideId: String(rideId).slice(0, 12),
+        driverId: String(entry.driverId).slice(0, 12),
+        distanceMi: Math.round(entry.distance * 100) / 100,
+        mappedSocket: !!connectedDrivers.get(entry.driverId),
+        roomSocketCount: roomSockets,
+      },
+    );
+    // #endregion
     io.to(`driver:${entry.driverId}`).emit("ride:new", enrichedRide);
 
     // Always push as well — socket may be dead while the driver is still online
@@ -1416,12 +1476,40 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.warn(
         `⚠️ Ride ${rideData.id} has invalid pickup coords (${pickupLat}, ${pickupLng}) — cannot apply 5-mile matching`,
       );
+      // #region agent log
+      agentDebugLog(
+        "F",
+        "server/socket.ts:buildDispatchState",
+        "Invalid pickup coords — matching aborted",
+        {
+          rideId: String(rideData.id || "").slice(0, 12),
+          pickupLat,
+          pickupLng,
+        },
+      );
+      // #endregion
       return null;
     }
 
     console.log(
       `🧭 Matching ride ${rideData.id}: pickup=(${pickupLat.toFixed(5)}, ${pickupLng.toFixed(5)}), onlineDrivers=${onlineDrivers?.length || 0}, busy=${busyDriverIds.size}, vehicle=${requestedType}`,
     );
+    // #region agent log
+    agentDebugLog(
+      "A",
+      "server/socket.ts:buildDispatchState",
+      "Matching start",
+      {
+        rideId: String(rideData.id || "").slice(0, 12),
+        onlineCount: onlineDrivers?.length || 0,
+        busyCount: busyDriverIds.size,
+        connectedSockets: connectedDrivers.size,
+        vehicle: requestedType,
+        pickupLat,
+        pickupLng,
+      },
+    );
+    // #endregion
 
     const resolveDistanceMiles = async (
       driverId: string,
@@ -1473,6 +1561,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — already handling an active ride`,
           );
+          // #region agent log
+          agentDebugLog("C", "server/socket.ts:match-skip", "Skip busy", {
+            driverId: String(driver.id).slice(0, 12),
+            rideId: String(rideData.id || "").slice(0, 12),
+          });
+          // #endregion
           continue;
         }
         if (declinedBy.has(driver.id)) {
@@ -1491,6 +1585,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — vehicle "${driverVehicle}" not compatible with "${requestedType}"`,
           );
+          // #region agent log
+          agentDebugLog("D", "server/socket.ts:match-skip", "Skip vehicle", {
+            driverId: String(driver.id).slice(0, 12),
+            driverVehicle,
+            requestedType,
+          });
+          // #endregion
           continue;
         }
 
@@ -1526,6 +1627,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — no usable location for 5-mile check`,
           );
+          // #region agent log
+          agentDebugLog("B", "server/socket.ts:match-skip", "Skip no GPS", {
+            driverId: String(driver.id).slice(0, 12),
+            isOnline: !!driver.is_online,
+            hasSocket: !!driverSocketId,
+          });
+          // #endregion
           continue;
         }
 
@@ -1533,6 +1641,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — distance ${dist.toFixed(2)} mi exceeds 5-mile radius limit (${RADIUS_MILES} mi)`,
           );
+          // #region agent log
+          agentDebugLog("B", "server/socket.ts:match-skip", "Skip out of radius", {
+            driverId: String(driver.id).slice(0, 12),
+            distMi: Math.round(dist * 100) / 100,
+            radiusMiles: RADIUS_MILES,
+          });
+          // #endregion
           continue;
         }
 
@@ -1628,8 +1743,43 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.log(
         `🚫 No eligible drivers for ride ${rideData.id} after filters (online=${onlineDrivers?.length || 0}, radius=${RADIUS_MILES} mi)`,
       );
+      // #region agent log
+      agentDebugLog(
+        "A",
+        "server/socket.ts:buildDispatchState",
+        "No eligible drivers after filters",
+        {
+          rideId: String(rideData.id || "").slice(0, 12),
+          onlineCount: onlineDrivers?.length || 0,
+          busyCount: busyDriverIds.size,
+          connectedSockets: connectedDrivers.size,
+          radiusMiles: RADIUS_MILES,
+          vehicle: requestedType,
+          hasValidPickup,
+          pickupLat,
+          pickupLng,
+        },
+      );
+      // #endregion
       return null;
     }
+
+    // #region agent log
+    agentDebugLog(
+      "A",
+      "server/socket.ts:buildDispatchState",
+      "Eligible drivers built",
+      {
+        rideId: String(rideData.id || "").slice(0, 12),
+        heapSize: heap.size,
+        onlineCount: onlineDrivers?.length || 0,
+        busyCount: busyDriverIds.size,
+        connectedSockets: connectedDrivers.size,
+        vehicle: requestedType,
+        radiusMiles: RADIUS_MILES,
+      },
+    );
+    // #endregion
 
     return {
       heap,
@@ -1994,28 +2144,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
     console.log(`✅ Client connected: ${socket.id}`);
 
     socket.on("driver:connect", async (driverId: string) => {
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "25c155",
-          },
-          body: JSON.stringify({
-            sessionId: "25c155",
-            runId: "pre-fix",
-            hypothesisId: "C",
-            location: "server/socket.ts:driver-connect",
-            message: "Driver connect event",
-            data: { driverId, socketId: socket.id },
-            timestamp: Date.now(),
-          }),
-        },
-      ).catch(() => { });
-      // #endregion
       const actualDriverId = await resolveDriverTableId(driverId);
+      // #region agent log
+      agentDebugLog("E", "server/socket.ts:driver-connect", "Driver connect", {
+        rawDriverId: String(driverId || "").slice(0, 12),
+        resolvedDriverId: actualDriverId
+          ? String(actualDriverId).slice(0, 12)
+          : null,
+        socketId: socket.id,
+        connectedCount: connectedDrivers.size,
+      });
+      // #endregion
       if (!actualDriverId) {
         console.warn(
           `⚠️ driver:connect ignored — ${driverId} is not a valid drivers.id or drivers.user_id`,
@@ -2152,25 +2291,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
         console.error("Error setting driver offline:", error);
       }
       // #region agent log
-      fetch(
-        "http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "25c155",
-          },
-          body: JSON.stringify({
-            sessionId: "25c155",
-            runId: "post-fix",
-            hypothesisId: "C",
-            location: "server/socket.ts:go_offline",
-            message: "Driver explicitly offline",
-            data: { driverId: actualDriverId },
-            timestamp: Date.now(),
-          }),
-        },
-      ).catch(() => { });
+      agentDebugLog("E", "server/socket.ts:go_offline", "Driver offline", {
+        driverId: String(actualDriverId).slice(0, 12),
+        connectedCount: connectedDrivers.size,
+      });
       // #endregion
     });
 
@@ -2350,29 +2474,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     socket.on("ride:request", async (rideData: any) => {
       // #region agent log
-      fetch(
-        "http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "25c155",
-          },
-          body: JSON.stringify({
-            sessionId: "25c155",
-            runId: "pre-fix",
-            hypothesisId: "C",
-            location: "server/socket.ts:ride-request",
-            message: "Ride request event",
-            data: {
-              rideId: rideData?.id,
-              riderId: rideData?.riderId,
-              paymentMethod: rideData?.paymentMethod,
-            },
-            timestamp: Date.now(),
-          }),
-        },
-      ).catch(() => { });
+      agentDebugLog("F", "server/socket.ts:ride-request", "Ride request event", {
+        rideId: rideData?.id ? String(rideData.id).slice(0, 12) : null,
+        riderId: rideData?.riderId
+          ? String(rideData.riderId).slice(0, 12)
+          : null,
+        vehicleType: rideData?.rideType || rideData?.vehicleType || null,
+        connectedDrivers: connectedDrivers.size,
+      });
       // #endregion
       await handleRideRequest(rideData, socket.id);
     });
@@ -4746,25 +4855,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 );
               }
               // #region agent log
-              fetch(
-                "http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2",
+              agentDebugLog(
+                "E",
+                "server/socket.ts:disconnect",
+                "Driver socket dropped - kept online",
                 {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "X-Debug-Session-Id": "25c155",
-                  },
-                  body: JSON.stringify({
-                    sessionId: "25c155",
-                    runId: "post-fix",
-                    hypothesisId: "C",
-                    location: "server/socket.ts:disconnect",
-                    message: "Driver socket dropped - kept online",
-                    data: { driverId, liveSockets: connectedDrivers.size },
-                    timestamp: Date.now(),
-                  }),
+                  driverId: String(driverId).slice(0, 12),
+                  liveSockets: connectedDrivers.size,
                 },
-              ).catch(() => { });
+              );
               // #endregion
             }
           }, disconnectGraceMs);
