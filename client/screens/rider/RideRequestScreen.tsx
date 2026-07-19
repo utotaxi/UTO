@@ -1934,6 +1934,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
   const { activeRide, requestRide, calculateDynamicFare } = useRide();
   const { user } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  const screenHeight = Dimensions.get("window").height;
 
   // Schedule mode (passed from home screen when user taps Later)
   const initScheduleMode = route?.params?.scheduleMode === true;
@@ -2580,7 +2581,13 @@ export default function RideRequestScreen({ navigation, route }: any) {
         <View
           style={[
             styles.searchContainer,
-            { paddingTop: insets.top + Spacing.md },
+            {
+              paddingTop: insets.top + Spacing.md,
+              // Keep room for the ride sheet + request button when vias are open.
+              maxHeight: showVehicleSelector
+                ? Math.round(screenHeight * 0.36)
+                : Math.round(screenHeight * 0.55),
+            },
           ]}
         >
           <View style={styles.headerRow}>
@@ -2591,123 +2598,109 @@ export default function RideRequestScreen({ navigation, route }: any) {
               <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
             </Pressable>
             <ThemedText style={styles.headerTitle}>Plan your ride</ThemedText>
-            {/* Pickup Later Button */}
-            {/* <Pressable
-              style={[
-                styles.pickupLaterBtn,
-                isScheduleMode && styles.pickupLaterBtnActive,
-              ]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setShowChooseTimeModal(true);
-              }}
-            >
-              <MaterialIcons
-                name="event"
-                size={15}
-                color={isScheduleMode ? '#000000' : '#FFFFFF'}
-              />
-              <ThemedText style={[
-                styles.pickupLaterText,
-                isScheduleMode && { color: '#000000' },
-              ]}>
-                {isScheduleMode
-                  ? formatDisplayTime(scheduledDate)
-                  : 'Pickup later'}
-              </ThemedText>
-              <MaterialIcons
-                name="keyboard-arrow-down"
-                size={16}
-                color={isScheduleMode ? '#000000' : '#FFFFFF'}
-              />
-            </Pressable> */}
           </View>
 
-          <View style={styles.locationCard}>
-            <View style={{ zIndex: 300 }}>
-              <LocationInputAutocomplete
-                label="Pickup"
-                value={pickup}
-                placeholder="Enter pickup location"
-                onChangeText={setPickup}
-                onSelectLocation={handlePickupSelect}
-                type="pickup"
-              />
-            </View>
-
-            {vias.map((via, index) => (
-              <React.Fragment key={via.id}>
-                <View style={styles.routeConnector} />
-                <View style={{ zIndex: 250 - index, position: "relative" }}>
-                  <LocationInputAutocomplete
-                    label={`Via ${index + 1}`}
-                    value={via.address}
-                    placeholder="Add a stop"
-                    onChangeText={(text) => {
-                      setVias((prev) =>
-                        prev.map((v) =>
-                          v.id === via.id ? { ...v, address: text } : v,
-                        ),
-                      );
-                    }}
-                    onSelectLocation={(loc: any) => {
-                      setVias((prev) =>
-                        prev.map((v) =>
-                          v.id === via.id
-                            ? {
-                              ...v,
-                              address:
-                                loc.description || loc.mainText || v.address,
-                              latitude: loc.latitude,
-                              longitude: loc.longitude,
-                            }
-                            : v,
-                        ),
-                      );
-                    }}
-                    type="via"
-                    onRemove={() =>
-                      setVias((prev) => prev.filter((v) => v.id !== via.id))
-                    }
-                  />
-                </View>
-              </React.Fragment>
-            ))}
-
-            {vias.length < MAX_RIDE_VIAS ? (
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setVias((prev) => [
-                    ...prev,
-                    { id: `via_${Date.now()}_${prev.length}`, address: "" },
-                  ]);
-                }}
-                style={styles.addViaBtn}
-              >
-                <MaterialIcons
-                  name="add-location-alt"
-                  size={16}
-                  color="#F59E0B"
+          <ScrollView
+            style={styles.locationScroll}
+            contentContainerStyle={styles.locationScrollContent}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={vias.length > 0}
+          >
+            <View style={styles.locationCard}>
+              <View style={{ zIndex: 300 }}>
+                <LocationInputAutocomplete
+                  label="Pickup"
+                  value={pickup}
+                  placeholder="Enter pickup location"
+                  onChangeText={setPickup}
+                  onSelectLocation={handlePickupSelect}
+                  type="pickup"
                 />
-                <ThemedText style={styles.addViaText}>
-                  Add stop ({vias.length}/{MAX_RIDE_VIAS})
-                </ThemedText>
-              </Pressable>
-            ) : null}
+              </View>
 
-            <View style={styles.routeConnector} />
-            <View style={{ zIndex: 100 }}>
-              <LocationInputAutocomplete
-                label="Dropoff"
-                value={dropoff}
-                placeholder="Where to?"
-                onChangeText={setDropoff}
-                onSelectLocation={handleDropoffSelect}
-                type="dropoff"
-              />
+              {vias.map((via, index) => (
+                <React.Fragment key={via.id}>
+                  <View style={styles.routeConnector} />
+                  <View style={{ zIndex: 250 - index, position: "relative" }}>
+                    <LocationInputAutocomplete
+                      label={`Via ${index + 1}`}
+                      value={via.address}
+                      placeholder="Add a stop"
+                      onChangeText={(text) => {
+                        setVias((prev) =>
+                          prev.map((v) =>
+                            v.id === via.id ? { ...v, address: text } : v,
+                          ),
+                        );
+                      }}
+                      onSelectLocation={(loc: any) => {
+                        setVias((prev) =>
+                          prev.map((v) =>
+                            v.id === via.id
+                              ? {
+                                  ...v,
+                                  address:
+                                    loc.description ||
+                                    loc.mainText ||
+                                    v.address,
+                                  latitude: loc.latitude,
+                                  longitude: loc.longitude,
+                                }
+                              : v,
+                          ),
+                        );
+                      }}
+                      type="via"
+                      onRemove={() =>
+                        setVias((prev) => prev.filter((v) => v.id !== via.id))
+                      }
+                    />
+                  </View>
+                </React.Fragment>
+              ))}
+
+              {vias.length < MAX_RIDE_VIAS ? (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setVias((prev) => {
+                      if (prev.length >= MAX_RIDE_VIAS) return prev;
+                      return [
+                        ...prev,
+                        {
+                          id: `via_${Date.now()}_${prev.length}`,
+                          address: "",
+                        },
+                      ];
+                    });
+                  }}
+                  style={styles.addViaBtn}
+                >
+                  <MaterialIcons
+                    name="add-location-alt"
+                    size={16}
+                    color="#F59E0B"
+                  />
+                  <ThemedText style={styles.addViaText}>
+                    Add stop ({vias.length}/{MAX_RIDE_VIAS})
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+
+              <View style={styles.routeConnector} />
+              <View style={{ zIndex: 100 }}>
+                <LocationInputAutocomplete
+                  label="Dropoff"
+                  value={dropoff}
+                  placeholder="Where to?"
+                  onChangeText={setDropoff}
+                  onSelectLocation={handleDropoffSelect}
+                  type="dropoff"
+                />
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
 
         {showVehicleSelector && dropoff ? (
@@ -2726,9 +2719,9 @@ export default function RideRequestScreen({ navigation, route }: any) {
             <ThemedText style={styles.sheetTitle}>Choose a ride</ThemedText>
 
             <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: 8 }}
-              showsVerticalScrollIndicator={false}
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetScrollContent}
+              showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
             >
@@ -3663,17 +3656,18 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
+    paddingBottom: Spacing.sm,
     backgroundColor: "#000000",
     borderBottomLeftRadius: BorderRadius.xl,
     borderBottomRightRadius: BorderRadius.xl,
     zIndex: 2,
+    flexShrink: 1,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
   backButton: {
     width: 40,
@@ -3689,6 +3683,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     flex: 1,
     textAlign: "center",
+  },
+  locationScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  locationScrollContent: {
+    paddingBottom: 4,
+    flexGrow: 0,
   },
   // Match Reserve-the-trip: stacked inputs with connector lines, no extra left rail
   // (LocationInputAutocomplete already draws its own colored dots).
@@ -3766,17 +3768,25 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     flex: 1,
+    minHeight: 0,
     marginTop: 4,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
+    paddingTop: Spacing.sm,
     borderTopLeftRadius: BorderRadius.xl,
     borderTopRightRadius: BorderRadius.xl,
     backgroundColor: "#000000",
-    minHeight: 280,
+  },
+  sheetScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  sheetScrollContent: {
+    paddingBottom: 12,
+    flexGrow: 1,
   },
   sheetHandle: {
     alignItems: "center",
-    paddingBottom: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
   handle: {
     width: 36,
@@ -3845,6 +3855,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.xl,
     marginTop: Spacing.md,
+    flexShrink: 0,
   },
   requestButtonText: {
     color: "#000000",

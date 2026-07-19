@@ -162,7 +162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("ℹ️ Migration check skipped:", (e as Error).message);
   }
 
-  // ─── Ensure ride_vias table for ASAP intermediate stops (up to 5) ───
+  // ─── Ensure ride_vias table for ASAP intermediate stops (up to 2) ───
   try {
     const { error: viaTableErr } = await supabase.rpc("exec_sql", {
       sql: `

@@ -1,4 +1,4 @@
-/** Shared via-stop shape for ASAP rides (max 5). */
+/** Shared via-stop shape for ASAP rides (max 2). */
 export type RideVia = {
   address: string;
   latitude: number;
@@ -6,7 +6,7 @@ export type RideVia = {
   sequenceOrder?: number;
 };
 
-export const MAX_RIDE_VIAS = 5;
+export const MAX_RIDE_VIAS = 2;
 
 export function normalizeVias(raw: any): RideVia[] {
   if (!Array.isArray(raw)) return [];
