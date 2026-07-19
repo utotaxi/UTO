@@ -3198,10 +3198,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 "paid",
                 "succeeded",
               ]).has(paymentStatus);
+              // Scheduled/upcoming rides are paid at booking — never charge again
+              // when the driver finishes (including early / emergency complete).
+              const isScheduledLive = isScheduledLiveRideId(update.rideId);
               const isCardRide =
                 (completedRide?.payment_method || "card") === "card";
 
-              if (
+              if (isScheduledLive || alreadyCaptured) {
+                updateData.payment_status =
+                  completedRide?.payment_status || "prepaid";
+                console.log(
+                  `💳 Ride ${update.rideId} ${isScheduledLive ? "is scheduled/prepaid" : "was already charged"} — skipping completion-time card charge`,
+                );
+              } else if (
                 completedRide &&
                 completedFare > 0 &&
                 completedRide.rider_id &&
@@ -3307,17 +3316,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   );
                   updateData.payment_status = "card_charge_failed";
                 }
-              } else if (alreadyCaptured) {
-                updateData.payment_status =
-                  completedRide?.payment_status || "prepaid";
-                console.log(
-                  `💳 Ride ${update.rideId} was already charged — skipping completion-time card charge`,
-                );
               } else if (
                 completedRide &&
                 walletDeduction > 0 &&
                 completedFare <= 0 &&
-                !alreadyCaptured
+                !alreadyCaptured &&
+                !isScheduledLive
               ) {
                 updateData.payment_status = "paid";
                 console.log(

@@ -2605,7 +2605,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const assignmentSocketAnnouncedKeys = new Set<string>();
   const missingLaterBookingCancelColumns = new Set<string>();
   const missingLaterBookingActivationColumns = new Set<string>();
-  const scheduledReminderBucketByBooking = new Map<string, string>();
+  // bookingKey → set of reminder bucket keys already sent (or skipped as missed)
+  const scheduledReminderBucketsByBooking = new Map<string, Set<string>>();
   const announcedMarketplaceBookingKeys = new Set<string>();
   let lastMarketplaceReminderKey: string | null = null;
 
@@ -3168,22 +3169,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
-  const getScheduledReminderBucket = (
-    msUntilPickup: number,
-  ): { key: string; label: string; contactPassenger: boolean } | null => {
-    if (msUntilPickup <= 0) return null;
+  // Reminder cadence for accepted scheduled jobs (with sound via Expo push):
+  // 3h → 2h → 30m → 15m → 5m before pickup.
+  const SCHEDULED_REMINDER_THRESHOLDS: Array<{
+    key: string;
+    ms: number;
+    label: string;
+    contactPassenger: boolean;
+  }> = (() => {
     const minute = 60 * 1000;
     const hour = 60 * minute;
-    if (msUntilPickup <= 30 * minute)
-      return { key: "30m", label: "30 minutes", contactPassenger: true };
-    if (msUntilPickup <= hour)
-      return { key: "1h", label: "1 hour", contactPassenger: true };
-    if (msUntilPickup <= 3 * hour)
-      return { key: "3h", label: "3 hours", contactPassenger: false };
-    if (msUntilPickup <= 4 * hour)
-      return { key: "4h", label: "4 hours", contactPassenger: false };
-    if (msUntilPickup <= 6 * hour)
-      return { key: "6h", label: "6 hours", contactPassenger: false };
+    return [
+      { key: "3h", ms: 3 * hour, label: "3 hours", contactPassenger: false },
+      { key: "2h", ms: 2 * hour, label: "2 hours", contactPassenger: false },
+      {
+        key: "30m",
+        ms: 30 * minute,
+        label: "30 minutes",
+        contactPassenger: true,
+      },
+      {
+        key: "15m",
+        ms: 15 * minute,
+        label: "15 minutes",
+        contactPassenger: true,
+      },
+      { key: "5m", ms: 5 * minute, label: "5 minutes", contactPassenger: true },
+    ];
+  })();
+
+  // If we first see a booking more than ~2 minutes past a threshold, treat that
+  // reminder as missed (late accept / restart) instead of sending a wrong label.
+  const SCHEDULED_REMINDER_MISS_GRACE_MS = 2 * 60 * 1000;
+
+  const getNextScheduledReminderBucket = (
+    msUntilPickup: number,
+    alreadyHandled: Set<string>,
+  ): { key: string; label: string; contactPassenger: boolean } | null => {
+    if (msUntilPickup <= 0) return null;
+
+    if (alreadyHandled.size === 0) {
+      for (const threshold of SCHEDULED_REMINDER_THRESHOLDS) {
+        if (msUntilPickup < threshold.ms - SCHEDULED_REMINDER_MISS_GRACE_MS) {
+          alreadyHandled.add(threshold.key);
+        }
+      }
+    }
+
+    for (const threshold of SCHEDULED_REMINDER_THRESHOLDS) {
+      if (
+        msUntilPickup <= threshold.ms &&
+        !alreadyHandled.has(threshold.key)
+      ) {
+        return threshold;
+      }
+    }
     return null;
   };
 
@@ -5375,7 +5415,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 6 * 60 * 60 * 1000;
+  // Look ahead 3 hours so the 3h reminder can fire.
+  const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 3 * 60 * 60 * 1000;
+  // Tick every 60s so 15m / 5m reminders are not missed by a coarse interval.
+  const SCHEDULED_DRIVER_REMINDER_TICK_MS = 60 * 1000;
 
   const triggerScheduledDriverReminders = async () => {
     const nowTs = Date.now();
@@ -5409,17 +5452,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     for (const booking of acceptedBookings) {
       const pickupTs = pickupTimestamp(booking);
       const msUntilPickup = pickupTs - nowTs;
-      const reminderBucket = getScheduledReminderBucket(msUntilPickup);
-      if (!reminderBucket) continue;
-
       const reminderKey = `${booking.source_table}:${booking.id}`;
       activeReminderKeys.add(reminderKey);
 
-      if (
-        scheduledReminderBucketByBooking.get(reminderKey) === reminderBucket.key
-      ) {
-        continue;
+      let handled = scheduledReminderBucketsByBooking.get(reminderKey);
+      if (!handled) {
+        handled = new Set<string>();
+        scheduledReminderBucketsByBooking.set(reminderKey, handled);
       }
+
+      const reminderBucket = getNextScheduledReminderBucket(
+        msUntilPickup,
+        handled,
+      );
+      if (!reminderBucket) continue;
 
       const assignedDriverId = booking.driver_id || booking.assigned_driver_id;
       if (!assignedDriverId) continue;
@@ -5438,17 +5484,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .eq("id", driverUserId)
         .maybeSingle();
 
-      if (!userRow?.push_token) continue;
+      if (!userRow?.push_token) {
+        // Still mark handled so we do not retry forever without a token.
+        handled.add(reminderBucket.key);
+        continue;
+      }
 
       const pickupLabel = booking.pickup_address || "pickup location";
       const dropoffLabel = booking.dropoff_address || "destination";
-      const rideDetails = `${pickupLabel} to ${dropoffLabel}`;
-      const title = reminderBucket.contactPassenger
-        ? "Have you contacted the passenger?"
-        : "You have upcoming booking!";
+      const rideDetails = `${pickupLabel} → ${dropoffLabel}`;
+      const title =
+        reminderBucket.key === "5m"
+          ? "Pickup in 5 minutes!"
+          : reminderBucket.key === "15m"
+            ? "Pickup in 15 minutes"
+            : reminderBucket.contactPassenger
+              ? "Upcoming booking soon"
+              : "Upcoming booking reminder";
       const body = reminderBucket.contactPassenger
-        ? "Have you contact the passenger? See upcoming booking!"
-        : `You have upcoming booking! Ride ${rideDetails} is going to start in ${reminderBucket.label} please reach to the pickup location`;
+        ? `Your ride ${rideDetails} starts in ${reminderBucket.label}. Contact the passenger if needed and head to pickup.`
+        : `Your ride ${rideDetails} starts in ${reminderBucket.label}. Please plan to reach the pickup location on time.`;
 
       await sendExpoPushNotification(
         userRow.push_token,
@@ -5463,15 +5518,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           screen: "ScheduledJobDetails",
           reminderBucket: reminderBucket.key,
         },
-        { channelId: "uto-ride-requests-v2", ttlSeconds: 900 },
+        // High-importance scheduled channel with sound.
+        { channelId: "uto-scheduled-v2", ttlSeconds: 900 },
       );
 
-      scheduledReminderBucketByBooking.set(reminderKey, reminderBucket.key);
+      handled.add(reminderBucket.key);
+      console.log(
+        `🔔 Scheduled reminder ${reminderBucket.key} sent for booking ${booking.id}`,
+      );
     }
 
-    for (const key of Array.from(scheduledReminderBucketByBooking.keys())) {
+    for (const key of Array.from(scheduledReminderBucketsByBooking.keys())) {
       if (!activeReminderKeys.has(key)) {
-        scheduledReminderBucketByBooking.delete(key);
+        scheduledReminderBucketsByBooking.delete(key);
       }
     }
   };
@@ -5482,7 +5541,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("Scheduled driver reminder engine error:", err);
       });
     },
-    5 * 60 * 1000,
+    SCHEDULED_DRIVER_REMINDER_TICK_MS,
   );
 
   triggerScheduledDriverReminders().catch((err) => {

@@ -714,10 +714,26 @@ export default function ScheduledJobDetailsScreen() {
       );
       return;
     }
+    const note = String(earlyCompleteOther || "").trim();
+    if (
+      (earlyCompleteReason === "Other" ||
+        earlyCompleteReason === "Emergency") &&
+      !note
+    ) {
+      Alert.alert(
+        "Note Required",
+        earlyCompleteReason === "Emergency"
+          ? "Please add a short note about the emergency."
+          : "Please add a short note for Other.",
+      );
+      return;
+    }
     const finalReason =
       earlyCompleteReason === "Other"
-        ? earlyCompleteOther
-        : earlyCompleteReason;
+        ? note
+        : note
+          ? `${earlyCompleteReason}: ${note}`
+          : earlyCompleteReason;
     finishTrip(finalReason);
   };
 
@@ -1079,6 +1095,7 @@ export default function ScheduledJobDetailsScreen() {
             </Text>
             {[
               "Passenger request",
+              "Emergency",
               "Traffic restriction",
               "Wrong address",
               "Other",
@@ -1104,10 +1121,15 @@ export default function ScheduledJobDetailsScreen() {
                 <Text style={s.reasonText}>{reason}</Text>
               </Pressable>
             ))}
-            {earlyCompleteReason === "Other" && (
+            {(earlyCompleteReason === "Other" ||
+              earlyCompleteReason === "Emergency") && (
               <TextInput
                 style={s.otherInput}
-                placeholder="Please describe the reason..."
+                placeholder={
+                  earlyCompleteReason === "Emergency"
+                    ? "Add a short note about the emergency..."
+                    : "Please describe the reason..."
+                }
                 value={earlyCompleteOther}
                 onChangeText={setEarlyCompleteOther}
                 multiline
