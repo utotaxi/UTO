@@ -860,7 +860,7 @@ import React, {
   useEffect,
   ReactNode,
 } from "react";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   getSocket,
@@ -1060,6 +1060,123 @@ export function RideProvider({ children }: { children: ReactNode }) {
       if (cleanup) cleanup();
     };
   }, []);
+
+  // Safety net: if a socket event is missed (background / reconnect), poll the
+  // server so the rider never stays stuck on "Finding your driver..." after
+  // the driver has already accepted / arrived / started.
+  useEffect(() => {
+    const rideId = activeRide?.id;
+    const status = activeRide?.status;
+    const liveStatuses: RideStatus[] = [
+      "pending",
+      "accepted",
+      "arrived",
+      "in_progress",
+    ];
+    if (!rideId || !status || !liveStatuses.includes(status)) return;
+
+    let cancelled = false;
+
+    const applyServerRide = (serverRide: any) => {
+      if (!serverRide?.id || cancelled) return;
+      const current = activeRideRef.current;
+      if (!current || current.id !== serverRide.id) return;
+
+      const nextStatus = String(serverRide.status || "").toLowerCase();
+      if (!nextStatus || nextStatus === current.status) {
+        // Still sync driver details if accept happened but UI missed driverInfo.
+        if (
+          nextStatus === "accepted" &&
+          serverRide.driverName &&
+          !current.driverName
+        ) {
+          const patched: Ride = {
+            ...current,
+            driverName: serverRide.driverName,
+            driverPhone: serverRide.driverPhone,
+            vehicleInfo: serverRide.vehicleInfo,
+            licensePlate: serverRide.licensePlate,
+            driverRating: serverRide.driverRating,
+            acceptedAt:
+              serverRide.acceptedAt ||
+              current.acceptedAt ||
+              new Date().toISOString(),
+          };
+          setActiveRide(patched);
+          AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(patched)).catch(
+            console.error,
+          );
+        }
+        return;
+      }
+
+      if (
+        ["cancelled", "cancelled_no_drivers", "cancelled_no_show", "completed"].includes(
+          nextStatus,
+        )
+      ) {
+        // Let the socket cancel/complete handlers own teardown when possible;
+        // still clear a stuck pending if the server already cancelled.
+        if (current.status === "pending") {
+          setActiveRide(null);
+          activeRideRef.current = null;
+          AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
+        }
+        return;
+      }
+
+      const updated: Ride = {
+        ...current,
+        status: nextStatus as RideStatus,
+        acceptedAt:
+          serverRide.acceptedAt ||
+          current.acceptedAt ||
+          (nextStatus === "accepted" ? new Date().toISOString() : undefined),
+        driverName: serverRide.driverName || current.driverName,
+        driverPhone: serverRide.driverPhone || current.driverPhone,
+        vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
+        licensePlate: serverRide.licensePlate || current.licensePlate,
+        driverRating: serverRide.driverRating ?? current.driverRating,
+        driverArrivedAt:
+          serverRide.arrivedAt ||
+          serverRide.driverArrivedAt ||
+          current.driverArrivedAt,
+      };
+      console.log(
+        `🔄 [RideContext] Synced ride ${rideId} from server: ${current.status} → ${nextStatus}`,
+      );
+      setActiveRide(updated);
+      AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(
+        console.error,
+      );
+    };
+
+    const syncFromServer = async () => {
+      try {
+        const res = await fetch(`${getApiUrl()}/api/rides/${rideId}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        applyServerRide(data?.ride);
+      } catch (err) {
+        console.warn("⚠️ [RideContext] Active ride sync failed:", err);
+      }
+    };
+
+    // Pending needs a fast poll; later statuses can be a bit slower.
+    const intervalMs = status === "pending" ? 4000 : 8000;
+    const interval = setInterval(syncFromServer, intervalMs);
+    void syncFromServer();
+
+    const appSub = AppState.addEventListener("change", (next) => {
+      if (next === "active") void syncFromServer();
+    });
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      appSub.remove();
+    };
+  }, [activeRide?.id, activeRide?.status]);
 
   // A scheduled (book-later) ride reached its 15-minute window and went live.
   // The server sends the full ride payload (including the pre-provided PIN) so

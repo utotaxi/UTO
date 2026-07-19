@@ -237,6 +237,7 @@ function toCamelRide(row: Ride) {
     driverRating: row.driver_rating,
     requestedAt: row.requested_at,
     acceptedAt: row.accepted_at,
+    arrivedAt: (row as any).arrived_at || null,
     startedAt: row.started_at,
     completedAt: row.completed_at,
     cancelledAt: row.cancelled_at,

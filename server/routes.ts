@@ -6,7 +6,6 @@ import {
   extractScheduledBookingId,
   setupSocketIO,
   scheduledRideHooks,
-  getDebugMatchLogs,
 } from "./socket";
 import {
   authorizeSavedCard,
@@ -96,15 +95,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // ─── Health check endpoint (used by Railway for monitoring) ───
-  // #region agent log
-  app.get("/api/debug/match-logs", (req: Request, res: Response) => {
-    if (String(req.query.key || "") !== "853741") {
-      return res.status(404).json({ error: "Not found" });
-    }
-    res.json({ sessionId: "853741", logs: getDebugMatchLogs() });
-  });
-  // #endregion
-
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({
       status: "ok",

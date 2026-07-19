@@ -114,8 +114,9 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
       setError("Please enter the verification code");
       return;
     }
-    if (otp.length < 6) {
-      setError("Verification code must be 6 digits");
+    // Supabase Auth OTPs are typically 6 or 8 digits depending on project settings.
+    if (otp.length < 6 || otp.length > 8) {
+      setError("Verification code must be 6–8 digits");
       return;
     }
 
@@ -199,7 +200,7 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
       case "email":
         return "Enter your email address. We'll send a verification code (or link) via Supabase Auth.";
       case "otp":
-        return `Enter the 6-digit code from the email sent to ${email}. If you opened the reset link instead, you can skip ahead automatically.`;
+        return `Enter the verification code from the email sent to ${email}. If you opened the reset link instead, you can skip ahead automatically.`;
       case "password":
         return "Choose a strong password to secure your account.";
     }
@@ -261,12 +262,12 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="Enter 6-digit code"
+                    placeholder="Enter verification code"
                     placeholderTextColor="#6B7280"
                     value={otp}
                     onChangeText={setOtp}
                     keyboardType="number-pad"
-                    maxLength={6}
+                    maxLength={8}
                   />
                 </View>
               </View>

@@ -1,8 +1,6 @@
 //server/socket.ts
 
 import { Server as HTTPServer } from "http";
-import { appendFileSync } from "fs";
-import { join } from "path";
 import { Server, Socket } from "socket.io"; // ✅ CORRECT - Use socket.io for server
 import { supabase } from "./db";
 import { EventEmitter } from "events";
@@ -27,47 +25,6 @@ import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 export const serverRideEmitter = new EventEmitter();
 export let io: Server;
 
-// #region agent log
-const DEBUG_MATCH_LOGS: Array<Record<string, unknown>> = [];
-export function getDebugMatchLogs() {
-  return DEBUG_MATCH_LOGS.slice(-80);
-}
-function agentDebugLog(
-  hypothesisId: string,
-  location: string,
-  message: string,
-  data: Record<string, unknown> = {},
-  runId: string = "pre-fix",
-) {
-  const entry = {
-    sessionId: "853741",
-    runId,
-    hypothesisId,
-    location,
-    message,
-    data,
-    timestamp: Date.now(),
-  };
-  DEBUG_MATCH_LOGS.push(entry);
-  if (DEBUG_MATCH_LOGS.length > 100) DEBUG_MATCH_LOGS.shift();
-  fetch("http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "853741",
-    },
-    body: JSON.stringify(entry),
-  }).catch(() => {});
-  try {
-    appendFileSync(
-      join(process.cwd(), "debug-853741.log"),
-      `${JSON.stringify(entry)}\n`,
-    );
-  } catch {
-    /* ignore local file write failures on remote hosts */
-  }
-}
-// #endregion
 
 // ─── Scheduled booking → live ride bridge ─────────────────────────────────
 // Populated inside setupSocketIO (needs access to the in-memory dispatch state).
@@ -129,20 +86,6 @@ async function assertRideStillOfferable(rideId: string): Promise<boolean> {
       .eq("id", rideId)
       .maybeSingle();
 
-    // #region agent log
-    agentDebugLog(
-      "F",
-      "server/socket.ts:assertRideStillOfferable",
-      "Offerability check result",
-      {
-        rideId: String(rideId || "").slice(0, 20),
-        hasError: !!error,
-        errorCode: error?.code || null,
-        errorMessage: error?.message ? String(error.message).slice(0, 120) : null,
-        status: ride?.status || null,
-      },
-    );
-    // #endregion
 
     if (error || !ride) {
       console.warn(
@@ -455,7 +398,8 @@ class MinHeap {
 
 const RADIUS_MILES = DEFAULT_DRIVER_RADIUS_MILES; // 5-mile radius for driver eligibility
 const DISPATCH_TIMEOUT_MS = 60000; // 60-second timeout when driver socket is connected
-const DISPATCH_TIMEOUT_BACKGROUND_MS = 120000; // 120-second timeout when driver is online but app is backgrounded
+/** Short window when there is no live socket — avoids multi-minute waits on ghost online rows. */
+const DISPATCH_TIMEOUT_NO_SOCKET_MS = 20_000;
 /** How long to keep retrying when no eligible driver is found yet. */
 const NO_DRIVER_RETRY_MS = 90_000;
 const NO_DRIVER_RETRY_INTERVAL_MS = 10_000;
@@ -933,22 +877,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
     console.log(
       `📡 Dispatching ride ${rideId} to nearest driver ${entry.driverId} (${entry.distance.toFixed(2)} mi away)`,
     );
-    // #region agent log
-    const roomSockets =
-      io.sockets.adapter.rooms.get(`driver:${entry.driverId}`)?.size || 0;
-    agentDebugLog(
-      "E",
-      "server/socket.ts:dispatchToNextDriver",
-      "Emitting ride:new to driver",
-      {
-        rideId: String(rideId).slice(0, 12),
-        driverId: String(entry.driverId).slice(0, 12),
-        distanceMi: Math.round(entry.distance * 100) / 100,
-        mappedSocket: !!connectedDrivers.get(entry.driverId),
-        roomSocketCount: roomSockets,
-      },
-    );
-    // #endregion
     io.to(`driver:${entry.driverId}`).emit("ride:new", enrichedRide);
 
     // Always push as well — socket may be dead while the driver is still online
@@ -1068,9 +996,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
       );
     }
 
-    // Prefer the longer background window unless we can prove the driver's
-    // socket is currently connected and alive. A stale map entry after the OS
-    // suspends the app must NOT use the short foreground timeout.
+    // Live socket → full window. No socket → short window so stuck is_online
+    // "ghost" drivers cannot delay the real nearby driver by minutes.
     const mappedSocketId = connectedDrivers.get(entry.driverId);
     const liveSocket = mappedSocketId
       ? io.sockets.sockets.get(mappedSocketId)
@@ -1080,9 +1007,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
     );
     const dispatchTimeoutMs = driverSocketConnected
       ? DISPATCH_TIMEOUT_MS
-      : DISPATCH_TIMEOUT_BACKGROUND_MS;
+      : DISPATCH_TIMEOUT_NO_SOCKET_MS;
     console.log(
-      `⏱️ Dispatch window for driver ${entry.driverId}: ${dispatchTimeoutMs / 1000}s (${driverSocketConnected ? "live socket" : "background/push"})`,
+      `⏱️ Dispatch window for driver ${entry.driverId}: ${dispatchTimeoutMs / 1000}s (${driverSocketConnected ? "live socket" : "no live socket / push"})`,
     );
     state.timer = setTimeout(() => {
       console.log(
@@ -1491,40 +1418,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.warn(
         `⚠️ Ride ${rideData.id} has invalid pickup coords (${pickupLat}, ${pickupLng}) — cannot apply 5-mile matching`,
       );
-      // #region agent log
-      agentDebugLog(
-        "F",
-        "server/socket.ts:buildDispatchState",
-        "Invalid pickup coords — matching aborted",
-        {
-          rideId: String(rideData.id || "").slice(0, 12),
-          pickupLat,
-          pickupLng,
-        },
-      );
-      // #endregion
       return null;
     }
 
     console.log(
       `🧭 Matching ride ${rideData.id}: pickup=(${pickupLat.toFixed(5)}, ${pickupLng.toFixed(5)}), onlineDrivers=${onlineDrivers?.length || 0}, busy=${busyDriverIds.size}, vehicle=${requestedType}`,
     );
-    // #region agent log
-    agentDebugLog(
-      "A",
-      "server/socket.ts:buildDispatchState",
-      "Matching start",
-      {
-        rideId: String(rideData.id || "").slice(0, 12),
-        onlineCount: onlineDrivers?.length || 0,
-        busyCount: busyDriverIds.size,
-        connectedSockets: connectedDrivers.size,
-        vehicle: requestedType,
-        pickupLat,
-        pickupLng,
-      },
-    );
-    // #endregion
 
     const resolveDistanceMiles = async (
       driverId: string,
@@ -1576,12 +1475,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — already handling an active ride`,
           );
-          // #region agent log
-          agentDebugLog("C", "server/socket.ts:match-skip", "Skip busy", {
-            driverId: String(driver.id).slice(0, 12),
-            rideId: String(rideData.id || "").slice(0, 12),
-          });
-          // #endregion
           continue;
         }
         if (declinedBy.has(driver.id)) {
@@ -1592,6 +1485,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         const driverSocketId = connectedDrivers.get(driver.id);
+        const lastSeenMs = driver.last_seen_at
+          ? new Date(driver.last_seen_at).getTime()
+          : 0;
+        const recentlySeen =
+          Number.isFinite(lastSeenMs) &&
+          lastSeenMs > 0 &&
+          Date.now() - lastSeenMs <= RECENT_DRIVER_SEEN_MS;
+        // Ignore stuck is_online rows with no heartbeat and no live socket —
+        // offering them first (then waiting) made riders wait ~minutes.
+        if (!driverSocketId && !recentlySeen) {
+          console.log(
+            `   ⏭️ Skipping driver ${driver.id} — stale online flag (no recent heartbeat / socket)`,
+          );
+          continue;
+        }
 
         const driverVehicle = normalizeVehicleType(
           driver.vehicle_type || "saloon",
@@ -1600,13 +1508,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — vehicle "${driverVehicle}" not compatible with "${requestedType}"`,
           );
-          // #region agent log
-          agentDebugLog("D", "server/socket.ts:match-skip", "Skip vehicle", {
-            driverId: String(driver.id).slice(0, 12),
-            driverVehicle,
-            requestedType,
-          });
-          // #endregion
           continue;
         }
 
@@ -1620,14 +1521,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           // GPS can lag a few seconds after going online. Keep recently-seen /
           // socket-connected drivers eligible at the end of the queue so rides
           // still match instead of failing with "no drivers".
-          const lastSeenMs = driver.last_seen_at
-            ? new Date(driver.last_seen_at).getTime()
-            : 0;
-          const recentlySeen =
-            Number.isFinite(lastSeenMs) &&
-            lastSeenMs > 0 &&
-            Date.now() - lastSeenMs <= RECENT_DRIVER_SEEN_MS;
-          if (driverSocketId || recentlySeen || driver.is_online) {
+          if (driverSocketId || recentlySeen) {
             console.log(
               `   📍 Driver ${driver.id}: no GPS yet — queueing as fallback candidate`,
             );
@@ -1642,13 +1536,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — no usable location for 5-mile check`,
           );
-          // #region agent log
-          agentDebugLog("B", "server/socket.ts:match-skip", "Skip no GPS", {
-            driverId: String(driver.id).slice(0, 12),
-            isOnline: !!driver.is_online,
-            hasSocket: !!driverSocketId,
-          });
-          // #endregion
           continue;
         }
 
@@ -1656,13 +1543,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — distance ${dist.toFixed(2)} mi exceeds 5-mile radius limit (${RADIUS_MILES} mi)`,
           );
-          // #region agent log
-          agentDebugLog("B", "server/socket.ts:match-skip", "Skip out of radius", {
-            driverId: String(driver.id).slice(0, 12),
-            distMi: Math.round(dist * 100) / 100,
-            radiusMiles: RADIUS_MILES,
-          });
-          // #endregion
           continue;
         }
 
@@ -1758,43 +1638,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.log(
         `🚫 No eligible drivers for ride ${rideData.id} after filters (online=${onlineDrivers?.length || 0}, radius=${RADIUS_MILES} mi)`,
       );
-      // #region agent log
-      agentDebugLog(
-        "A",
-        "server/socket.ts:buildDispatchState",
-        "No eligible drivers after filters",
-        {
-          rideId: String(rideData.id || "").slice(0, 12),
-          onlineCount: onlineDrivers?.length || 0,
-          busyCount: busyDriverIds.size,
-          connectedSockets: connectedDrivers.size,
-          radiusMiles: RADIUS_MILES,
-          vehicle: requestedType,
-          hasValidPickup,
-          pickupLat,
-          pickupLng,
-        },
-      );
-      // #endregion
       return null;
     }
 
-    // #region agent log
-    agentDebugLog(
-      "A",
-      "server/socket.ts:buildDispatchState",
-      "Eligible drivers built",
-      {
-        rideId: String(rideData.id || "").slice(0, 12),
-        heapSize: heap.size,
-        onlineCount: onlineDrivers?.length || 0,
-        busyCount: busyDriverIds.size,
-        connectedSockets: connectedDrivers.size,
-        vehicle: requestedType,
-        radiusMiles: RADIUS_MILES,
-      },
-    );
-    // #endregion
 
     return {
       heap,
@@ -2160,16 +2006,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     socket.on("driver:connect", async (driverId: string) => {
       const actualDriverId = await resolveDriverTableId(driverId);
-      // #region agent log
-      agentDebugLog("E", "server/socket.ts:driver-connect", "Driver connect", {
-        rawDriverId: String(driverId || "").slice(0, 12),
-        resolvedDriverId: actualDriverId
-          ? String(actualDriverId).slice(0, 12)
-          : null,
-        socketId: socket.id,
-        connectedCount: connectedDrivers.size,
-      });
-      // #endregion
       if (!actualDriverId) {
         console.warn(
           `⚠️ driver:connect ignored — ${driverId} is not a valid drivers.id or drivers.user_id`,
@@ -2305,12 +2141,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
       } catch (error) {
         console.error("Error setting driver offline:", error);
       }
-      // #region agent log
-      agentDebugLog("E", "server/socket.ts:go_offline", "Driver offline", {
-        driverId: String(actualDriverId).slice(0, 12),
-        connectedCount: connectedDrivers.size,
-      });
-      // #endregion
     });
 
     socket.on("rider:connect", (riderId: string) => {
@@ -2488,16 +2318,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
     });
 
     socket.on("ride:request", async (rideData: any) => {
-      // #region agent log
-      agentDebugLog("F", "server/socket.ts:ride-request", "Ride request event", {
-        rideId: rideData?.id ? String(rideData.id).slice(0, 12) : null,
-        riderId: rideData?.riderId
-          ? String(rideData.riderId).slice(0, 12)
-          : null,
-        vehicleType: rideData?.rideType || rideData?.vehicleType || null,
-        connectedDrivers: connectedDrivers.size,
-      });
-      // #endregion
       await handleRideRequest(rideData, socket.id);
     });
 
@@ -2869,18 +2689,35 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         const dispState = dispatchQueues.get(data.rideId);
-        if (
-          !dispState ||
-          dispState.cancelled ||
-          dispState.currentDriverId !== actualDriverId
-        ) {
+        const isCurrentOffer =
+          !!dispState &&
+          !dispState.cancelled &&
+          dispState.currentDriverId === actualDriverId;
+
+        // If the in-memory queue was lost (restart / multi-instance) but the ride
+        // is still pending+unassigned, still allow the atomic DB claim below.
+        if (!isCurrentOffer) {
+          const { data: pendingRide } = await supabase
+            .from("rides")
+            .select("id, status, driver_id")
+            .eq("id", data.rideId)
+            .maybeSingle();
+          const stillClaimable =
+            !!pendingRide &&
+            String(pendingRide.status || "").toLowerCase() === "pending" &&
+            !pendingRide.driver_id;
+          if (!stillClaimable) {
+            console.log(
+              `⏭️ Rejecting stale/unauthorized accept for ride ${data.rideId} from ${actualDriverId}; current offer=${dispState?.currentDriverId || "none"}`,
+            );
+            io.to(`driver:${actualDriverId}`).emit("ride:expired", {
+              rideId: data.rideId,
+            });
+            return;
+          }
           console.log(
-            `⏭️ Rejecting stale/unauthorized accept for ride ${data.rideId} from ${actualDriverId}; current offer=${dispState?.currentDriverId || "none"}`,
+            `⚠️ Accepting ride ${data.rideId} without live dispatch queue (pending in DB)`,
           );
-          io.to(`driver:${actualDriverId}`).emit("ride:expired", {
-            rideId: data.rideId,
-          });
-          return;
         }
 
         // Claim the ride atomically while it is still pending and unassigned.
@@ -2923,8 +2760,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         // Cancel the dispatch queue — ride is taken
-        if (dispState.timer) clearTimeout(dispState.timer);
-        dispState.cancelled = true;
+        if (dispState?.timer) clearTimeout(dispState.timer);
+        if (dispState) dispState.cancelled = true;
         dispatchQueues.delete(data.rideId);
         console.log(
           `🛑 Dispatch queue cancelled for ride ${data.rideId} — accepted by ${data.driverId}`,
@@ -3022,14 +2859,31 @@ export function setupSocketIO(httpServer: HTTPServer) {
               driverLocation,
             };
 
+            // Emit both events — older clients listen for ride:update; newer for ride:accepted.
+            const riderUpdatePayload = {
+              rideId: data.rideId,
+              status: "accepted",
+              acceptedAt,
+              driverId: actualDriverId,
+              driverInfo,
+              driverLocation,
+            };
             io.to(`rider:${ride.rider_id}`).emit(
               "ride:accepted",
               acceptedPayload,
+            );
+            io.to(`rider:${ride.rider_id}`).emit(
+              "ride:update",
+              riderUpdatePayload,
             );
             if (rideInfo?.riderSocketId) {
               io.to(rideInfo.riderSocketId).emit(
                 "ride:accepted",
                 acceptedPayload,
+              );
+              io.to(rideInfo.riderSocketId).emit(
+                "ride:update",
+                riderUpdatePayload,
               );
             }
             if (driverLocation) {
@@ -3048,6 +2902,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 `⚠️ ride:accept — no current or last received location for driver ${actualDriverId}`,
               );
             }
+            console.log(
+              `📢 Notified rider ${ride.rider_id} that ride ${data.rideId} was accepted`,
+            );
           }
         } catch (error) {
           console.error("Error accepting ride:", error);
@@ -4867,17 +4724,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   error,
                 );
               }
-              // #region agent log
-              agentDebugLog(
-                "E",
-                "server/socket.ts:disconnect",
-                "Driver socket dropped - kept online",
-                {
-                  driverId: String(driverId).slice(0, 12),
-                  liveSockets: connectedDrivers.size,
-                },
-              );
-              // #endregion
             }
           }, disconnectGraceMs);
           break;

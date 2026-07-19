@@ -129,7 +129,7 @@ export async function sendSupabasePasswordResetEmail(
 }
 
 /**
- * Verify the 6-digit recovery OTP from the Supabase Auth email.
+ * Verify the recovery OTP (6–8 digits) from the Supabase Auth email.
  */
 export async function verifySupabaseRecoveryOtp(
   email: string,

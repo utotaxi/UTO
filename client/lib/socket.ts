@@ -30,24 +30,6 @@ export function getSocket(): Socket {
     const serverUrl = getApiUrl();
 
     console.log("🔌 Connecting to socket server:", serverUrl);
-    // #region agent log
-    fetch("http://127.0.0.1:7697/ingest/ce76089c-d795-4060-ab70-2c912a1224d2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "853741",
-      },
-      body: JSON.stringify({
-        sessionId: "853741",
-        runId: "pre-fix",
-        hypothesisId: "E",
-        location: "client/lib/socket.ts:getSocket",
-        message: "Socket target selected",
-        data: { serverUrl },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     socket = io(serverUrl, {
       transports: ["websocket", "polling"],
