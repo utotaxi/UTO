@@ -340,11 +340,13 @@ interface RideUpdate {
 }
 
 // ─── Min-Heap (Priority Queue) for Nearest Driver Dispatch ───────────────────
-// Each entry: { driverId, distance, socketId }
+// Live-socket drivers are always offered before push-only/background drivers,
+// then nearest distance wins. This keeps first-offer latency ~seconds.
 interface DriverHeapEntry {
   driverId: string;
   distance: number;
   socketId: string;
+  liveSocket: boolean;
 }
 
 class MinHeap {
@@ -370,10 +372,16 @@ class MinHeap {
     return min;
   }
 
+  /** Live socket first, then nearer distance. */
+  private isBetter(a: DriverHeapEntry, b: DriverHeapEntry): boolean {
+    if (a.liveSocket !== b.liveSocket) return a.liveSocket;
+    return a.distance < b.distance;
+  }
+
   private bubbleUp(i: number): void {
     while (i > 0) {
       const parent = Math.floor((i - 1) / 2);
-      if (this.heap[parent].distance <= this.heap[i].distance) break;
+      if (!this.isBetter(this.heap[i], this.heap[parent])) break;
       [this.heap[parent], this.heap[i]] = [this.heap[i], this.heap[parent]];
       i = parent;
     }
@@ -385,9 +393,9 @@ class MinHeap {
       let smallest = i;
       const left = 2 * i + 1;
       const right = 2 * i + 2;
-      if (left < n && this.heap[left].distance < this.heap[smallest].distance)
+      if (left < n && this.isBetter(this.heap[left], this.heap[smallest]))
         smallest = left;
-      if (right < n && this.heap[right].distance < this.heap[smallest].distance)
+      if (right < n && this.isBetter(this.heap[right], this.heap[smallest]))
         smallest = right;
       if (smallest === i) break;
       [this.heap[smallest], this.heap[i]] = [this.heap[i], this.heap[smallest]];
@@ -397,14 +405,15 @@ class MinHeap {
 }
 
 const RADIUS_MILES = DEFAULT_DRIVER_RADIUS_MILES; // 5-mile radius for driver eligibility
-const DISPATCH_TIMEOUT_MS = 60000; // 60-second timeout when driver socket is connected
-/** Short window when there is no live socket — avoids multi-minute waits on ghost online rows. */
-const DISPATCH_TIMEOUT_NO_SOCKET_MS = 20_000;
+/** Accept window while the driver app has a live socket. */
+const DISPATCH_TIMEOUT_MS = 45_000;
+/** Fast cascade when only push/background — keeps first live driver within ~10–12s. */
+const DISPATCH_TIMEOUT_NO_SOCKET_MS = 8_000;
 /** How long to keep retrying when no eligible driver is found yet. */
 const NO_DRIVER_RETRY_MS = 90_000;
-const NO_DRIVER_RETRY_INTERVAL_MS = 10_000;
-/** Online drivers with a recent heartbeat but no GPS yet may still be offered. */
-const RECENT_DRIVER_SEEN_MS = 15 * 60 * 1000;
+const NO_DRIVER_RETRY_INTERVAL_MS = 5_000;
+/** Heartbeat window used for matching when there is no live socket. */
+const RECENT_DRIVER_SEEN_MS = 3 * 60 * 1000;
 const ARRIVED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes waiting for rider
 
 const normalizeVehicleType = (value: any): string => {
@@ -996,14 +1005,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
       );
     }
 
-    // Live socket → full window. No socket → short window so stuck is_online
-    // "ghost" drivers cannot delay the real nearby driver by minutes.
+    // Live socket → accept window. No live socket → short cascade (8s) so the
+    // next available app gets the offer within ~10–12s overall.
     const mappedSocketId = connectedDrivers.get(entry.driverId);
-    const liveSocket = mappedSocketId
+    const liveSock = mappedSocketId
       ? io.sockets.sockets.get(mappedSocketId)
       : undefined;
     const driverSocketConnected = !!(
-      liveSocket && (liveSocket as any).connected !== false
+      (entry.liveSocket || liveSock) &&
+      (!liveSock || (liveSock as any).connected !== false)
     );
     const dispatchTimeoutMs = driverSocketConnected
       ? DISPATCH_TIMEOUT_MS
@@ -1425,6 +1435,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
       `🧭 Matching ride ${rideData.id}: pickup=(${pickupLat.toFixed(5)}, ${pickupLng.toFixed(5)}), onlineDrivers=${onlineDrivers?.length || 0}, busy=${busyDriverIds.size}, vehicle=${requestedType}`,
     );
 
+    const isLiveDriverSocket = (socketId?: string | null): boolean => {
+      if (!socketId) return false;
+      const sock = io.sockets.sockets.get(socketId);
+      return !!(sock && (sock as any).connected !== false);
+    };
+
     const resolveDistanceMiles = async (
       driverId: string,
       rowLat?: any,
@@ -1485,6 +1501,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         const driverSocketId = connectedDrivers.get(driver.id);
+        const liveSocket = isLiveDriverSocket(driverSocketId);
         const lastSeenMs = driver.last_seen_at
           ? new Date(driver.last_seen_at).getTime()
           : 0;
@@ -1492,9 +1509,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
           Number.isFinite(lastSeenMs) &&
           lastSeenMs > 0 &&
           Date.now() - lastSeenMs <= RECENT_DRIVER_SEEN_MS;
-        // Ignore stuck is_online rows with no heartbeat and no live socket —
-        // offering them first (then waiting) made riders wait ~minutes.
-        if (!driverSocketId && !recentlySeen) {
+        // Ignore stuck is_online rows with no recent heartbeat and no live socket.
+        if (!liveSocket && !recentlySeen) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — stale online flag (no recent heartbeat / socket)`,
           );
@@ -1518,17 +1534,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
           driverSocketId,
         );
         if (dist == null) {
-          // GPS can lag a few seconds after going online. Keep recently-seen /
-          // socket-connected drivers eligible at the end of the queue so rides
-          // still match instead of failing with "no drivers".
-          if (driverSocketId || recentlySeen) {
+          // GPS can lag briefly after going online — keep live/recent drivers.
+          if (liveSocket || recentlySeen) {
             console.log(
-              `   📍 Driver ${driver.id}: no GPS yet — queueing as fallback candidate`,
+              `   📍 Driver ${driver.id}: no GPS yet — queueing as fallback candidate (live=${liveSocket})`,
             );
             heap.push({
               driverId: driver.id,
               distance: RADIUS_MILES,
               socketId: driverSocketId || "",
+              liveSocket,
             });
             addedDriverIds.add(driver.id);
             continue;
@@ -1547,13 +1562,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         console.log(
-          `   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle}, socket: ${connectedDrivers.get(driver.id) ? "connected" : "background/offline"})`,
+          `   📏 Driver ${driver.id}: ${dist.toFixed(2)} mi from pickup (vehicle: ${driverVehicle}, liveSocket=${liveSocket})`,
         );
 
         heap.push({
           driverId: driver.id,
           distance: dist,
           socketId: driverSocketId || "",
+          liveSocket,
         });
         addedDriverIds.add(driver.id);
       }
@@ -1611,11 +1627,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
         rowLng,
         socketId,
       );
+      const liveSocket = isLiveDriverSocket(socketId);
       if (dist == null) {
         console.log(
           `   📍 Socket driver ${driverId}: no GPS yet — queueing as fallback candidate`,
         );
-        heap.push({ driverId, distance: RADIUS_MILES, socketId });
+        heap.push({
+          driverId,
+          distance: RADIUS_MILES,
+          socketId,
+          liveSocket,
+        });
         addedDriverIds.add(driverId);
         continue;
       }
@@ -1628,9 +1650,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
       }
 
       console.log(
-        `   📏 Socket driver ${driverId} is ${dist.toFixed(2)} mi away — eligible for dispatch`,
+        `   📏 Socket driver ${driverId} is ${dist.toFixed(2)} mi away — eligible for dispatch (live=${liveSocket})`,
       );
-      heap.push({ driverId, distance: dist, socketId });
+      heap.push({ driverId, distance: dist, socketId, liveSocket });
       addedDriverIds.add(driverId);
     }
 
