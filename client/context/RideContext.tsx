@@ -1031,11 +1031,16 @@ export function RideProvider({ children }: { children: ReactNode }) {
         setActiveRide((current) => {
           if (!current || current.id !== data.rideId) return current;
 
+          const acceptedAt =
+            data.acceptedAt ||
+            (data as any).accepted_at ||
+            current.acceptedAt ||
+            new Date().toISOString();
+
           const updated: Ride = {
             ...current,
             status: "accepted",
-            acceptedAt:
-              data.acceptedAt || current.acceptedAt || new Date().toISOString(),
+            acceptedAt,
             ...((data as any).driverInfo
               ? {
                   driverName: (data as any).driverInfo.driverName,
@@ -1084,28 +1089,31 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
       const nextStatus = String(serverRide.status || "").toLowerCase();
       if (!nextStatus || nextStatus === current.status) {
-        // Still sync driver details if accept happened but UI missed driverInfo.
-        if (
-          nextStatus === "accepted" &&
-          serverRide.driverName &&
-          !current.driverName
-        ) {
-          const patched: Ride = {
-            ...current,
-            driverName: serverRide.driverName,
-            driverPhone: serverRide.driverPhone,
-            vehicleInfo: serverRide.vehicleInfo,
-            licensePlate: serverRide.licensePlate,
-            driverRating: serverRide.driverRating,
-            acceptedAt:
-              serverRide.acceptedAt ||
-              current.acceptedAt ||
-              new Date().toISOString(),
-          };
-          setActiveRide(patched);
-          AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(patched)).catch(
-            console.error,
-          );
+        // Still sync driver details / acceptedAt if accept landed without them.
+        if (nextStatus === "accepted") {
+          const nextAcceptedAt =
+            serverRide.acceptedAt ||
+            current.acceptedAt ||
+            new Date().toISOString();
+          const needsPatch =
+            !current.acceptedAt ||
+            (!!serverRide.driverName && !current.driverName);
+          if (needsPatch) {
+            const patched: Ride = {
+              ...current,
+              driverName: serverRide.driverName || current.driverName,
+              driverPhone: serverRide.driverPhone || current.driverPhone,
+              vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
+              licensePlate: serverRide.licensePlate || current.licensePlate,
+              driverRating: serverRide.driverRating ?? current.driverRating,
+              acceptedAt: nextAcceptedAt,
+            };
+            setActiveRide(patched);
+            AsyncStorage.setItem(
+              ACTIVE_RIDE_KEY,
+              JSON.stringify(patched),
+            ).catch(console.error);
+          }
         }
         return;
       }

@@ -3316,20 +3316,46 @@ export function setupSocketIO(httpServer: HTTPServer) {
             // Charge the full payable fare (after discount when applicable).
             // Driver-initiated cancels must NEVER charge the rider (ASAP or otherwise).
             try {
-              const { data: cancelledRide, error: cancelledRideErr } =
-                await supabase
+              // Only select columns that exist on production rides table.
+              // cancellation_fee / cancelled_by are optional and may be absent —
+              // selecting them used to fail the whole cancel-fee path.
+              let cancelledRide: any = null;
+              {
+                const fullSelect = await supabase
                   .from("rides")
                   .select(
                     "rider_id, driver_id, status, accepted_at, arrived_at, estimated_price, final_price, payment_method, payment_intent_id, payment_status, discount_amount, cancellation_fee, cancelled_by",
                   )
                   .eq("id", update.rideId)
-                  .single();
-
-              if (cancelledRideErr) {
-                console.warn(
-                  `⚠️ Could not load ride ${update.rideId} for cancel fee:`,
-                  cancelledRideErr.message,
-                );
+                  .maybeSingle();
+                if (
+                  fullSelect.error &&
+                  /column|42703|PGRST204/i.test(
+                    String(fullSelect.error.message || ""),
+                  )
+                ) {
+                  const slimSelect = await supabase
+                    .from("rides")
+                    .select(
+                      "rider_id, driver_id, status, accepted_at, arrived_at, estimated_price, final_price, payment_method, payment_intent_id, payment_status, discount_amount",
+                    )
+                    .eq("id", update.rideId)
+                    .maybeSingle();
+                  cancelledRide = slimSelect.data;
+                  if (slimSelect.error) {
+                    console.warn(
+                      `⚠️ Could not load ride ${update.rideId} for cancel fee:`,
+                      slimSelect.error.message,
+                    );
+                  }
+                } else if (fullSelect.error) {
+                  console.warn(
+                    `⚠️ Could not load ride ${update.rideId} for cancel fee:`,
+                    fullSelect.error.message,
+                  );
+                } else {
+                  cancelledRide = fullSelect.data;
+                }
               }
 
               const acceptedAt = cancelledRide?.accepted_at
@@ -3387,15 +3413,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 (cancelledRide as any)?.cancellation_fee || 0,
               );
               const alreadyProcessedRiderCancelFee =
-                existingCancelFee > 0 &&
-                (String(cancelledRide?.status || "").toLowerCase() ===
-                  "cancelled" ||
-                  [
-                    "cancellation_fee_wallet_charged",
-                    "cancellation_fee_card_captured",
-                    "cancellation_fee_card_charged",
-                    "prepaid_retained",
-                  ].includes(cancellationPaymentStatus));
+                (existingCancelFee > 0 &&
+                  String(cancelledRide?.status || "").toLowerCase() ===
+                    "cancelled") ||
+                [
+                  "cancellation_fee_wallet_charged",
+                  "cancellation_fee_card_captured",
+                  "cancellation_fee_card_charged",
+                  "cancellation_fee_processing",
+                  "prepaid_retained",
+                ].includes(cancellationPaymentStatus);
               // Product rule: 1 free minute from driver accept, then full payable fare
               // on rider cancel. Driver cancels never charge the rider.
               const shouldChargeCancellationFee =
@@ -3408,7 +3435,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
               if (cancelledRide && alreadyProcessedRiderCancelFee) {
                 (update as any).cancellationFee = existingCancelFee;
                 (update as any).cancellationPolicy = "already_charged";
-                updateData.cancellation_fee = existingCancelFee;
+                if (existingCancelFee > 0) {
+                  updateData.cancellation_fee = existingCancelFee;
+                }
                 console.log(
                   `⏭️ Rider cancel fee already recorded for ride ${update.rideId} (£${existingCancelFee.toFixed(2)}) — skipping duplicate`,
                 );
@@ -3450,11 +3479,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 const walletDebitAmount = Math.max(0, walletAdjustmentAmount);
 
                 if (riderId && cancellationFeeAmount > 0) {
-                  // Atomically claim fee processing before making an external
-                  // payment. Concurrent/retried cancel events cannot both pass
-                  // this conditional update and double-charge the rider.
-                  const { data: feeClaim, error: feeClaimError } =
-                    await supabase
+                  // Atomically claim fee processing before charging.
+                  // Prefer cancellation_fee column; fall back to payment_status
+                  // when that column is missing from the schema.
+                  let feeClaimed = false;
+                  let alreadyClaimed = false;
+                  {
+                    const byFeeCol = await supabase
                       .from("rides")
                       .update({ cancellation_fee: cancellationFeeAmount })
                       .eq("id", update.rideId)
@@ -3462,196 +3493,229 @@ export function setupSocketIO(httpServer: HTTPServer) {
                       .or("cancellation_fee.is.null,cancellation_fee.eq.0")
                       .select("id")
                       .maybeSingle();
-                  if (feeClaimError) {
-                    console.error(
-                      `❌ Could not atomically claim rider cancellation fee for ride ${update.rideId}:`,
-                      feeClaimError.message,
-                    );
-                    return;
+                    if (!byFeeCol.error && byFeeCol.data) {
+                      feeClaimed = true;
+                      updateData.cancellation_fee = cancellationFeeAmount;
+                    } else if (
+                      byFeeCol.error &&
+                      /column|42703|PGRST204/i.test(
+                        String(byFeeCol.error.message || ""),
+                      )
+                    ) {
+                      const byStatus = await supabase
+                        .from("rides")
+                        .update({
+                          payment_status: "cancellation_fee_processing",
+                        })
+                        .eq("id", update.rideId)
+                        .neq("status", "cancelled")
+                        .not(
+                          "payment_status",
+                          "in",
+                          "(cancellation_fee_wallet_charged,cancellation_fee_card_captured,cancellation_fee_card_charged,cancellation_fee_processing,prepaid_retained)",
+                        )
+                        .select("id")
+                        .maybeSingle();
+                      if (!byStatus.error && byStatus.data) {
+                        feeClaimed = true;
+                      } else if (!byStatus.error && !byStatus.data) {
+                        alreadyClaimed = true;
+                      } else if (byStatus.error) {
+                        console.warn(
+                          `⚠️ Cancel-fee claim via payment_status failed for ${update.rideId}: ${byStatus.error.message} — charging once anyway`,
+                        );
+                        feeClaimed = true;
+                      }
+                    } else if (!byFeeCol.error && !byFeeCol.data) {
+                      alreadyClaimed = true;
+                    } else if (byFeeCol.error) {
+                      console.warn(
+                        `⚠️ Cancel-fee claim failed for ${update.rideId}: ${byFeeCol.error.message} — charging once anyway`,
+                      );
+                      feeClaimed = true;
+                    }
                   }
-                  if (!feeClaim) {
+
+                  if (alreadyClaimed) {
                     console.log(
                       `⏭️ Cancellation fee processing already claimed for ride ${update.rideId}`,
                     );
-                    return;
-                  }
+                  } else if (feeClaimed) {
+                    (update as any).cancellationFee = cancellationFeeAmount;
+                    (update as any).chargedAmount = walletDebitAmount;
+                    (update as any).walletAdjustment = walletAdjustmentAmount;
+                    (update as any).cancellationPolicy = "after_free_minute";
 
-                  (update as any).cancellationFee = cancellationFeeAmount;
-                  (update as any).chargedAmount = walletDebitAmount;
-                  (update as any).walletAdjustment = walletAdjustmentAmount;
-                  (update as any).cancellationPolicy = "after_free_minute";
+                    let cardCaptureSuccess = false;
+                    let capturedPaymentIntentId: string | undefined;
 
-                  let cardCaptureSuccess = false;
-                  let capturedPaymentIntentId: string | undefined;
-
-                  if (cancellationAlreadyCaptured) {
-                    cardCaptureSuccess = true;
-                    capturedPaymentIntentId =
-                      cancelledRide.payment_intent_id || undefined;
-                    updateData.payment_status = "prepaid_retained";
-                    (update as any).chargedVia = "prepaid";
-                    (update as any).chargedAmount = cancellationFeeAmount;
-                  } else if (
-                    cancelledRide.payment_method === "card" &&
-                    cancelledRide.payment_intent_id
-                  ) {
-                    const captureResult = await capturePaymentIntent(
-                      cancelledRide.payment_intent_id,
-                      cancellationFeeAmount,
-                    );
-                    cardCaptureSuccess = captureResult.success;
-                    capturedPaymentIntentId = captureResult.paymentIntentId;
-                    if (cardCaptureSuccess) {
-                      updateData.payment_status =
-                        "cancellation_fee_card_captured";
-                      updateData.payment_intent_id = capturedPaymentIntentId;
-                      (update as any).chargedVia = "card";
+                    if (cancellationAlreadyCaptured) {
+                      cardCaptureSuccess = true;
+                      capturedPaymentIntentId =
+                        cancelledRide.payment_intent_id || undefined;
+                      updateData.payment_status = "prepaid_retained";
+                      (update as any).chargedVia = "prepaid";
                       (update as any).chargedAmount = cancellationFeeAmount;
-                    } else {
-                      console.warn(
-                        `⚠️ Cancellation fee card capture failed for ride ${update.rideId}: ${captureResult.error}`,
+                    } else if (
+                      cancelledRide.payment_method === "card" &&
+                      cancelledRide.payment_intent_id
+                    ) {
+                      const captureResult = await capturePaymentIntent(
+                        cancelledRide.payment_intent_id,
+                        cancellationFeeAmount,
                       );
-                    }
-                  } else if (
-                    cancelledRide.payment_method === "card" &&
-                    walletDebitAmount > 0
-                  ) {
-                    const { data: riderUser } = await supabase
-                      .from("users")
-                      .select("stripe_customer_id")
-                      .eq("id", riderId)
-                      .single();
-                    if (riderUser?.stripe_customer_id) {
-                      const chargeResult = await chargeSavedCard(
-                        riderUser.stripe_customer_id,
-                        walletDebitAmount,
-                        update.rideId,
-                        "gbp",
-                        "cancellation_fee",
-                        `cancel_fee_${update.rideId}`,
-                      );
-                      cardCaptureSuccess = chargeResult.success;
-                      capturedPaymentIntentId = chargeResult.paymentIntentId;
+                      cardCaptureSuccess = captureResult.success;
+                      capturedPaymentIntentId = captureResult.paymentIntentId;
                       if (cardCaptureSuccess) {
                         updateData.payment_status =
-                          "cancellation_fee_card_charged";
+                          "cancellation_fee_card_captured";
                         updateData.payment_intent_id = capturedPaymentIntentId;
                         (update as any).chargedVia = "card";
-                        (update as any).chargedAmount = walletDebitAmount;
+                        (update as any).chargedAmount = cancellationFeeAmount;
                       } else {
                         console.warn(
-                          `⚠️ Cancellation fee card charge failed for ride ${update.rideId}: ${chargeResult.error}`,
+                          `⚠️ Cancellation fee card capture failed for ride ${update.rideId}: ${captureResult.error}`,
+                        );
+                      }
+                    } else if (
+                      cancelledRide.payment_method === "card" &&
+                      walletDebitAmount > 0
+                    ) {
+                      const { data: riderUser } = await supabase
+                        .from("users")
+                        .select("stripe_customer_id")
+                        .eq("id", riderId)
+                        .single();
+                      if (riderUser?.stripe_customer_id) {
+                        const chargeResult = await chargeSavedCard(
+                          riderUser.stripe_customer_id,
+                          walletDebitAmount,
+                          update.rideId,
+                          "gbp",
+                          "cancellation_fee",
+                          `cancel_fee_${update.rideId}`,
+                        );
+                        cardCaptureSuccess = chargeResult.success;
+                        capturedPaymentIntentId = chargeResult.paymentIntentId;
+                        if (cardCaptureSuccess) {
+                          updateData.payment_status =
+                            "cancellation_fee_card_charged";
+                          updateData.payment_intent_id =
+                            capturedPaymentIntentId;
+                          (update as any).chargedVia = "card";
+                          (update as any).chargedAmount = walletDebitAmount;
+                        } else {
+                          console.warn(
+                            `⚠️ Cancellation fee card charge failed for ride ${update.rideId}: ${chargeResult.error}`,
+                          );
+                        }
+                      }
+                    }
+
+                    if (!cardCaptureSuccess) {
+                      try {
+                        const { data: userRow } = await supabase
+                          .from("users")
+                          .select("wallet_balance")
+                          .eq("id", riderId)
+                          .single();
+
+                        const currentBalance = Number(
+                          userRow?.wallet_balance || 0,
+                        );
+                        const newBalance = Number(
+                          (currentBalance - walletAdjustmentAmount).toFixed(2),
+                        );
+
+                        await supabase
+                          .from("users")
+                          .update({ wallet_balance: newBalance })
+                          .eq("id", riderId);
+
+                        updateData.payment_status =
+                          "cancellation_fee_wallet_charged";
+                        (update as any).chargedVia = "wallet";
+                        (update as any).chargedAmount = walletDebitAmount;
+                        (update as any).walletBalance = newBalance;
+                      } catch (walletErr) {
+                        console.error(
+                          "❌ Failed to adjust wallet for cancellation fee:",
+                          walletErr,
                         );
                       }
                     }
-                  }
 
-                  if (!cardCaptureSuccess) {
-                    try {
-                      const { data: userRow } = await supabase
-                        .from("users")
-                        .select("wallet_balance")
-                        .eq("id", riderId)
-                        .single();
-
-                      const currentBalance = Number(
-                        userRow?.wallet_balance || 0,
-                      );
-                      const newBalance = Number(
-                        (currentBalance - walletAdjustmentAmount).toFixed(2),
-                      );
-
-                      await supabase
-                        .from("users")
-                        .update({ wallet_balance: newBalance })
-                        .eq("id", riderId);
-
-                      updateData.payment_status =
-                        "cancellation_fee_wallet_charged";
-                      (update as any).chargedVia = "wallet";
-                      (update as any).chargedAmount = walletDebitAmount;
-                      (update as any).walletBalance = newBalance;
-                    } catch (walletErr) {
-                      console.error(
-                        "❌ Failed to adjust wallet for cancellation fee:",
-                        walletErr,
-                      );
-                    }
-                  }
-
-                  if (
-                    (update as any).chargedVia === "wallet" &&
-                    walletAdjustmentAmount !== 0
-                  ) {
-                    try {
-                      const { error: walletTxnErr } = await supabase
-                        .from("wallet_transactions")
-                        .insert({
+                    if (
+                      (update as any).chargedVia === "wallet" &&
+                      walletAdjustmentAmount !== 0
+                    ) {
+                      try {
+                        await supabase.from("wallet_transactions").insert({
                           user_id: riderId,
                           ride_id: update.rideId,
                           amount: Math.abs(walletAdjustmentAmount),
-                          type: walletAdjustmentAmount > 0 ? "debit" : "credit",
+                          type:
+                            walletAdjustmentAmount > 0 ? "debit" : "credit",
                           description:
                             walletAdjustmentAmount > 0
                               ? `100% Cancellation fee (£${cancellationFeeAmount.toFixed(2)})`
                               : `Refund unused wallet deduction after 100% cancellation fee (£${cancellationFeeAmount.toFixed(2)})`,
                         });
-                    } catch (txnErr) {
+                      } catch (txnErr) {
+                        console.warn(
+                          "⚠️ Failed to insert cancellation fee wallet transaction:",
+                          txnErr,
+                        );
+                      }
+                    }
+
+                    if ((update as any).chargedVia === "card") {
+                      try {
+                        await supabase.from("payments").insert({
+                          ride_id: update.rideId,
+                          user_id: riderId,
+                          amount: cancellationFeeAmount,
+                          currency: "gbp",
+                          status: "succeeded",
+                          payment_method: "card",
+                          stripe_payment_intent_id:
+                            capturedPaymentIntentId ||
+                            cancelledRide.payment_intent_id,
+                          completed_at: new Date().toISOString(),
+                        });
+                      } catch (paymentErr) {
+                        console.warn(
+                          "⚠️ Failed to insert cancellation card payment record:",
+                          paymentErr,
+                        );
+                      }
+                    }
+
+                    if (cancelledRide.driver_id) {
+                      try {
+                        await ensureRiderCancellationEarningsCredit(
+                          update.rideId,
+                          cancelledRide.driver_id,
+                          cancellationFeeAmount,
+                        );
+                      } catch (earningsErr) {
+                        console.error(
+                          "❌ Failed to update driver earnings on cancellation:",
+                          earningsErr,
+                        );
+                      }
+                    } else {
                       console.warn(
-                        "⚠️ Failed to insert cancellation fee wallet transaction:",
-                        txnErr,
+                        `⚠️ Rider cancel fee charged but no driver_id on ride ${update.rideId}`,
                       );
                     }
                   }
-
-                  if ((update as any).chargedVia === "card") {
-                    try {
-                      await supabase.from("payments").insert({
-                        ride_id: update.rideId,
-                        user_id: riderId,
-                        amount: cancellationFeeAmount,
-                        currency: "gbp",
-                        status: "succeeded",
-                        payment_method: "card",
-                        stripe_payment_intent_id:
-                          capturedPaymentIntentId ||
-                          cancelledRide.payment_intent_id,
-                        completed_at: new Date().toISOString(),
-                      });
-                    } catch (paymentErr) {
-                      console.warn(
-                        "⚠️ Failed to insert cancellation card payment record:",
-                        paymentErr,
-                      );
-                    }
-                  }
-
-                  // Credit the entire payable fare to the assigned driver.
-                  if (cancelledRide.driver_id) {
-                    try {
-                      await ensureRiderCancellationEarningsCredit(
-                        update.rideId,
-                        cancelledRide.driver_id,
-                        cancellationFeeAmount,
-                      );
-                    } catch (earningsErr) {
-                      console.error(
-                        "❌ Failed to update driver earnings on cancellation:",
-                        earningsErr,
-                      );
-                    }
-                  } else {
-                    console.warn(
-                      `⚠️ Rider cancel fee charged but no driver_id on ride ${update.rideId}`,
-                    );
-                  }
-
-                  updateData.cancellation_fee = cancellationFeeAmount;
                 }
               } else {
                 (update as any).cancellationFee = 0;
                 (update as any).chargedAmount = 0;
                 (update as any).chargedVia = "none";
+                // Only set when column exists — stripped below on write if missing.
                 updateData.cancellation_fee = 0;
                 if (driverInitiatedCancellation) {
                   (update as any).cancellationPolicy =
@@ -3709,12 +3773,43 @@ export function setupSocketIO(httpServer: HTTPServer) {
             JSON.stringify(updateData),
           );
 
-          const { data: updatedRide, error: statusUpdateError } = await supabase
-            .from("rides")
-            .update(updateData)
-            .eq("id", update.rideId)
-            .select()
-            .maybeSingle();
+          // Retry without optional columns when schema is missing them
+          // (e.g. cancelled_by / cancellation_fee on some environments).
+          let payloadToUpdate: Record<string, any> = { ...updateData };
+          let updatedRide: any = null;
+          let statusUpdateError: any = null;
+          for (let attempt = 0; attempt < 6; attempt += 1) {
+            const result = await supabase
+              .from("rides")
+              .update(payloadToUpdate)
+              .eq("id", update.rideId)
+              .select()
+              .maybeSingle();
+            updatedRide = result.data;
+            statusUpdateError = result.error;
+            if (!statusUpdateError) break;
+
+            const missingColumn = String(statusUpdateError.message || "").match(
+              /'([^']+)'/,
+            )?.[1];
+            if (
+              missingColumn &&
+              Object.prototype.hasOwnProperty.call(
+                payloadToUpdate,
+                missingColumn,
+              ) &&
+              /column|42703|PGRST204/i.test(
+                String(statusUpdateError.message || ""),
+              )
+            ) {
+              delete payloadToUpdate[missingColumn];
+              console.warn(
+                `⚠️ rides.${missingColumn} missing — retrying status update without it`,
+              );
+              continue;
+            }
+            break;
+          }
 
           if (statusUpdateError) {
             console.error(

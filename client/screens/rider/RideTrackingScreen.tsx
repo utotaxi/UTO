@@ -99,6 +99,10 @@ export default function RideTrackingScreen({ navigation }: any) {
   const [waitingSecondsLeft, setWaitingSecondsLeft] = useState<number | null>(
     null,
   );
+  /** Seconds left in the 1-minute free-cancel window after driver accept. */
+  const [freeCancelSecondsLeft, setFreeCancelSecondsLeft] = useState<
+    number | null
+  >(null);
   const [noDriversAvailable, setNoDriversAvailable] = useState(false);
   const hasInitialized = useRef(false);
 
@@ -272,6 +276,46 @@ export default function RideTrackingScreen({ navigation }: any) {
     hasInitialized.current = true;
   }, []);
 
+  // ─── 1-minute free-cancel countdown after driver is assigned ───────────
+  useEffect(() => {
+    const status = String(rideStatus || activeRide?.status || "").toLowerCase();
+    const showFreeCancel =
+      status === "accepted" ||
+      status === "arrived" ||
+      status === "at_pickup" ||
+      status === "arriving";
+
+    if (!showFreeCancel) {
+      setFreeCancelSecondsLeft(null);
+      return;
+    }
+
+    let acceptedAtMs = activeRide?.acceptedAt
+      ? new Date(activeRide.acceptedAt).getTime()
+      : 0;
+    // If status is accepted but acceptedAt never arrived over the socket, start
+    // the free window from now so the rider still sees the countdown.
+    if (!acceptedAtMs || !Number.isFinite(acceptedAtMs)) {
+      acceptedAtMs = Date.now();
+    }
+
+    const FREE_CANCEL_MS = 60_000;
+    const tick = () => {
+      const remainingMs = FREE_CANCEL_MS - (Date.now() - acceptedAtMs);
+      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+      setFreeCancelSecondsLeft(remainingSec > 0 ? remainingSec : 0);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [
+    rideStatus,
+    activeRide?.status,
+    activeRide?.acceptedAt,
+    activeRide?.id,
+  ]);
+
   // ─── 10-minute countdown timer when driver arrives ────────────────────
   useEffect(() => {
     const status = rideStatus || activeRide?.status;
@@ -441,38 +485,46 @@ export default function RideTrackingScreen({ navigation }: any) {
   const handleCancel = () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    } catch (_) { }
+    } catch (_) {}
     // 1 free minute from the moment a driver accepts; after that, full payable fare.
-    const acceptedAtMs = (activeRide as any)?.acceptedAt
-      ? new Date((activeRide as any).acceptedAt).getTime()
+    const status = String(activeRide?.status || "").toLowerCase();
+    const acceptedAtMs = activeRide?.acceptedAt
+      ? new Date(activeRide.acceptedAt).getTime()
       : 0;
-    const driverAccepted =
-      !!acceptedAtMs ||
-      ["accepted", "arriving", "arrived", "at_pickup", "in_progress"].includes(
-        String(activeRide?.status || "").toLowerCase(),
-      );
-    const acceptedElapsedMs = acceptedAtMs
-      ? Date.now() - acceptedAtMs
-      : driverAccepted
-        ? 60_000
-        : 0;
-    const withinFreeMinute = !driverAccepted || acceptedElapsedMs < 60_000;
+    const driverAssigned = [
+      "accepted",
+      "arriving",
+      "arrived",
+      "at_pickup",
+      "in_progress",
+    ].includes(status);
+    const withinFreeMinute =
+      !!acceptedAtMs &&
+      Number.isFinite(acceptedAtMs) &&
+      Date.now() - acceptedAtMs < 60_000;
+    // Prefer live countdown state; fall back to acceptedAt math.
     const freeSecondsRemaining =
-      driverAccepted && acceptedElapsedMs < 60_000
-        ? Math.max(1, Math.ceil((60_000 - acceptedElapsedMs) / 1000))
-        : 0;
+      freeCancelSecondsLeft != null && freeCancelSecondsLeft > 0
+        ? freeCancelSecondsLeft
+        : withinFreeMinute
+          ? Math.max(1, Math.ceil((60_000 - (Date.now() - acceptedAtMs)) / 1000))
+          : 0;
     const fullFare = Number(
       (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0,
     );
     const discount = Math.max(0, Number(activeRide?.discountAmount || 0));
-    // Match on-screen Total Fare (payable amount with or without coupon).
     const fareAmount = Math.max(0, Number((fullFare - discount).toFixed(2)));
-    const cancellationFeeApplies = fareAmount > 0 && !withinFreeMinute;
+    // Charge only after driver is assigned AND free minute has ended.
+    const cancellationFeeApplies =
+      fareAmount > 0 &&
+      driverAssigned &&
+      !withinFreeMinute &&
+      freeSecondsRemaining <= 0;
 
     if (cancellationFeeApplies) {
       Alert.alert(
         "Cancellation Fee Applies",
-        `Your free cancellation period has ended and your driver is on the way. Cancelling now will result in the full fare amount of £${fareAmount.toFixed(2)} being charged to your payment method.`,
+        `Your free 1-minute cancellation period has ended and your driver is on the way. Cancelling now will charge the full fare of £${fareAmount.toFixed(2)} to your payment method.`,
         [
           { text: "Keep Ride", style: "cancel" },
           {
@@ -495,7 +547,7 @@ export default function RideTrackingScreen({ navigation }: any) {
     Alert.alert(
       "Cancel Ride",
       freeSecondsRemaining > 0
-        ? `Are you sure you want to cancel this ride? You are still inside the free cancellation period (${freeSecondsRemaining}s remaining). No cancellation fee will be charged.`
+        ? `Are you sure you want to cancel this ride? Free cancellation ends in ${freeSecondsRemaining}s. No fee will be charged.`
         : "Are you sure you want to cancel this ride? No cancellation fee will be charged.",
       [
         { text: "Keep Ride", style: "cancel" },
@@ -1855,6 +1907,64 @@ export default function RideTrackingScreen({ navigation }: any) {
                 )}
               </View>
             )}
+
+            {/* ─── 1-minute free cancellation countdown after assign ─── */}
+            {(currentStatus === "accepted" ||
+              currentStatus === "arrived" ||
+              currentStatus === "at_pickup") &&
+              freeCancelSecondsLeft !== null &&
+              freeCancelSecondsLeft > 0 && (
+                <AnimatedView
+                  style={[
+                    styles.waitingTimerContainer,
+                    {
+                      backgroundColor: UTOColors.success + "18",
+                      borderColor: UTOColors.success + "40",
+                      marginTop: Spacing.md,
+                    },
+                    freeCancelSecondsLeft <= 15 ? timerPulseStyle : {},
+                  ]}
+                >
+                  <View style={styles.waitingTimerHeader}>
+                    <MaterialIcons
+                      name="timer"
+                      size={18}
+                      color={UTOColors.success}
+                    />
+                    <ThemedText
+                      style={[
+                        styles.waitingTimerTitle,
+                        { color: theme.text },
+                      ]}
+                    >
+                      Free cancellation ends in
+                    </ThemedText>
+                  </View>
+                  <ThemedText
+                    style={[
+                      styles.waitingTimerDigits,
+                      {
+                        color:
+                          freeCancelSecondsLeft <= 15
+                            ? "#EF4444"
+                            : UTOColors.success,
+                      },
+                    ]}
+                  >
+                    {`0:${freeCancelSecondsLeft.toString().padStart(2, "0")}`}
+                  </ThemedText>
+                  <ThemedText
+                    style={[
+                      styles.waitingTimerWarning,
+                      { color: theme.textSecondary },
+                    ]}
+                  >
+                    Cancel free within this time. After that the full fare will
+                    be charged.
+                  </ThemedText>
+                </AnimatedView>
+              )}
+
             {currentStatus === "in_progress" && (
               <View style={styles.etaRow}>
                 <ThemedText
