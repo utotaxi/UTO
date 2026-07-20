@@ -1090,13 +1090,19 @@ export function RideProvider({ children }: { children: ReactNode }) {
       const nextStatus = String(serverRide.status || "").toLowerCase();
       if (!nextStatus || nextStatus === current.status) {
         // Still sync driver details / acceptedAt if accept landed without them.
-        if (nextStatus === "accepted") {
+        if (
+          nextStatus === "accepted" ||
+          nextStatus === "arrived" ||
+          nextStatus === "at_pickup" ||
+          nextStatus === "arriving"
+        ) {
           const nextAcceptedAt =
             serverRide.acceptedAt ||
+            (serverRide as any).accepted_at ||
             current.acceptedAt ||
-            new Date().toISOString();
+            (nextStatus === "accepted" ? new Date().toISOString() : undefined);
           const needsPatch =
-            !current.acceptedAt ||
+            (!!nextAcceptedAt && !current.acceptedAt) ||
             (!!serverRide.driverName && !current.driverName);
           if (needsPatch) {
             const patched: Ride = {
@@ -1106,7 +1112,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
               licensePlate: serverRide.licensePlate || current.licensePlate,
               driverRating: serverRide.driverRating ?? current.driverRating,
-              acceptedAt: nextAcceptedAt,
+              ...(nextAcceptedAt ? { acceptedAt: nextAcceptedAt } : {}),
             };
             setActiveRide(patched);
             AsyncStorage.setItem(
@@ -1133,13 +1139,15 @@ export function RideProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      const syncedAcceptedAt =
+        serverRide.acceptedAt ||
+        (serverRide as any).accepted_at ||
+        current.acceptedAt ||
+        (nextStatus === "accepted" ? new Date().toISOString() : undefined);
       const updated: Ride = {
         ...current,
         status: nextStatus as RideStatus,
-        acceptedAt:
-          serverRide.acceptedAt ||
-          current.acceptedAt ||
-          (nextStatus === "accepted" ? new Date().toISOString() : undefined),
+        ...(syncedAcceptedAt ? { acceptedAt: syncedAcceptedAt } : {}),
         driverName: serverRide.driverName || current.driverName,
         driverPhone: serverRide.driverPhone || current.driverPhone,
         vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
@@ -1588,6 +1596,19 @@ export function RideProvider({ children }: { children: ReactNode }) {
                       (update as any).accepted_at ||
                       current.acceptedAt ||
                       new Date().toISOString(),
+                  }
+                : {}),
+              // Keep the original accept timestamp across later status updates
+              // so the 1-minute free-cancel countdown stays accurate.
+              ...(update.status !== "accepted" &&
+              (current.acceptedAt ||
+                (update as any).acceptedAt ||
+                (update as any).accepted_at)
+                ? {
+                    acceptedAt:
+                      current.acceptedAt ||
+                      (update as any).acceptedAt ||
+                      (update as any).accepted_at,
                   }
                 : {}),
               // Capture driverArrivedAt timestamp when status transitions to "arrived"

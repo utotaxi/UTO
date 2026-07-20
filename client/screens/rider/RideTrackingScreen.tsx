@@ -11,6 +11,7 @@ import {
   ScrollView,
   Dimensions,
   Alert,
+  Modal,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -103,8 +104,12 @@ export default function RideTrackingScreen({ navigation }: any) {
   const [freeCancelSecondsLeft, setFreeCancelSecondsLeft] = useState<
     number | null
   >(null);
+  /** Cancel confirmation sheet — shows live free-cancel countdown. */
+  const [showCancelModal, setShowCancelModal] = useState(false);
   const [noDriversAvailable, setNoDriversAvailable] = useState(false);
   const hasInitialized = useRef(false);
+  /** Stable anchor for the free-cancel window (avoids resetting on re-renders). */
+  const freeCancelAnchorRef = useRef<number | null>(null);
 
   const pulseScale = useSharedValue(1);
   const cancelScale = useSharedValue(1);
@@ -279,29 +284,34 @@ export default function RideTrackingScreen({ navigation }: any) {
   // ─── 1-minute free-cancel countdown after driver is assigned ───────────
   useEffect(() => {
     const status = String(rideStatus || activeRide?.status || "").toLowerCase();
-    const showFreeCancel =
-      status === "accepted" ||
-      status === "arrived" ||
-      status === "at_pickup" ||
-      status === "arriving";
+    const driverAssigned = [
+      "accepted",
+      "arrived",
+      "at_pickup",
+      "arriving",
+    ].includes(status);
 
-    if (!showFreeCancel) {
+    if (!driverAssigned) {
+      freeCancelAnchorRef.current = null;
       setFreeCancelSecondsLeft(null);
       return;
     }
 
-    let acceptedAtMs = activeRide?.acceptedAt
+    const parsedAcceptedAt = activeRide?.acceptedAt
       ? new Date(activeRide.acceptedAt).getTime()
-      : 0;
-    // If status is accepted but acceptedAt never arrived over the socket, start
-    // the free window from now so the rider still sees the countdown.
-    if (!acceptedAtMs || !Number.isFinite(acceptedAtMs)) {
-      acceptedAtMs = Date.now();
+      : NaN;
+    // Prefer the real accept timestamp from the server; only fall back to "now"
+    // once so the countdown does not reset on every re-render.
+    if (Number.isFinite(parsedAcceptedAt) && parsedAcceptedAt > 0) {
+      freeCancelAnchorRef.current = parsedAcceptedAt;
+    } else if (!freeCancelAnchorRef.current) {
+      freeCancelAnchorRef.current = Date.now();
     }
 
     const FREE_CANCEL_MS = 60_000;
     const tick = () => {
-      const remainingMs = FREE_CANCEL_MS - (Date.now() - acceptedAtMs);
+      const anchor = freeCancelAnchorRef.current || Date.now();
+      const remainingMs = FREE_CANCEL_MS - (Date.now() - anchor);
       const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
       setFreeCancelSecondsLeft(remainingSec > 0 ? remainingSec : 0);
     };
@@ -486,11 +496,20 @@ export default function RideTrackingScreen({ navigation }: any) {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     } catch (_) {}
-    // 1 free minute from the moment a driver accepts; after that, full payable fare.
-    const status = String(activeRide?.status || "").toLowerCase();
-    const acceptedAtMs = activeRide?.acceptedAt
-      ? new Date(activeRide.acceptedAt).getTime()
-      : 0;
+    // Open confirmation modal so the free-cancel countdown is visible live.
+    setShowCancelModal(true);
+  };
+
+  const getCancelFeeState = () => {
+    // 1 free minute from the moment a driver is assigned; after that, full payable fare.
+    const status = String(
+      rideStatus || activeRide?.status || "",
+    ).toLowerCase();
+    const acceptedAtMs =
+      freeCancelAnchorRef.current ||
+      (activeRide?.acceptedAt
+        ? new Date(activeRide.acceptedAt).getTime()
+        : 0);
     const driverAssigned = [
       "accepted",
       "arriving",
@@ -499,72 +518,54 @@ export default function RideTrackingScreen({ navigation }: any) {
       "in_progress",
     ].includes(status);
     const withinFreeMinute =
-      !!acceptedAtMs &&
-      Number.isFinite(acceptedAtMs) &&
-      Date.now() - acceptedAtMs < 60_000;
-    // Prefer live countdown state; fall back to acceptedAt math.
-    const freeSecondsRemaining =
-      freeCancelSecondsLeft != null && freeCancelSecondsLeft > 0
-        ? freeCancelSecondsLeft
-        : withinFreeMinute
-          ? Math.max(1, Math.ceil((60_000 - (Date.now() - acceptedAtMs)) / 1000))
-          : 0;
+      driverAssigned &&
+      freeCancelSecondsLeft != null &&
+      freeCancelSecondsLeft > 0;
+    const freeSecondsRemaining = withinFreeMinute
+      ? freeCancelSecondsLeft
+      : driverAssigned &&
+          Number.isFinite(acceptedAtMs) &&
+          acceptedAtMs > 0 &&
+          Date.now() - acceptedAtMs < 60_000
+        ? Math.max(1, Math.ceil((60_000 - (Date.now() - acceptedAtMs)) / 1000))
+        : 0;
     const fullFare = Number(
       (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0,
     );
     const discount = Math.max(0, Number(activeRide?.discountAmount || 0));
     const fareAmount = Math.max(0, Number((fullFare - discount).toFixed(2)));
-    // Charge only after driver is assigned AND free minute has ended.
+    // Only charge once we know the free window has ended. If the countdown
+    // has not started yet (just assigned), treat cancel as free in the UI.
+    const freeWindowSettled =
+      freeCancelSecondsLeft != null ||
+      (Number.isFinite(acceptedAtMs) && acceptedAtMs > 0);
     const cancellationFeeApplies =
       fareAmount > 0 &&
       driverAssigned &&
-      !withinFreeMinute &&
+      freeWindowSettled &&
       freeSecondsRemaining <= 0;
 
-    if (cancellationFeeApplies) {
-      Alert.alert(
-        "Cancellation Fee Applies",
-        `Your free 1-minute cancellation period has ended and your driver is on the way. Cancelling now will charge the full fare of £${fareAmount.toFixed(2)} to your payment method.`,
-        [
-          { text: "Keep Ride", style: "cancel" },
-          {
-            text: "Cancel & Accept Charge",
-            style: "destructive",
-            onPress: () => {
-              try {
-                if (activeRide) cancelRide(activeRide.id, true);
-              } catch (e) {
-                console.error("Cancel ride error:", e);
-                navigateHome();
-              }
-            },
-          },
-        ],
-      );
+    return {
+      driverAssigned,
+      freeSecondsRemaining,
+      fareAmount,
+      cancellationFeeApplies,
+    };
+  };
+
+  const confirmCancelRide = () => {
+    if (!activeRide) {
+      setShowCancelModal(false);
       return;
     }
-
-    Alert.alert(
-      "Cancel Ride",
-      freeSecondsRemaining > 0
-        ? `Are you sure you want to cancel this ride? Free cancellation ends in ${freeSecondsRemaining}s. No fee will be charged.`
-        : "Are you sure you want to cancel this ride? No cancellation fee will be charged.",
-      [
-        { text: "Keep Ride", style: "cancel" },
-        {
-          text: "Cancel Ride",
-          style: "destructive",
-          onPress: () => {
-            try {
-              if (activeRide) cancelRide(activeRide.id, false);
-            } catch (e) {
-              console.error("Cancel ride error:", e);
-              navigateHome();
-            }
-          },
-        },
-      ],
-    );
+    const { cancellationFeeApplies } = getCancelFeeState();
+    setShowCancelModal(false);
+    try {
+      cancelRide(activeRide.id, cancellationFeeApplies);
+    } catch (e) {
+      console.error("Cancel ride error:", e);
+      navigateHome();
+    }
   };
 
   const getDialablePhone = (rawPhone?: string) => {
@@ -1765,7 +1766,14 @@ export default function RideTrackingScreen({ navigation }: any) {
     longitude: activeRide.pickupLocation.longitude + 0.003,
   };
 
-  const currentStatus = rideStatus || activeRide.status;
+  const currentStatus = String(
+    rideStatus || activeRide.status || "",
+  ).toLowerCase();
+  const cancelFeeState = getCancelFeeState();
+  const showFreeCancelCountdown =
+    ["accepted", "arrived", "at_pickup", "arriving"].includes(currentStatus) &&
+    freeCancelSecondsLeft !== null &&
+    freeCancelSecondsLeft > 0;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
@@ -1909,11 +1917,7 @@ export default function RideTrackingScreen({ navigation }: any) {
             )}
 
             {/* ─── 1-minute free cancellation countdown after assign ─── */}
-            {(currentStatus === "accepted" ||
-              currentStatus === "arrived" ||
-              currentStatus === "at_pickup") &&
-              freeCancelSecondsLeft !== null &&
-              freeCancelSecondsLeft > 0 && (
+            {showFreeCancelCountdown && (
                 <AnimatedView
                   style={[
                     styles.waitingTimerContainer,
@@ -1922,7 +1926,10 @@ export default function RideTrackingScreen({ navigation }: any) {
                       borderColor: UTOColors.success + "40",
                       marginTop: Spacing.md,
                     },
-                    freeCancelSecondsLeft <= 15 ? timerPulseStyle : {},
+                    freeCancelSecondsLeft !== null &&
+                    freeCancelSecondsLeft <= 15
+                      ? timerPulseStyle
+                      : {},
                   ]}
                 >
                   <View style={styles.waitingTimerHeader}>
@@ -1945,13 +1952,14 @@ export default function RideTrackingScreen({ navigation }: any) {
                       styles.waitingTimerDigits,
                       {
                         color:
+                          freeCancelSecondsLeft !== null &&
                           freeCancelSecondsLeft <= 15
                             ? "#EF4444"
                             : UTOColors.success,
                       },
                     ]}
                   >
-                    {`0:${freeCancelSecondsLeft.toString().padStart(2, "0")}`}
+                    {`0:${(freeCancelSecondsLeft ?? 0).toString().padStart(2, "0")}`}
                   </ThemedText>
                   <ThemedText
                     style={[
@@ -2448,24 +2456,55 @@ export default function RideTrackingScreen({ navigation }: any) {
           {(currentStatus === "pending" ||
             currentStatus === "accepted" ||
             currentStatus === "at_pickup" ||
-            currentStatus === "arrived") &&
+            currentStatus === "arrived" ||
+            currentStatus === "arriving") &&
             !noDriversAvailable && (
-              <AnimatedPressable
-                onPress={handleCancel}
-                onPressIn={() => (cancelScale.value = withSpring(0.98))}
-                onPressOut={() => (cancelScale.value = withSpring(1))}
-                style={[
-                  styles.cancelButton,
-                  { backgroundColor: UTOColors.error + "15" },
-                  cancelAnimatedStyle,
-                ]}
-              >
-                <ThemedText
-                  style={[styles.cancelButtonText, { color: UTOColors.error }]}
+              <>
+                {showFreeCancelCountdown && (
+                  <View
+                    style={[
+                      styles.freeCancelBanner,
+                      {
+                        backgroundColor: UTOColors.success + "18",
+                        borderColor: UTOColors.success + "40",
+                      },
+                    ]}
+                  >
+                    <MaterialIcons
+                      name="timer"
+                      size={18}
+                      color={
+                        freeCancelSecondsLeft !== null &&
+                        freeCancelSecondsLeft <= 15
+                          ? "#EF4444"
+                          : UTOColors.success
+                      }
+                    />
+                    <ThemedText
+                      style={[styles.freeCancelBannerText, { color: theme.text }]}
+                    >
+                      Free cancel:{" "}
+                      {`0:${(freeCancelSecondsLeft ?? 0).toString().padStart(2, "0")}`}
+                    </ThemedText>
+                  </View>
+                )}
+                <AnimatedPressable
+                  onPress={handleCancel}
+                  onPressIn={() => (cancelScale.value = withSpring(0.98))}
+                  onPressOut={() => (cancelScale.value = withSpring(1))}
+                  style={[
+                    styles.cancelButton,
+                    { backgroundColor: UTOColors.error + "15" },
+                    cancelAnimatedStyle,
+                  ]}
                 >
-                  Cancel Ride
-                </ThemedText>
-              </AnimatedPressable>
+                  <ThemedText
+                    style={[styles.cancelButtonText, { color: UTOColors.error }]}
+                  >
+                    Cancel Ride
+                  </ThemedText>
+                </AnimatedPressable>
+              </>
             )}
 
           {/* ─── No Drivers Available — Rebook ─────────────────────────── */}
@@ -2516,6 +2555,122 @@ export default function RideTrackingScreen({ navigation }: any) {
           )}
         </ScrollView>
       </Animated.View>
+
+      {/* Cancel confirmation — live free-cancel countdown after driver assign */}
+      <Modal
+        visible={showCancelModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCancelModal(false)}
+      >
+        <View style={styles.cancelModalOverlay}>
+          <View
+            style={[
+              styles.cancelModalCard,
+              { backgroundColor: theme.backgroundRoot },
+            ]}
+          >
+            <MaterialIcons
+              name={
+                cancelFeeState.cancellationFeeApplies
+                  ? "warning"
+                  : "cancel"
+              }
+              size={36}
+              color={
+                cancelFeeState.cancellationFeeApplies
+                  ? UTOColors.warning
+                  : UTOColors.error
+              }
+            />
+            <ThemedText
+              style={[styles.cancelModalTitle, { color: theme.text }]}
+            >
+              {cancelFeeState.cancellationFeeApplies
+                ? "Cancellation Fee Applies"
+                : "Cancel Ride?"}
+            </ThemedText>
+
+            {showFreeCancelCountdown && (
+              <View
+                style={[
+                  styles.cancelModalTimerBox,
+                  {
+                    backgroundColor: UTOColors.success + "18",
+                    borderColor: UTOColors.success + "40",
+                  },
+                ]}
+              >
+                <ThemedText
+                  style={[
+                    styles.cancelModalTimerLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Free cancellation ends in
+                </ThemedText>
+                <ThemedText
+                  style={[
+                    styles.cancelModalTimerDigits,
+                    {
+                      color:
+                        freeCancelSecondsLeft !== null &&
+                        freeCancelSecondsLeft <= 15
+                          ? "#EF4444"
+                          : UTOColors.success,
+                    },
+                  ]}
+                >
+                  {`0:${(freeCancelSecondsLeft ?? 0).toString().padStart(2, "0")}`}
+                </ThemedText>
+              </View>
+            )}
+
+            <ThemedText
+              style={[
+                styles.cancelModalMessage,
+                { color: theme.textSecondary },
+              ]}
+            >
+              {cancelFeeState.cancellationFeeApplies
+                ? `Your free 1-minute period has ended. Cancelling now will charge the full fare of £${cancelFeeState.fareAmount.toFixed(2)}.`
+                : showFreeCancelCountdown
+                  ? "Cancel now and no fare will be charged."
+                  : cancelFeeState.driverAssigned
+                    ? "Are you sure you want to cancel this ride?"
+                    : "No cancellation fee will be charged before a driver is assigned."}
+            </ThemedText>
+
+            <Pressable
+              onPress={confirmCancelRide}
+              style={[
+                styles.cancelModalConfirmBtn,
+                {
+                  backgroundColor: cancelFeeState.cancellationFeeApplies
+                    ? UTOColors.warning
+                    : UTOColors.error,
+                },
+              ]}
+            >
+              <ThemedText style={styles.cancelModalConfirmText}>
+                {cancelFeeState.cancellationFeeApplies
+                  ? "Cancel & Accept Charge"
+                  : "Cancel Ride"}
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowCancelModal(false)}
+              style={styles.cancelModalKeepBtn}
+            >
+              <ThemedText
+                style={[styles.cancelModalKeepText, { color: theme.text }]}
+              >
+                Keep Ride
+              </ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2811,6 +2966,84 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "center",
     marginTop: 4,
+  },
+  freeCancelBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  freeCancelBannerText: {
+    fontSize: 14,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"] as any,
+  },
+  cancelModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    paddingHorizontal: Spacing.lg,
+  },
+  cancelModalCard: {
+    borderRadius: 20,
+    padding: Spacing.xl,
+    alignItems: "center",
+    gap: 12,
+  },
+  cancelModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  cancelModalTimerBox: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  cancelModalTimerLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  cancelModalTimerDigits: {
+    fontSize: 36,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"] as any,
+    marginTop: 4,
+  },
+  cancelModalMessage: {
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  cancelModalConfirmBtn: {
+    width: "100%",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  cancelModalConfirmText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  cancelModalKeepBtn: {
+    width: "100%",
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  cancelModalKeepText: {
+    fontSize: 15,
+    fontWeight: "600",
   },
   // ─── Ride Stage Stepper Styles ──────────────────────────
   stageStepper: {

@@ -3400,11 +3400,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   "at_pickup",
                   "in_progress",
                 ].includes(String(cancelledRide?.status || "").toLowerCase());
-              // 1 free minute from accept; if accepted_at is missing but a driver is
-              // already assigned, treat the free window as already elapsed.
+              // 1 free minute from accept. If accepted_at is missing we cannot prove
+              // the free window has elapsed — do NOT charge (keeps app countdown +
+              // server fee decision aligned; rider gets benefit of the doubt).
               const isAfterFreeMinute =
                 driverHasAccepted &&
-                (acceptedAt > 0 ? acceptedElapsedMs >= 60_000 : true);
+                acceptedAt > 0 &&
+                acceptedElapsedMs >= 60_000;
               const cancelledByRaw = String(
                 (update as any).cancelledBy || "",
               ).toLowerCase();
