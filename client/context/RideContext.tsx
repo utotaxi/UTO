@@ -992,6 +992,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
   }, [activeRide]);
   const pendingCancelledRideRef = React.useRef<Ride | null>(null);
   const lastDriverCancellationNoticeRef = React.useRef<string | null>(null);
+  /** Prevents double-finalize when both socket and poll see the same terminal status. */
+  const finalizedTerminalRideRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     loadStoredRides();
@@ -1125,16 +1127,71 @@ export function RideProvider({ children }: { children: ReactNode }) {
       }
 
       if (
-        ["cancelled", "cancelled_no_drivers", "cancelled_no_show", "completed"].includes(
-          nextStatus,
-        )
+        [
+          "cancelled",
+          "cancelled_no_drivers",
+          "cancelled_no_show",
+          "completed",
+          "payment_collected",
+        ].includes(nextStatus)
       ) {
-        // Let the socket cancel/complete handlers own teardown when possible;
-        // still clear a stuck pending if the server already cancelled.
-        if (current.status === "pending") {
-          setActiveRide(null);
-          activeRideRef.current = null;
-          AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
+        // Socket may have been missed (background / reconnect). Always tear down
+        // terminal rides here — not only when still "pending" — and surface the
+        // driver rating prompt for successful completions.
+        if (finalizedTerminalRideRef.current === rideId) {
+          return;
+        }
+        finalizedTerminalRideRef.current = rideId;
+
+        const finalStatus: RideStatus =
+          nextStatus === "cancelled_no_drivers" ||
+          nextStatus === "cancelled_no_show"
+            ? "cancelled"
+            : nextStatus === "payment_collected"
+              ? "completed"
+              : (nextStatus as RideStatus);
+
+        const finalRide: Ride = {
+          ...current,
+          status: finalStatus,
+          completedAt: new Date().toISOString(),
+          farePrice: Number(
+            serverRide.finalPrice ||
+              serverRide.estimatedPrice ||
+              current.farePrice ||
+              0,
+          ),
+        };
+
+        setActiveRide(null);
+        activeRideRef.current = null;
+        AsyncStorage.removeItem(ACTIVE_RIDE_KEY).catch(console.error);
+
+        setRideHistory((prev) => {
+          if (prev.some((r) => r.id === rideId)) return prev;
+          const newHistory = [finalRide, ...prev];
+          AsyncStorage.setItem(
+            RIDE_HISTORY_KEY,
+            JSON.stringify(newHistory),
+          ).catch(console.error);
+          return newHistory;
+        });
+
+        if (
+          nextStatus === "completed" ||
+          nextStatus === "payment_collected"
+        ) {
+          setPendingRating({
+            rideId,
+            driverName: current.driverName || "Your Driver",
+          });
+          console.log(
+            `✅ [RideContext] Poll finalized completed ride ${rideId} — showing driver rating`,
+          );
+        } else {
+          console.log(
+            `✅ [RideContext] Poll finalized cancelled ride ${rideId}`,
+          );
         }
         return;
       }
@@ -1178,8 +1235,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // Pending needs a fast poll; later statuses can be a bit slower.
-    const intervalMs = status === "pending" ? 4000 : 8000;
+    // Pending / in-progress need a responsive poll so completion isn't missed.
+    const intervalMs =
+      status === "pending" || status === "in_progress" ? 4000 : 8000;
     const interval = setInterval(syncFromServer, intervalMs);
     void syncFromServer();
 
@@ -1307,17 +1365,20 @@ export function RideProvider({ children }: { children: ReactNode }) {
         if (update.rideId && myRideId && update.rideId !== myRideId) {
           return;
         }
+        const terminalStatus = String(update.status || "")
+          .toLowerCase()
+          .trim();
         if (
-          update.status === "completed" ||
-          update.status === "payment_collected" ||
-          update.status === "cancelled" ||
-          update.status === "cancelled_no_drivers" ||
-          update.status === "cancelled_no_show"
+          terminalStatus === "completed" ||
+          terminalStatus === "payment_collected" ||
+          terminalStatus === "cancelled" ||
+          terminalStatus === "cancelled_no_drivers" ||
+          terminalStatus === "cancelled_no_show"
         ) {
           // ✅ Handle wallet update for payment_collected BEFORE touching activeRide
           // The server already updated the DB wallet balance; we refresh from server to stay in sync
           if (
-            update.status === "payment_collected" &&
+            terminalStatus === "payment_collected" &&
             (update as any).extraAmount
           ) {
             const extra = parseFloat((update as any).extraAmount);
@@ -1363,7 +1424,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
           }
 
           // ✅ Handle no-show cancellation — rider didn't board within 10 minutes
-          if (update.status === "cancelled_no_show") {
+          if (terminalStatus === "cancelled_no_show") {
             const noShowFare = Number((update as any).noShowFare || 0);
             const chargedVia = (update as any).chargedVia || "wallet";
 
@@ -1414,6 +1475,20 @@ export function RideProvider({ children }: { children: ReactNode }) {
               ? pendingCancelledRideRef.current
               : null);
 
+          const terminalRideId = capturedRide?.id || update.rideId || null;
+          if (
+            terminalRideId &&
+            finalizedTerminalRideRef.current === terminalRideId
+          ) {
+            // Poll (or a prior socket event) already finalized this ride.
+            setActiveRide(null);
+            activeRideRef.current = null;
+            return;
+          }
+          if (terminalRideId) {
+            finalizedTerminalRideRef.current = terminalRideId;
+          }
+
           // Clear activeRide state
           setActiveRide(null);
           activeRideRef.current = null;
@@ -1445,15 +1520,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
               discountAmount: discountAmt,
               discountedFare: finalFarePrice,
               status:
-                update.status === "cancelled_no_drivers" ||
-                update.status === "cancelled_no_show"
+                terminalStatus === "cancelled_no_drivers" ||
+                terminalStatus === "cancelled_no_show"
                   ? "cancelled"
-                  : update.status === "payment_collected"
+                  : terminalStatus === "payment_collected"
                     ? "completed"
-                    : (update.status as RideStatus),
+                    : (terminalStatus as RideStatus),
               completedAt: new Date().toISOString(),
             };
             setRideHistory((prev) => {
+              if (prev.some((r) => r.id === ride.id)) {
+                return prev;
+              }
               const newHistory = [finalRide, ...prev];
               AsyncStorage.setItem(
                 RIDE_HISTORY_KEY,
@@ -1472,8 +1550,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
             // Refund wallet deduction only for free cancellations / no-driver cancellations.
             if (
-              (update.status === "cancelled" ||
-                update.status === "cancelled_no_drivers") &&
+              (terminalStatus === "cancelled" ||
+                terminalStatus === "cancelled_no_drivers") &&
               cancellationFee <= 0 &&
               ride.walletDeduction &&
               ride.walletDeduction > 0
@@ -1488,7 +1566,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
             }
 
             if (
-              update.status === "cancelled" &&
+              terminalStatus === "cancelled" &&
               cancellationFee > 0 &&
               (update as any).cancelledBy !== "driver"
             ) {
@@ -1516,8 +1594,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
             }
 
             if (
-              update.status === "completed" ||
-              update.status === "payment_collected"
+              terminalStatus === "completed" ||
+              terminalStatus === "payment_collected"
             ) {
               // ✅ Use Number() to safely call toFixed — farePrice can be a string after AsyncStorage round-trip
               const fareStr = `£${Number(finalFarePrice || 0).toFixed(2)}`;
@@ -1532,12 +1610,12 @@ export function RideProvider({ children }: { children: ReactNode }) {
               const rId = ride.id;
               setPendingRating({ rideId: rId, driverName: dName });
             } else if (
-              update.status === "cancelled" ||
-              update.status === "cancelled_no_drivers"
+              terminalStatus === "cancelled" ||
+              terminalStatus === "cancelled_no_drivers"
             ) {
               sendLocalNotification(
                 "❌ Ride Cancelled",
-                update.status === "cancelled_no_drivers"
+                terminalStatus === "cancelled_no_drivers"
                   ? "No drivers available right now. Please try again later."
                   : "Your ride has been cancelled.",
                 { type: "ride_cancelled", rideId: ride.id, audience: "rider" },
@@ -2161,6 +2239,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
       `🚕 Ride created: distance=${distanceMiles}mi, duration=${durationMinutes}min, fare=${fullFare}, vias=${vias.length}`,
     );
 
+    finalizedTerminalRideRef.current = null;
     setActiveRide(newRide);
     await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(newRide));
 

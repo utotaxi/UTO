@@ -386,6 +386,15 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   // Track whether we've already navigated away to prevent double-navigation
   const hasNavigatedAway = useRef(false);
+  /** True once the driver-rating prompt was shown for this completed trip. */
+  const sawRatingPromptRef = useRef(false);
+
+  // Reset navigation/rating flags when a new ride starts on this screen.
+  useEffect(() => {
+    if (!activeRide?.id) return;
+    hasNavigatedAway.current = false;
+    sawRatingPromptRef.current = false;
+  }, [activeRide?.id]);
 
   // Navigate home helper - used by both activeRide null and rideStatus triggers
   const navigateHome = useCallback(() => {
@@ -400,12 +409,15 @@ export default function RideTrackingScreen({ navigation }: any) {
   }, [navigation]);
 
   // When activeRide becomes null due to cancellation, navigate home.
-  // For completions, the rideStatus effect below handles navigation with a longer
-  // delay to ensure pendingRating is set before the Home screen mounts.
+  // For completions, wait for the rating modal — do not leave the tracking screen early.
   useEffect(() => {
     if (!activeRide && hasInitialized.current && !hasNavigatedAway.current) {
-      // If this is a completion, let the rideStatus effect handle navigation
-      if (rideStatus === "completed" || rideStatus === "payment_collected") {
+      // Completion: stay put so RatingModal can render (or Home will show it).
+      if (
+        rideStatus === "completed" ||
+        rideStatus === "payment_collected" ||
+        pendingRating
+      ) {
         return;
       }
       // For cancellations and other cases, navigate after a short delay
@@ -414,18 +426,16 @@ export default function RideTrackingScreen({ navigation }: any) {
       }, 10000);
       return () => clearTimeout(timer);
     }
-  }, [activeRide, rideStatus, navigateHome]);
+  }, [activeRide, rideStatus, pendingRating, navigateHome]);
 
   // When the driver marks the trip as complete via socket, delay navigation slightly
   // so RideContext has time to set pendingRating before the Home screen mounts.
-  // pendingRating is now set synchronously in RideContext, so 800ms is plenty.
   useEffect(() => {
     if (
       (rideStatus === "completed" || rideStatus === "payment_collected") &&
       !hasNavigatedAway.current
     ) {
       // DON'T navigate yet — wait for the rating modal to be dismissed.
-      // The pendingRating effect below handles navigation after rating is done.
       return;
     }
     // Show rebook screen when no drivers available
@@ -449,12 +459,20 @@ export default function RideTrackingScreen({ navigation }: any) {
     }
   }, [rideStatus, navigateHome]);
 
-  // Navigate home ONLY after the rider has submitted or skipped the rating
+  useEffect(() => {
+    if (pendingRating) {
+      sawRatingPromptRef.current = true;
+    }
+  }, [pendingRating]);
+
+  // Navigate home ONLY after the rider has submitted or skipped the rating.
+  // Do NOT navigate on first "completed" while pendingRating is still null —
+  // that race used to leave the app before the review screen could appear.
   const rideIsOver =
     rideStatus === "completed" || rideStatus === "payment_collected";
   useEffect(() => {
-    if (rideIsOver && !pendingRating && !hasNavigatedAway.current) {
-      // pendingRating is null → user submitted or skipped rating. Navigate home now.
+    if (!rideIsOver || pendingRating || hasNavigatedAway.current) return;
+    if (sawRatingPromptRef.current) {
       navigateHome();
     }
   }, [rideIsOver, pendingRating, navigateHome]);
@@ -1622,33 +1640,34 @@ export default function RideTrackingScreen({ navigation }: any) {
     );
   }
 
-  // When ride is complete and activeRide is cleared, show Rating Modal
-  // instead of returning null. This ensures the modal stays visible.
+  // Prefer the driver review modal as soon as pendingRating is set — even if
+  // activeRide has not been cleared yet (avoids staying stuck on the live map).
+  if (pendingRating) {
+    return (
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor: theme.backgroundRoot,
+            justifyContent: "center",
+            alignItems: "center",
+          },
+        ]}
+      >
+        <RatingModal
+          visible={true}
+          ratedRole="driver"
+          ratedName={pendingRating.driverName || "Driver"}
+          rideId={pendingRating.rideId || ""}
+          onSubmit={handleRatingSubmit}
+          onDismiss={handleRatingDismiss}
+        />
+      </View>
+    );
+  }
+
+  // When ride is complete and activeRide is cleared, show a brief transition.
   if (!activeRide) {
-    if (pendingRating) {
-      return (
-        <View
-          style={[
-            styles.container,
-            {
-              backgroundColor: theme.backgroundRoot,
-              justifyContent: "center",
-              alignItems: "center",
-            },
-          ]}
-        >
-          <RatingModal
-            visible={true}
-            ratedRole="driver"
-            ratedName={pendingRating.driverName || "Driver"}
-            rideId={pendingRating.rideId || ""}
-            onSubmit={handleRatingSubmit}
-            onDismiss={handleRatingDismiss}
-          />
-        </View>
-      );
-    }
-    // Show a brief transition screen instead of null to avoid crash
     return (
       <View
         style={[
@@ -1664,7 +1683,7 @@ export default function RideTrackingScreen({ navigation }: any) {
   }
 
   const getStatusMessage = () => {
-    const status = rideStatus || activeRide.status;
+    const status = String(rideStatus || activeRide.status || "").toLowerCase();
     switch (status) {
       case "pending":
         return "Finding your driver...";
@@ -1674,6 +1693,9 @@ export default function RideTrackingScreen({ navigation }: any) {
         return "Driver has arrived";
       case "in_progress":
         return "On your way to destination";
+      case "completed":
+      case "payment_collected":
+        return "Trip completed";
       default:
         return "Processing ride...";
     }
