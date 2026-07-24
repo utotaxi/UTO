@@ -16,6 +16,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
 import { useRide } from "@/context/RideContext";
 import { getApiUrl } from "@/lib/query-client";
+import { getSocket, connectAsRider } from "@/lib/socket";
 
 const UTO_YELLOW = "#FFD000";
 
@@ -31,7 +32,7 @@ interface ScheduledRide {
   id: string;
   pickup_address: string;
   dropoff_address: string;
-  vias?: Array<{ address: string; latitude?: number; longitude?: number }>;
+  vias?: { address: string; latitude?: number; longitude?: number }[];
   pickup_at: string;
   dropoff_by: string;
   status: BookingStatus;
@@ -44,6 +45,18 @@ interface ScheduledRide {
   passengers?: number;
   luggage?: number;
   otp?: string | null;
+  driver_id?: string | null;
+  assigned_driver_id?: string | null;
+  assigned_driver_name?: string | null;
+  assigned_driver_phone?: string | null;
+  driver_name?: string | null;
+  driver_phone?: string | null;
+  driver_vehicle_make?: string | null;
+  driver_vehicle_model?: string | null;
+  driver_vehicle_color?: string | null;
+  driver_license_plate?: string | null;
+  driver_vehicle_info?: string | null;
+  driver_rating?: number | null;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -64,14 +77,19 @@ function fmtDateTime(iso: string) {
   return { date, time };
 }
 
-function statusLabel(status: BookingStatus): {
+function statusLabel(
+  status: BookingStatus,
+  hasDriver: boolean,
+): {
   label: string;
   color: string;
   bg: string;
 } {
   switch (status) {
     case "scheduled":
-      return { label: "Scheduled", color: "#000", bg: UTO_YELLOW };
+      return hasDriver
+        ? { label: "Driver Assigned", color: "#fff", bg: "#10B981" }
+        : { label: "Scheduled", color: "#000", bg: UTO_YELLOW };
     case "driver_accepted":
       return { label: "Driver Assigned", color: "#fff", bg: "#10B981" };
     case "in_progress":
@@ -96,9 +114,24 @@ function RideCard({
   calculateFare: (dist: number, dur: number, type: string) => number;
 }) {
   const pickup = fmtDateTime(ride.pickup_at);
-  const badge = statusLabel(ride.status);
+  const hasDriver = !!(ride.driver_id || ride.assigned_driver_id);
+  const badge = statusLabel(ride.status, hasDriver);
   const canCancel =
     ride.status === "scheduled" || ride.status === "driver_accepted";
+  const driverName =
+    ride.driver_name || ride.assigned_driver_name || "Your Driver";
+  const driverPhone = ride.driver_phone || ride.assigned_driver_phone || null;
+  const vehicleInfo =
+    ride.driver_vehicle_info ||
+    [
+      ride.driver_vehicle_color,
+      ride.driver_vehicle_make,
+      ride.driver_vehicle_model,
+    ]
+      .filter(Boolean)
+      .join(" ") ||
+    null;
+  const licensePlate = ride.driver_license_plate || null;
 
   // Cancellation policy: within 3 hours = fee applies
   const now = Date.now();
@@ -191,6 +224,46 @@ function RideCard({
           <Text style={cs.fareLabel}>Estimated Fare</Text>
           <Text style={cs.fareValue}>
             £{parseFloat(displayFare as any).toFixed(2)}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Driver details — shown as soon as a driver is assigned or accepts */}
+      {hasDriver ? (
+        <View style={cs.driverBox}>
+          <View style={cs.driverHeader}>
+            <MaterialIcons name="person" size={18} color={UTO_YELLOW} />
+            <Text style={cs.driverTitle}>Your Driver</Text>
+            {ride.driver_rating != null && Number(ride.driver_rating) > 0 ? (
+              <Text style={cs.driverRating}>
+                ★ {Number(ride.driver_rating).toFixed(1)}
+              </Text>
+            ) : null}
+          </View>
+          <Text style={cs.driverName}>{driverName}</Text>
+          {driverPhone ? (
+            <View style={cs.driverMetaRow}>
+              <MaterialIcons name="phone" size={14} color="#9CA3AF" />
+              <Text style={cs.driverMetaText}>{driverPhone}</Text>
+            </View>
+          ) : null}
+          {vehicleInfo ? (
+            <View style={cs.driverMetaRow}>
+              <MaterialIcons name="directions-car" size={14} color="#9CA3AF" />
+              <Text style={cs.driverMetaText}>{vehicleInfo}</Text>
+            </View>
+          ) : null}
+          {licensePlate ? (
+            <View style={cs.plateBadge}>
+              <Text style={cs.plateText}>{licensePlate}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : ride.status === "scheduled" || ride.status === "driver_accepted" ? (
+        <View style={[cs.driverBox, cs.driverBoxPending]}>
+          <MaterialIcons name="hourglass-empty" size={16} color="#9CA3AF" />
+          <Text style={cs.driverPendingText}>
+            Waiting for a driver to be assigned
           </Text>
         </View>
       ) : null}
@@ -293,6 +366,92 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
     fetchRides();
   }, [fetchRides]);
 
+  // Keep rider socket joined and refresh when a driver is assigned / accepts / cancels.
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      connectAsRider(user.id);
+    } catch {
+      /* non-critical */
+    }
+    const socket = getSocket();
+    const refresh = () => fetchRides(true);
+    const onDriverChange = (payload: any) => {
+      if (!payload?.bookingId) {
+        refresh();
+        return;
+      }
+      setRides((prev) => {
+        const idx = prev.findIndex((r) => r.id === payload.bookingId);
+        if (idx < 0) {
+          refresh();
+          return prev;
+        }
+        const next = [...prev];
+        const current = next[idx];
+        const driver = payload.driver;
+        if (!driver) {
+          next[idx] = {
+            ...current,
+            status:
+              payload.status === "cancelled"
+                ? current.status
+                : (payload.status as BookingStatus) || "scheduled",
+            driver_id: null,
+            assigned_driver_id: null,
+            assigned_driver_name: null,
+            assigned_driver_phone: null,
+            driver_name: null,
+            driver_phone: null,
+            driver_vehicle_make: null,
+            driver_vehicle_model: null,
+            driver_vehicle_color: null,
+            driver_license_plate: null,
+            driver_vehicle_info: null,
+            driver_rating: null,
+          };
+          return next;
+        }
+        next[idx] = {
+          ...current,
+          status: (payload.status as BookingStatus) || current.status,
+          driver_id: driver.id || current.driver_id,
+          assigned_driver_id: driver.id || current.assigned_driver_id,
+          assigned_driver_name: driver.name || null,
+          assigned_driver_phone: driver.phone || null,
+          driver_name: driver.name || null,
+          driver_phone: driver.phone || null,
+          driver_vehicle_make: driver.vehicleMake || null,
+          driver_vehicle_model: driver.vehicleModel || null,
+          driver_vehicle_color: driver.vehicleColor || null,
+          driver_license_plate: driver.licensePlate || null,
+          driver_vehicle_info: driver.vehicleInfo || null,
+          driver_rating: driver.rating != null ? Number(driver.rating) : null,
+        };
+        return next;
+      });
+      // Also refresh from API shortly after so status/PIN stay in sync.
+      setTimeout(refresh, 800);
+    };
+    const onBookingUpdate = (payload: any) => {
+      if (
+        payload?.type === "accepted" ||
+        payload?.type === "assigned" ||
+        payload?.type === "released" ||
+        payload?.type === "declined" ||
+        payload?.type === "cancelled"
+      ) {
+        refresh();
+      }
+    };
+    socket.on("later-booking:driver", onDriverChange);
+    socket.on("later-booking:update", onBookingUpdate);
+    return () => {
+      socket.off("later-booking:driver", onDriverChange);
+      socket.off("later-booking:update", onBookingUpdate);
+    };
+  }, [user?.id, fetchRides]);
+
   // Auto-retry on error after 5 seconds
   useEffect(() => {
     if (!error) return;
@@ -359,8 +518,9 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
       </View>
       <Text style={cs.emptyTitle}>No Scheduled Rides</Text>
       <Text style={cs.emptySub}>
-        You haven't scheduled any future rides yet. Tap "Reserve" under Services
-        to plan a ride.
+        {
+          'You haven\'t scheduled any future rides yet. Tap "Reserve" under Services to plan a ride.'
+        }
       </Text>
       <Pressable
         style={cs.emptyBtn}
@@ -562,6 +722,63 @@ const cs = StyleSheet.create({
   },
   fareLabel: { fontSize: 13, color: "#9CA3AF" },
   fareValue: { fontSize: 15, fontWeight: "700", color: "#FFD000" },
+
+  // Driver details
+  driverBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "#111111",
+    borderWidth: 1,
+    borderColor: "#10B98155",
+    gap: 6,
+  },
+  driverBoxPending: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderColor: "#374151",
+    gap: 8,
+  },
+  driverHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 2,
+  },
+  driverTitle: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "700",
+    color: UTO_YELLOW,
+    letterSpacing: 0.8,
+  },
+  driverRating: { fontSize: 12, color: UTO_YELLOW, fontWeight: "600" },
+  driverName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  driverMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  driverMetaText: { fontSize: 13, color: "#D1D5DB" },
+  plateBadge: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    backgroundColor: "#FFD000",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  plateText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#000000",
+    letterSpacing: 1,
+  },
+  driverPendingText: { fontSize: 13, color: "#9CA3AF", flex: 1 },
 
   // Ride PIN
   pinBox: {

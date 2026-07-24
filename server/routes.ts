@@ -372,12 +372,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .single();
 
       if (error) {
-        return res
-          .status(404)
-          .json({
-            error: "No active configuration found",
-            details: error.message,
-          });
+        return res.status(404).json({
+          error: "No active configuration found",
+          details: error.message,
+        });
       }
       res.json(data);
     } catch (e) {
@@ -406,12 +404,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Block registration if the account was soft-deleted
         if (existingUser.isDeleted) {
           console.log(`⛔ Register blocked: account was deleted for ${email}`);
-          return res
-            .status(403)
-            .json({
-              error:
-                "This account has been deleted. Please contact support if you wish to re-register.",
-            });
+          return res.status(403).json({
+            error:
+              "This account has been deleted. Please contact support if you wish to re-register.",
+          });
         }
         console.log(`⚠️ Register: user already exists: ${email}`);
         return res.status(409).json({ error: "User already exists" });
@@ -1101,7 +1097,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ),
         );
         const matchOr = matchIds
-          .flatMap((id) => [`assigned_driver_id.eq.${id}`, `driver_id.eq.${id}`])
+          .flatMap((id) => [
+            `assigned_driver_id.eq.${id}`,
+            `driver_id.eq.${id}`,
+          ])
           .join(",");
         const pendingStatuses = ["scheduled", "marketplace", "assigned"];
         const [laterRes, webRes] = await Promise.all([
@@ -1739,12 +1738,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error(
             `❌ Uploaded ${docType} but failed to persist driver profile ${driver.id}`,
           );
-          return res
-            .status(500)
-            .json({
-              error:
-                "Document uploaded but failed to save to driver profile. Please try again.",
-            });
+          return res.status(500).json({
+            error:
+              "Document uploaded but failed to save to driver profile. Please try again.",
+          });
         }
       }
 
@@ -1869,11 +1866,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { userId, rideId, amount } = req.body;
 
         if (!userId || !rideId || !amount || amount <= 0) {
-          return res
-            .status(400)
-            .json({
-              error: "userId, rideId and a positive amount are required",
-            });
+          return res.status(400).json({
+            error: "userId, rideId and a positive amount are required",
+          });
         }
 
         const user = await storage.getUser(userId as string);
@@ -2456,12 +2451,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } = req.body;
 
       if (!riderId || !pickupAddress || !dropoffAddress || !scheduledAt) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "riderId, pickupAddress, dropoffAddress, and scheduledAt are required",
-          });
+        return res.status(400).json({
+          error:
+            "riderId, pickupAddress, dropoffAddress, and scheduledAt are required",
+        });
       }
 
       // Validate scheduledAt is in the future
@@ -2476,11 +2469,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       maxDate.setDate(maxDate.getDate() + 365);
       maxDate.setHours(23, 59, 59, 999);
       if (schedDate > maxDate) {
-        return res
-          .status(400)
-          .json({
-            error: "Cannot schedule a ride more than 365 days in advance",
-          });
+        return res.status(400).json({
+          error: "Cannot schedule a ride more than 365 days in advance",
+        });
       }
 
       const now = new Date();
@@ -2564,11 +2555,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Check minimum fare
       if (coupon.min_fare && fareAmount && fareAmount < coupon.min_fare) {
-        return res
-          .status(400)
-          .json({
-            error: `Minimum fare of £${coupon.min_fare} required for this coupon`,
-          });
+        return res.status(400).json({
+          error: `Minimum fare of £${coupon.min_fare} required for this coupon`,
+        });
       }
 
       // Calculate discount
@@ -3178,12 +3167,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Reminder cadence for accepted scheduled jobs (with sound via Expo push):
   // 3h → 2h → 30m → 15m → 5m before pickup.
-  const SCHEDULED_REMINDER_THRESHOLDS: Array<{
+  const SCHEDULED_REMINDER_THRESHOLDS: {
     key: string;
     ms: number;
     label: string;
     contactPassenger: boolean;
-  }> = (() => {
+  }[] = (() => {
     const minute = 60 * 1000;
     const hour = 60 * minute;
     return [
@@ -3224,10 +3213,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     for (const threshold of SCHEDULED_REMINDER_THRESHOLDS) {
-      if (
-        msUntilPickup <= threshold.ms &&
-        !alreadyHandled.has(threshold.key)
-      ) {
+      if (msUntilPickup <= threshold.ms && !alreadyHandled.has(threshold.key)) {
         return threshold;
       }
     }
@@ -3531,7 +3517,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ),
       distance_miles: distanceMiles,
       duration_minutes: durationMinutes,
-      vias: normalizeVias(booking?.vias || booking?.viaStops || booking?.waypoints),
+      vias: normalizeVias(
+        booking?.vias || booking?.viaStops || booking?.waypoints,
+      ),
       status,
       // Pending assignment = driver set but not yet accepted
       assignment_pending:
@@ -3628,6 +3616,193 @@ export async function registerRoutes(app: Express): Promise<Server> {
         passenger_name: firstNonEmpty(booking.passenger_name, riderName),
       };
     });
+  };
+
+  // Attach assigned/accepted driver name, phone, and vehicle details for rider UI.
+  // Looks up live driver + user rows so a reassignment always shows the new driver.
+  const clearDriverDetailsOnBooking = (booking: any) => ({
+    ...booking,
+    assigned_driver_name: null,
+    assigned_driver_phone: null,
+    driver_name: null,
+    driver_phone: null,
+    driver_vehicle_make: null,
+    driver_vehicle_model: null,
+    driver_vehicle_color: null,
+    driver_license_plate: null,
+    driver_vehicle_info: null,
+    driver_vehicle_type: null,
+    driver_rating: null,
+  });
+
+  const attachDriverDetails = async (bookings: any[]): Promise<any[]> => {
+    if (!Array.isArray(bookings) || bookings.length === 0)
+      return bookings || [];
+
+    const driverIds = Array.from(
+      new Set(
+        bookings
+          .flatMap((b: any) => [b?.driver_id, b?.assigned_driver_id])
+          .filter((id: any) => typeof id === "string" && id.length > 0)
+          .map(String),
+      ),
+    );
+
+    if (driverIds.length === 0) {
+      return bookings.map((b: any) => clearDriverDetailsOnBooking(b));
+    }
+
+    let driverMap = new Map<string, any>();
+    let userMap = new Map<string, any>();
+    try {
+      const { data: drivers, error } = await sb
+        .from("drivers")
+        .select(
+          "id, user_id, vehicle_make, vehicle_model, vehicle_color, license_plate, vehicle_type, rating",
+        )
+        .in("id", driverIds);
+      if (error) {
+        console.warn(
+          "⚠️ Could not fetch driver details for bookings:",
+          error.message,
+        );
+      } else {
+        driverMap = new Map((drivers || []).map((d: any) => [d.id, d]));
+      }
+
+      const userIds = Array.from(
+        new Set(
+          Array.from(driverMap.values())
+            .map((d: any) => d?.user_id)
+            .filter((id: any) => typeof id === "string" && id.length > 0),
+        ),
+      );
+      if (userIds.length > 0) {
+        const { data: users, error: usersErr } = await sb
+          .from("users")
+          .select("id, full_name, phone")
+          .in("id", userIds);
+        if (usersErr) {
+          console.warn(
+            "⚠️ Could not fetch driver user details for bookings:",
+            usersErr.message,
+          );
+        } else {
+          userMap = new Map((users || []).map((u: any) => [u.id, u]));
+        }
+      }
+    } catch (err) {
+      console.warn("⚠️ attachDriverDetails failed:", err);
+    }
+
+    return bookings.map((booking: any) => {
+      const status = String(booking?.status || "").toLowerCase();
+      const hasDriver =
+        !!(booking?.driver_id || booking?.assigned_driver_id) &&
+        status !== "cancelled" &&
+        status !== "completed";
+      if (!hasDriver) {
+        return clearDriverDetailsOnBooking(booking);
+      }
+
+      const preferredId =
+        status === "driver_accepted" || status === "in_progress"
+          ? booking.driver_id || booking.assigned_driver_id
+          : booking.assigned_driver_id || booking.driver_id;
+      const driver = preferredId ? driverMap.get(String(preferredId)) : null;
+      if (!driver) {
+        // Keep any stored name from the booking row if the driver row is missing.
+        return {
+          ...booking,
+          assigned_driver_name:
+            booking.assigned_driver_name || booking.driver_name || null,
+          assigned_driver_phone: booking.assigned_driver_phone || null,
+          driver_name:
+            booking.driver_name || booking.assigned_driver_name || null,
+          driver_phone:
+            booking.driver_phone || booking.assigned_driver_phone || null,
+          driver_vehicle_make: booking.driver_vehicle_make || null,
+          driver_vehicle_model: booking.driver_vehicle_model || null,
+          driver_vehicle_color: booking.driver_vehicle_color || null,
+          driver_license_plate: booking.driver_license_plate || null,
+          driver_vehicle_info: booking.driver_vehicle_info || null,
+          driver_vehicle_type: booking.driver_vehicle_type || null,
+          driver_rating: booking.driver_rating || null,
+        };
+      }
+
+      const user = driver.user_id ? userMap.get(driver.user_id) : null;
+      const driverName = firstNonEmpty(
+        user?.full_name,
+        booking.assigned_driver_name,
+        booking.driver_name,
+      );
+      const driverPhone = firstNonEmpty(
+        user?.phone,
+        booking.assigned_driver_phone,
+        booking.driver_phone,
+      );
+      const vehicleMake = firstNonEmpty(driver.vehicle_make);
+      const vehicleModel = firstNonEmpty(driver.vehicle_model);
+      const vehicleColor = firstNonEmpty(driver.vehicle_color);
+      const licensePlate = firstNonEmpty(driver.license_plate);
+      const vehicleInfo =
+        [vehicleColor, vehicleMake, vehicleModel].filter(Boolean).join(" ") ||
+        null;
+
+      return {
+        ...booking,
+        assigned_driver_name: driverName,
+        assigned_driver_phone: driverPhone,
+        driver_name: driverName,
+        driver_phone: driverPhone,
+        driver_vehicle_make: vehicleMake,
+        driver_vehicle_model: vehicleModel,
+        driver_vehicle_color: vehicleColor,
+        driver_license_plate: licensePlate,
+        driver_vehicle_info: vehicleInfo,
+        driver_vehicle_type: firstNonEmpty(
+          driver.vehicle_type,
+          booking.vehicle_type,
+        ),
+        driver_rating: driver.rating != null ? Number(driver.rating) : null,
+      };
+    });
+  };
+
+  // Push driver assignment/clearance to the rider's private room so the
+  // scheduled-rides screen can update without a full list refresh delay.
+  const notifyRiderOfScheduledDriverChange = (booking: any) => {
+    const riderId = booking?.rider_id;
+    if (!riderId) return;
+    try {
+      const hasDriver = !!(booking?.driver_id || booking?.assigned_driver_id);
+      io.to(`rider:${riderId}`).emit("later-booking:driver", {
+        type: hasDriver ? "driver_updated" : "driver_cleared",
+        bookingId: booking?.id ?? null,
+        status: booking?.status ?? null,
+        driver: hasDriver
+          ? {
+              id: booking.driver_id || booking.assigned_driver_id || null,
+              name: booking.assigned_driver_name || booking.driver_name || null,
+              phone:
+                booking.assigned_driver_phone || booking.driver_phone || null,
+              vehicleMake: booking.driver_vehicle_make || null,
+              vehicleModel: booking.driver_vehicle_model || null,
+              vehicleColor: booking.driver_vehicle_color || null,
+              licensePlate: booking.driver_license_plate || null,
+              vehicleInfo: booking.driver_vehicle_info || null,
+              vehicleType: booking.driver_vehicle_type || null,
+              rating: booking.driver_rating ?? null,
+            }
+          : null,
+      });
+    } catch (err) {
+      console.warn(
+        `⚠️ Failed to notify rider of scheduled driver change for ${booking?.id}:`,
+        err,
+      );
+    }
   };
 
   // Drivers must not see the rider's PIN before pickup — strip it from driver-facing responses
@@ -3751,21 +3926,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const maxDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
       maxDate.setHours(23, 59, 59, 999);
       if (pickupTime > maxDate) {
-        return res
-          .status(400)
-          .json({
-            error: "Pickup time cannot be more than 365 days in the future",
-          });
+        return res.status(400).json({
+          error: "Pickup time cannot be more than 365 days in the future",
+        });
       }
 
       if (dropoffTime) {
         const gapMs = dropoffTime.getTime() - pickupTime.getTime();
         if (gapMs < 30 * 60 * 1000) {
-          return res
-            .status(400)
-            .json({
-              error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs / 60000)} min)`,
-            });
+          return res.status(400).json({
+            error: `Minimum 30 minutes required between pickup and dropoff (got ${Math.round(gapMs / 60000)} min)`,
+          });
         }
       }
 
@@ -3809,21 +3980,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (paymentIntentId) {
           const confirmed = await confirmPayment(paymentIntentId);
           if (!confirmed) {
-            return res
-              .status(400)
-              .json({
-                error:
-                  "Card authorization was not completed. Please try again.",
-              });
+            return res.status(400).json({
+              error: "Card authorization was not completed. Please try again.",
+            });
           }
           prepaidPaymentIntentId = paymentIntentId;
         } else {
           if (!stripeCustomerId) {
-            return res
-              .status(400)
-              .json({
-                error: "Please add a card before scheduling this ride.",
-              });
+            return res.status(400).json({
+              error: "Please add a card before scheduling this ride.",
+            });
           }
 
           const chargeReference = `later_${riderId}_${Date.now()}`;
@@ -4123,7 +4289,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        res.json({ bookings: withPins });
+        const withDrivers = await attachDriverDetails(withPins);
+        res.json({ bookings: withDrivers });
       } catch (error: any) {
         res
           .status(500)
@@ -4143,7 +4310,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .maybeSingle();
       if (webFetch.data) {
         const normalized = normalizeLaterBooking(webFetch.data, "web_booker");
-        const [enriched] = await attachRiderDetails([normalized]);
+        const [enriched] = await attachDriverDetails(
+          await attachRiderDetails([normalized]),
+        );
         return res.json({ booking: stripPinForDrivers(enriched) });
       }
 
@@ -4157,7 +4326,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           laterFetch.data,
           "later_bookings",
         );
-        const [enriched] = await attachRiderDetails([normalized]);
+        const [enriched] = await attachDriverDetails(
+          await attachRiderDetails([normalized]),
+        );
         return res.json({ booking: stripPinForDrivers(enriched) });
       }
 
@@ -4283,11 +4454,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
           if (msUntilPickup < -START_LATE_MS) {
-            return res
-              .status(400)
-              .json({
-                error: "The pickup window for this booking has expired.",
-              });
+            return res.status(400).json({
+              error: "The pickup window for this booking has expired.",
+            });
           }
         }
 
@@ -4440,11 +4609,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             identity.tableId,
           );
         if (!handedOver) {
-          return res
-            .status(500)
-            .json({
-              error: "Could not activate the live ride. Please try again.",
-            });
+          return res.status(500).json({
+            error: "Could not activate the live ride. Please try again.",
+          });
         }
 
         // Best-effort: persist live link / PIN on booking when columns exist.
@@ -4576,11 +4743,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Once a booking has been activated (converted to a live ride within the
         // activation window) it can only be accepted through the live dispatch flow.
         if (existingBooking?.activated_at || existingBooking?.live_ride_id) {
-          return res
-            .status(400)
-            .json({
-              error: "This booking is now being dispatched as a live ride",
-            });
+          return res.status(400).json({
+            error: "This booking is now being dispatched as a live ride",
+          });
         }
 
         // If already assigned to a specific driver, only that driver may accept.
@@ -4623,11 +4788,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updateResult.data,
           sourceTable,
         );
-        const [enrichedBooking] = (
-          await attachRiderDetails([normalizedBooking])
-        ).map(stripPinForDrivers);
-        emitLaterBookingSignal("accepted", enrichedBooking);
-        res.json({ booking: enrichedBooking });
+        const [enrichedBooking] = await attachDriverDetails(
+          await attachRiderDetails([normalizedBooking]),
+        );
+        const driverFacing = stripPinForDrivers(enrichedBooking);
+        emitLaterBookingSignal("accepted", driverFacing);
+        notifyRiderOfScheduledDriverChange(enrichedBooking);
+        res.json({ booking: driverFacing });
       } catch (error: any) {
         res
           .status(500)
@@ -4685,12 +4852,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .json({ error: `Cannot assign a ${currentStatus} booking` });
         }
         if (existingBooking.activated_at || existingBooking.live_ride_id) {
-          return res
-            .status(400)
-            .json({
-              error:
-                "This booking is already live and cannot be reassigned here",
-            });
+          return res.status(400).json({
+            error: "This booking is already live and cannot be reassigned here",
+          });
         }
 
         let resolvedName = driverName || identity.fullName || null;
@@ -4739,12 +4903,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           normalizeLaterBooking(updateResult.data, sourceTable),
           identity,
         );
-        const [enrichedBooking] = (
-          await attachRiderDetails([normalizedBooking])
-        ).map(stripPinForDrivers);
+        const [enrichedBooking] = await attachDriverDetails(
+          await attachRiderDetails([normalizedBooking]),
+        );
+        const driverFacing = stripPinForDrivers(enrichedBooking);
 
         const pushSent = await notifyDriverOfAssignedBooking(
-          enrichedBooking,
+          driverFacing,
           identity.tableId,
         );
         const assignKey = `${sourceTable}:${bookingId}:${identity.tableId}`;
@@ -4753,7 +4918,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           announcedAssignedBookingKeys.add(assignKey);
         }
 
-        res.json({ booking: enrichedBooking });
+        notifyRiderOfScheduledDriverChange(enrichedBooking);
+        res.json({ booking: driverFacing });
       } catch (error: any) {
         console.error("Assign later booking error:", error);
         res
@@ -4851,15 +5017,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         // Force-clear assignment fields for marketplace notify even if a column
         // was skipped by the fallback updater.
-        const releasedBooking = stripPinForDrivers({
-          ...((await attachRiderDetails([normalizedBooking]))[0] ||
-            normalizedBooking),
-          driver_id: null,
-          assigned_driver_id: null,
-          assigned_driver_name: null,
-          assignment_pending: false,
-          status: statusForReleasedBooking,
-        });
+        const releasedBooking = stripPinForDrivers(
+          clearDriverDetailsOnBooking({
+            ...((await attachRiderDetails([normalizedBooking]))[0] ||
+              normalizedBooking),
+            driver_id: null,
+            assigned_driver_id: null,
+            assigned_driver_name: null,
+            assignment_pending: false,
+            status: statusForReleasedBooking,
+          }),
+        );
 
         // Clear assignment announcement keys so a future re-assign can notify again
         for (const key of Array.from(announcedAssignedBookingKeys)) {
@@ -4881,6 +5049,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         emitLaterBookingSignal("declined", releasedBooking);
         emitLaterBookingSignal("created", releasedBooking);
+        notifyRiderOfScheduledDriverChange(releasedBooking);
         notifyDriversAboutMarketplaceBooking(releasedBooking)
           .then((sent) => {
             if (sent) announcedMarketplaceBookingKeys.add(marketplaceKey);
@@ -4972,12 +5141,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const liveRideId = booking.live_ride_id || null;
         if (liveRideId || currentStatus === "in_progress") {
           if (currentStatus === "in_progress") {
-            return res
-              .status(400)
-              .json({
-                error:
-                  "This ride is already in progress and can no longer be cancelled here",
-              });
+            return res.status(400).json({
+              error:
+                "This ride is already in progress and can no longer be cancelled here",
+            });
           }
           if (liveRideId) {
             try {
@@ -4987,12 +5154,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 .eq("id", liveRideId)
                 .maybeSingle();
               if (liveRide?.status === "in_progress") {
-                return res
-                  .status(400)
-                  .json({
-                    error:
-                      "This ride is already in progress and can no longer be cancelled here",
-                  });
+                return res.status(400).json({
+                  error:
+                    "This ride is already in progress and can no longer be cancelled here",
+                });
               }
             } catch (liveRideErr) {
               console.warn(
@@ -5214,12 +5379,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               if (isAlreadyCaptured) {
                 const refunded = await refundPayment(bookingPaymentIntentId);
                 if (!refunded) {
-                  return res
-                    .status(500)
-                    .json({
-                      error:
-                        "Failed to refund prepaid amount. Please try again.",
-                    });
+                  return res.status(500).json({
+                    error: "Failed to refund prepaid amount. Please try again.",
+                  });
                 }
                 penaltyNote = `Free cancellation — more than 3 hours before pickup. Prepaid amount £${refundAmount.toFixed(2)} refunded.`;
               } else {
@@ -5227,11 +5389,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   bookingPaymentIntentId,
                 );
                 if (!released.success && !released.alreadyFinal) {
-                  return res
-                    .status(500)
-                    .json({
-                      error: "Failed to release card hold. Please try again.",
-                    });
+                  return res.status(500).json({
+                    error: "Failed to release card hold. Please try again.",
+                  });
                 }
                 penaltyNote = `Free cancellation — more than 3 hours before pickup. Card hold of £${refundAmount.toFixed(2)} released.`;
               }
@@ -5366,12 +5526,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           data,
           sourceTable,
         );
+        const clearedForRider =
+          cancelledBy === "driver" && releaseDriverAssignment
+            ? clearDriverDetailsOnBooking({
+                ...normalizedUpdatedBooking,
+                driver_id: null,
+                assigned_driver_id: null,
+                assigned_driver_name: null,
+              })
+            : normalizedUpdatedBooking;
+        const [enrichedForRider] = await attachDriverDetails([clearedForRider]);
         emitLaterBookingSignal(
           cancelledBy === "driver" ? "released" : "cancelled",
-          normalizedUpdatedBooking,
+          enrichedForRider,
         );
+        if (cancelledBy === "driver") {
+          notifyRiderOfScheduledDriverChange(enrichedForRider);
+        }
         res.json({
-          booking: normalizedUpdatedBooking,
+          booking: enrichedForRider,
           withinThreeHours,
           cancellationFee,
           penaltyNote,
@@ -5546,14 +5719,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
-  setInterval(
-    () => {
-      triggerScheduledDriverReminders().catch((err) => {
-        console.error("Scheduled driver reminder engine error:", err);
-      });
-    },
-    SCHEDULED_DRIVER_REMINDER_TICK_MS,
-  );
+  setInterval(() => {
+    triggerScheduledDriverReminders().catch((err) => {
+      console.error("Scheduled driver reminder engine error:", err);
+    });
+  }, SCHEDULED_DRIVER_REMINDER_TICK_MS);
 
   triggerScheduledDriverReminders().catch((err) => {
     console.error("Initial scheduled driver reminder check failed:", err);
@@ -6373,11 +6543,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json({ pending: data || [] });
       } catch (err: any) {
-        res
-          .status(500)
-          .json({
-            error: err?.message || "Failed to fetch pending withdrawals",
-          });
+        res.status(500).json({
+          error: err?.message || "Failed to fetch pending withdrawals",
+        });
       }
     },
   );
