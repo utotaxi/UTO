@@ -2659,7 +2659,7 @@ export default function RideTrackingScreen({ navigation }: any) {
                 : showFreeCancelCountdown
                   ? "Cancel now and no fare will be charged."
                   : cancelFeeState.driverAssigned
-                    ? "Are you sure you want to cancel this ride?"
+                    ? "Your driver is assigned. You can cancel free during the first minute."
                     : "No cancellation fee will be charged before a driver is assigned."}
             </ThemedText>
 
