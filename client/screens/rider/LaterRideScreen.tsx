@@ -10,12 +10,11 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
+  TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-
-import { TextInput } from "react-native";
 
 import { LocationInputAutocomplete } from "@/components/LocationInputAutocomplete";
 import { useAuth } from "@/context/AuthContext";
@@ -86,7 +85,7 @@ export default function LaterRideScreen({ navigation }: any) {
   const [pickupLocation, setPickupLocation] = useState<LatLng | null>(null);
   const [dropoffLocation, setDropoffLocation] = useState<LatLng | null>(null);
   const [vias, setVias] = useState<
-    Array<{ id: string; address: string; latitude?: number; longitude?: number }>
+    { id: string; address: string; latitude?: number; longitude?: number }[]
   >([]);
 
   // Pricing
@@ -215,12 +214,25 @@ export default function LaterRideScreen({ navigation }: any) {
         const baseUrl = getApiUrl();
         const originStr = `${pickupLocation.latitude},${pickupLocation.longitude}`;
         const destStr = `${dropoffLocation.latitude},${dropoffLocation.longitude}`;
-        const validVias = vias.filter(
-          (v): v is RideVia & { latitude: number; longitude: number } =>
-            !!v.address.trim() &&
-            Number.isFinite(v.latitude) &&
-            Number.isFinite(v.longitude),
-        );
+        const validVias: RideVia[] = vias
+          .filter(
+            (
+              v,
+            ): v is {
+              id: string;
+              address: string;
+              latitude: number;
+              longitude: number;
+            } =>
+              !!v.address.trim() &&
+              Number.isFinite(v.latitude) &&
+              Number.isFinite(v.longitude),
+          )
+          .map((v) => ({
+            address: v.address,
+            latitude: v.latitude,
+            longitude: v.longitude,
+          }));
         const waypoints = viasToWaypointsParam(validVias);
         let url = `${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
         if (waypoints) {
@@ -235,11 +247,15 @@ export default function LaterRideScreen({ navigation }: any) {
         if (data.status === "OK" && data.routes?.[0]?.legs?.[0]) {
           const legs = data.routes[0].legs;
           dist =
-            legs.reduce((sum: number, leg: any) => sum + (leg.distance?.value || 0), 0) /
-            1000;
+            legs.reduce(
+              (sum: number, leg: any) => sum + (leg.distance?.value || 0),
+              0,
+            ) / 1000;
           dur = Math.round(
-            legs.reduce((sum: number, leg: any) => sum + (leg.duration?.value || 0), 0) /
-              60,
+            legs.reduce(
+              (sum: number, leg: any) => sum + (leg.duration?.value || 0),
+              0,
+            ) / 60,
           );
         }
 

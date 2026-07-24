@@ -25,7 +25,6 @@ import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 export const serverRideEmitter = new EventEmitter();
 export let io: Server;
 
-
 // ─── Scheduled booking → live ride bridge ─────────────────────────────────
 // Populated inside setupSocketIO (needs access to the in-memory dispatch state).
 // Used by the scheduled-bookings activation engine in routes.ts.
@@ -34,16 +33,16 @@ export const scheduledRideHooks: {
   dispatchScheduledRide: ((rideData: any) => Promise<void>) | null;
   // Hand an already-accepted scheduled booking straight to its driver's home screen
   activateAcceptedScheduledRide:
-  | ((rideData: any, driverId: string) => Promise<boolean>)
-  | null;
+    | ((rideData: any, driverId: string) => Promise<boolean>)
+    | null;
   // Cancel a live ride that originated from a scheduled booking (rider/driver cancelled the booking)
   cancelScheduledLiveRide:
-  | ((rideId: string, cancelledBy?: string) => Promise<void>)
-  | null;
+    | ((rideId: string, cancelledBy?: string) => Promise<void>)
+    | null;
   // Return the ride currently dispatched to a driver (for background / push recovery)
   getPendingDispatchForDriver:
-  | ((driverId: string) => Promise<any | null>)
-  | null;
+    | ((driverId: string) => Promise<any | null>)
+    | null;
 } = {
   dispatchScheduledRide: null,
   activateAcceptedScheduledRide: null,
@@ -85,7 +84,6 @@ async function assertRideStillOfferable(rideId: string): Promise<boolean> {
       .select("id, status, requested_at, cancelled_at")
       .eq("id", rideId)
       .maybeSingle();
-
 
     if (error || !ride) {
       console.warn(
@@ -913,9 +911,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
             "nearby";
           const rideTypeRaw = String(
             enrichedRide.rideType ||
-            enrichedRide.vehicleType ||
-            enrichedRide.vehicle_type ||
-            "saloon",
+              enrichedRide.vehicleType ||
+              enrichedRide.vehicle_type ||
+              "saloon",
           )
             .trim()
             .toLowerCase()
@@ -1071,9 +1069,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
         try {
           const normalizedRideVehicleType = normalizeVehicleType(
             rideData.rideType ||
-            rideData.vehicleType ||
-            rideData.vehicle_type ||
-            "economy",
+              rideData.vehicleType ||
+              rideData.vehicle_type ||
+              "economy",
           );
           const insertPayload: Record<string, any> = {
             id: rideData.id,
@@ -1215,9 +1213,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
           .single();
         if (riderUser?.phone) {
           rideData.riderPhone = riderUser.phone;
-          console.log(`📞 Looked up rider phone for dispatch: ${riderUser.phone}`);
+          console.log(
+            `📞 Looked up rider phone for dispatch: ${riderUser.phone}`,
+          );
         }
-      } catch (_) { /* Non-critical */ }
+      } catch (_) {
+        /* Non-critical */
+      }
     }
 
     const rideInfo = activeRides.get(rideData.id);
@@ -1235,8 +1237,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         return;
       }
 
-      const declined =
-        activeRides.get(rideData.id)?.declinedBy || declinedBy;
+      const declined = activeRides.get(rideData.id)?.declinedBy || declinedBy;
       const newDispatchState = await buildDispatchState(
         rideData,
         riderSocketId,
@@ -1363,9 +1364,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     const requestedType = normalizeVehicleType(
       rideData.rideType ||
-      rideData.vehicleType ||
-      rideData.vehicle_type ||
-      "economy",
+        rideData.vehicleType ||
+        rideData.vehicle_type ||
+        "economy",
     );
     const compatibleTypes = getCompatibleVehicleTypes(requestedType);
 
@@ -1673,7 +1674,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
       return null;
     }
 
-
     return {
       heap,
       timer: null,
@@ -1944,10 +1944,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
         .maybeSingle();
       const { data: driverUser } = driverProfile?.user_id
         ? await supabase
-          .from("users")
-          .select("full_name, phone")
-          .eq("id", driverProfile.user_id)
-          .maybeSingle()
+            .from("users")
+            .select("full_name, phone")
+            .eq("id", driverProfile.user_id)
+            .maybeSingle()
         : { data: null };
 
       io.to(`rider:${rideData.riderId}`).emit("ride:scheduled_activated", {
@@ -2435,8 +2435,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
           if (ride) {
             const actualDriverId = await resolveDriverTableId(
               data.driverId ||
-              getDriverIdForSocket(socket.id) ||
-              ride.driver_id,
+                getDriverIdForSocket(socket.id) ||
+                ride.driver_id,
             );
             // Penalty is 50% of the discounted (payable) fare when a coupon was applied.
             // This is deducted from the DRIVER only — the rider is never charged on driver cancel.
@@ -2823,19 +2823,28 @@ export function setupSocketIO(httpServer: HTTPServer) {
           if (allOnlineDrivers) {
             for (const driver of allOnlineDrivers) {
               if (driver.id !== actualDriverId) {
-                io.to(`driver:${driver.id}`).emit("ride:expired", { rideId: data.rideId });
+                io.to(`driver:${driver.id}`).emit("ride:expired", {
+                  rideId: data.rideId,
+                });
               }
             }
           }
           // Also expire for any socket-connected drivers not in DB query
           for (const [driverId] of connectedDrivers) {
             if (driverId !== actualDriverId) {
-              io.to(`driver:${driverId}`).emit("ride:expired", { rideId: data.rideId });
+              io.to(`driver:${driverId}`).emit("ride:expired", {
+                rideId: data.rideId,
+              });
             }
           }
-          console.log(`📢 Broadcast ride:expired for ${data.rideId} to all drivers except ${actualDriverId}`);
+          console.log(
+            `📢 Broadcast ride:expired for ${data.rideId} to all drivers except ${actualDriverId}`,
+          );
         } catch (expireErr) {
-          console.warn(`⚠️ Could not broadcast ride:expired for ${data.rideId}:`, expireErr);
+          console.warn(
+            `⚠️ Could not broadcast ride:expired for ${data.rideId}:`,
+            expireErr,
+          );
         }
 
         // Store the driver socket for this ride in the active rides map
@@ -2880,11 +2889,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
             ]);
             const driverUser = driverProfile?.user_id
               ? await supabase
-                .from("users")
-                .select("full_name, phone")
-                .eq("id", driverProfile.user_id)
-                .maybeSingle()
-                .then((res) => res.data)
+                  .from("users")
+                  .select("full_name, phone")
+                  .eq("id", driverProfile.user_id)
+                  .maybeSingle()
+                  .then((res) => res.data)
               : null;
             const driverInfo = {
               driverName: driverUser?.full_name || "Your Driver",
@@ -2970,6 +2979,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
       );
 
       try {
+        // Track whether this completion event is a duplicate so we avoid
+        // double-charging riders and double-crediting driver earnings.
+        let rideWasAlreadyCompleted = false;
+
         // ─── Resolve driver ID from multiple sources ─────────────────────────────────────
         // Priority 1: driverId sent directly in the payload from the client
         let resolvedDriverId: string | null = (update as any).driverId || null;
@@ -3115,10 +3128,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 .maybeSingle();
               const { data: driverUser } = driverProfile?.user_id
                 ? await supabase
-                  .from("users")
-                  .select("full_name, phone")
-                  .eq("id", driverProfile.user_id)
-                  .maybeSingle()
+                    .from("users")
+                    .select("full_name, phone")
+                    .eq("id", driverProfile.user_id)
+                    .maybeSingle()
                 : { data: null };
 
               (update as any).driverInfo = {
@@ -3157,11 +3170,36 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
             // (arrived timer clear logic removed as it's now client-side)
           } else if (update.status === "completed") {
-            updateData.completed_at = new Date().toISOString();
+            // Idempotency: detect duplicate completion events so we do not
+            // double-charge the rider or double-credit the driver.
+            let existingCompletedAt: string | null = null;
+            try {
+              const { data: existingCompletedRide } = await supabase
+                .from("rides")
+                .select("status, completed_at")
+                .eq("id", update.rideId)
+                .maybeSingle();
+              if (
+                existingCompletedRide?.status === "completed" ||
+                existingCompletedRide?.completed_at
+              ) {
+                rideWasAlreadyCompleted = true;
+                existingCompletedAt = existingCompletedRide.completed_at;
+                console.log(
+                  `ℹ️ Ride ${update.rideId} was already completed at ${existingCompletedRide.completed_at}; treating as duplicate event`,
+                );
+              }
+            } catch (_) {
+              /* ignore lookup error */
+            }
+
+            updateData.completed_at =
+              existingCompletedAt || new Date().toISOString();
             updateData.payment_status = "completed";
             updateData.payment_method = "card";
             // Ensure driver_id is ALWAYS set on completion
             if (resolvedDriverId) updateData.driver_id = resolvedDriverId;
+
             if (
               typeof update.earlyCompletionReason === "string" &&
               update.earlyCompletionReason.trim()
@@ -3288,7 +3326,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                     );
                     await releaseAuthorization(
                       completedRide.payment_intent_id,
-                    ).catch(() => { });
+                    ).catch(() => {});
                     chargeResult = await chargeSavedCard(
                       riderUser.stripe_customer_id,
                       completedFare,
@@ -3520,8 +3558,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 );
                 const cancellationFeeAmount = getDiscountedFare(
                   cancelledRide.estimated_price ||
-                  cancelledRide.final_price ||
-                  0,
+                    cancelledRide.final_price ||
+                    0,
                   discount,
                 );
                 const riderId = cancelledRide.rider_id;
@@ -3707,8 +3745,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                           user_id: riderId,
                           ride_id: update.rideId,
                           amount: Math.abs(walletAdjustmentAmount),
-                          type:
-                            walletAdjustmentAmount > 0 ? "debit" : "credit",
+                          type: walletAdjustmentAmount > 0 ? "debit" : "credit",
                           description:
                             walletAdjustmentAmount > 0
                               ? `100% Cancellation fee (£${cancellationFeeAmount.toFixed(2)})`
@@ -3901,17 +3938,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
             update.status === "accepted"
               ? "driver_accepted"
               : ["in_progress", "completed", "cancelled"].includes(
-                update.status,
-              )
+                    update.status,
+                  )
                 ? update.status
                 : null;
           if (bookingStatus) {
             const extra =
               update.status === "accepted" && resolvedDriverId
                 ? {
-                  driver_id: resolvedDriverId,
-                  assigned_driver_id: resolvedDriverId,
-                }
+                    driver_id: resolvedDriverId,
+                    assigned_driver_id: resolvedDriverId,
+                  }
                 : undefined;
             syncScheduledBookingForRide(
               update.rideId,
@@ -4034,7 +4071,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
               );
             }
 
-            if (rideData) {
+            if (rideWasAlreadyCompleted) {
+              console.log(
+                `ℹ️ Skipping earnings/wallet side-effects for already-completed ride ${update.rideId}`,
+              );
+            } else if (rideData) {
               const discount = Math.max(
                 0,
                 Number((rideData as any).discount_amount || 0),
@@ -4045,10 +4086,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
               // Driver earns the coupon-adjusted fare (+ waiting). Prefer persisted final_price.
               const fareAmount = Number(
                 (rideData.final_price != null &&
-                  Number(rideData.final_price) > 0
+                Number(rideData.final_price) > 0
                   ? Number(rideData.final_price)
                   : getDiscountedFare(rideData.estimated_price || 0, discount) +
-                  waitingFromClient
+                    waitingFromClient
                 ).toFixed(2),
               );
 
@@ -4384,7 +4425,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   type: "debit",
                   description: `No-show cancellation fee — charged to saved card`,
                 });
-              } catch (_) { }
+              } catch (_) {}
             }
           }
 
@@ -4451,7 +4492,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               .from("drivers")
               .update({ is_available: true })
               .eq("id", data.driverId);
-          } catch (_) { }
+          } catch (_) {}
 
           // ─── 9. Clean up ─────────────────────────────────────────────────────
           activeRides.delete(data.rideId);

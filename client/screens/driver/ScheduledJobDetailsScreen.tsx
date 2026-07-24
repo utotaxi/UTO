@@ -86,7 +86,7 @@ export default function ScheduledJobDetailsScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { user } = useAuth();
-  const { driverProfile } = useDriver();
+  const { driverProfile, refreshData } = useDriver();
   const tabBarHeight = useBottomTabBarHeight();
 
   const initialParams = (route.params as any) || {};
@@ -617,6 +617,12 @@ export default function ScheduledJobDetailsScreen() {
         prev ? { ...prev, status: "completed" } : prev,
       );
       setShowEarlyCompleteModal(false);
+      // Refresh driver earnings so the completed trip appears immediately.
+      setTimeout(() => {
+        refreshData().catch((err) =>
+          console.warn("⚠️ Post-completion refreshData failed:", err),
+        );
+      }, 1500);
       Alert.alert(
         "Trip Completed",
         "This scheduled ride has been marked as completed. Payment was already collected.",
