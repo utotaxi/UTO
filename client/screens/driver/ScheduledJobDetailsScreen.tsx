@@ -832,6 +832,12 @@ export default function ScheduledJobDetailsScreen() {
               <Text style={s.detailLabel}>Pickup:</Text>
               <Text style={s.detailValue}>{booking.pickup_address}</Text>
             </View>
+            {(booking.vias || []).map((via: any, index: number) => (
+              <View style={s.detailRowStack} key={`via-${index}`}>
+                <Text style={s.detailLabel}>Via {index + 1}:</Text>
+                <Text style={s.detailValue}>{via.address}</Text>
+              </View>
+            ))}
             <View style={s.detailRowStack}>
               <Text style={s.detailLabel}>Drop-off:</Text>
               <Text style={s.detailValue}>{booking.dropoff_address}</Text>

@@ -32,6 +32,7 @@ import {
 import { upsertDriverPenaltyDeduction } from "./services/driverDeductions";
 import { supabase } from "./db";
 import { getDiscountedFare } from "../shared/fare";
+import { normalizeVias, type RideVia } from "../shared/vias";
 import {
   ensureAuthUserForEmail,
   sendSupabasePasswordResetEmail,
@@ -309,6 +310,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS customer_name TEXT DEFAULT NULL;`,
     });
+    await supabase.rpc("exec_sql", {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS vias JSONB DEFAULT NULL;`,
+    });
     // Same fields for web_booker so admin/web bookings can also go live
     await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS otp TEXT DEFAULT NULL;`,
@@ -327,6 +331,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
     await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS payment_intent_id TEXT DEFAULT NULL;`,
+    });
+    await supabase.rpc("exec_sql", {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS vias JSONB DEFAULT NULL;`,
     });
     console.log(
       "✅ Ensured later_bookings columns exist (including penalty & tracking fields)",
@@ -3524,6 +3531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ),
       distance_miles: distanceMiles,
       duration_minutes: durationMinutes,
+      vias: normalizeVias(booking?.vias || booking?.viaStops || booking?.waypoints),
       status,
       // Pending assignment = driver set but not yet accepted
       assignment_pending:
@@ -3712,6 +3720,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         returnDropoffAddress,
         returnDropoffLatitude,
         returnDropoffLongitude,
+        vias,
       } = req.body;
 
       if (!riderId || !pickupAddress || !dropoffAddress || !pickupAt) {
@@ -3877,6 +3886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return_dropoff_address: returnDropoffAddress ?? null,
         return_dropoff_latitude: returnDropoffLatitude ?? null,
         return_dropoff_longitude: returnDropoffLongitude ?? null,
+        vias: normalizeVias(vias).length > 0 ? normalizeVias(vias) : null,
       };
 
       for (const column of missingLaterBookingColumns) {
@@ -4420,6 +4430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           scheduledBookingId: bookingId,
           scheduledPickupAt: enriched.pickup_at,
           sourceTable,
+          vias: normalizeVias(enriched.vias),
         };
 
         // Activate live ride FIRST — do not block on optional booking columns.
@@ -5808,6 +5819,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             scheduledBookingId: booking.id,
             scheduledPickupAt: booking.pickup_at,
             sourceTable: booking.source_table,
+            vias: normalizeVias(booking.vias),
           };
 
           // Mark as activated BEFORE dispatching so a slow dispatch can't double-fire

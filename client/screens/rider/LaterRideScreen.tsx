@@ -23,6 +23,11 @@ import { useRide } from "@/context/RideContext";
 import { getApiUrl } from "@/lib/query-client";
 import { api } from "@/lib/api";
 import { useStripe } from "@stripe/stripe-react-native";
+import {
+  MAX_RIDE_VIAS,
+  viasToWaypointsParam,
+  type RideVia,
+} from "@shared/vias";
 
 const UTO_YELLOW = "#FFD000";
 
@@ -80,6 +85,9 @@ export default function LaterRideScreen({ navigation }: any) {
   const [dropoff, setDropoff] = useState("");
   const [pickupLocation, setPickupLocation] = useState<LatLng | null>(null);
   const [dropoffLocation, setDropoffLocation] = useState<LatLng | null>(null);
+  const [vias, setVias] = useState<
+    Array<{ id: string; address: string; latitude?: number; longitude?: number }>
+  >([]);
 
   // Pricing
   const [estimatedFare, setEstimatedFare] = useState<number | null>(null);
@@ -207,18 +215,32 @@ export default function LaterRideScreen({ navigation }: any) {
         const baseUrl = getApiUrl();
         const originStr = `${pickupLocation.latitude},${pickupLocation.longitude}`;
         const destStr = `${dropoffLocation.latitude},${dropoffLocation.longitude}`;
-        const res = await fetch(
-          `${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`,
+        const validVias = vias.filter(
+          (v): v is RideVia & { latitude: number; longitude: number } =>
+            !!v.address.trim() &&
+            Number.isFinite(v.latitude) &&
+            Number.isFinite(v.longitude),
         );
+        const waypoints = viasToWaypointsParam(validVias);
+        let url = `${baseUrl}/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
+        if (waypoints) {
+          url += `&waypoints=${encodeURIComponent(waypoints)}`;
+        }
+        const res = await fetch(url);
         const data = await res.json();
 
         let dist = 5.5;
         let dur = 15;
 
         if (data.status === "OK" && data.routes?.[0]?.legs?.[0]) {
-          const leg = data.routes[0].legs[0];
-          dist = (leg.distance?.value || 0) / 1000;
-          dur = Math.round((leg.duration?.value || 0) / 60);
+          const legs = data.routes[0].legs;
+          dist =
+            legs.reduce((sum: number, leg: any) => sum + (leg.distance?.value || 0), 0) /
+            1000;
+          dur = Math.round(
+            legs.reduce((sum: number, leg: any) => sum + (leg.duration?.value || 0), 0) /
+              60,
+          );
         }
 
         setDistanceKm(dist);
@@ -246,7 +268,7 @@ export default function LaterRideScreen({ navigation }: any) {
     };
 
     calculateFare();
-  }, [pickupLocation, dropoffLocation, selectedVehicle]);
+  }, [pickupLocation, dropoffLocation, selectedVehicle, vias]);
 
   // Compute pickup time from spinner
   const computedPickup: Date = (() => {
@@ -345,6 +367,13 @@ export default function LaterRideScreen({ navigation }: any) {
           luggage,
           couponCode: isCouponApplied ? couponCode : null,
           discountAmount: isCouponApplied ? couponDiscount : 0,
+          vias: vias
+            .filter((v) => v.address.trim())
+            .map((v) => ({
+              address: v.address,
+              latitude: v.latitude ?? 0,
+              longitude: v.longitude ?? 0,
+            })),
         }),
       });
 
@@ -491,6 +520,72 @@ export default function LaterRideScreen({ navigation }: any) {
             />
           </View>
         </View>
+
+        {vias.map((via, index) => (
+          <React.Fragment key={via.id}>
+            <View style={s.routeLine} />
+            <View style={s.locationRow}>
+              <View style={[s.routeDot, { backgroundColor: "#F59E0B" }]} />
+              <View style={{ flex: 1 }}>
+                <LocationInputAutocomplete
+                  label={`Via ${index + 1}`}
+                  value={via.address}
+                  placeholder="Add a stop"
+                  onChangeText={(text) => {
+                    setVias((prev) =>
+                      prev.map((v) =>
+                        v.id === via.id ? { ...v, address: text } : v,
+                      ),
+                    );
+                  }}
+                  onSelectLocation={(place: PlaceSuggestion) => {
+                    setVias((prev) =>
+                      prev.map((v) =>
+                        v.id === via.id
+                          ? {
+                              ...v,
+                              address: place.mainText,
+                              latitude: place.latitude,
+                              longitude: place.longitude,
+                            }
+                          : v,
+                      ),
+                    );
+                  }}
+                  type="via"
+                  onRemove={() =>
+                    setVias((prev) => prev.filter((v) => v.id !== via.id))
+                  }
+                />
+              </View>
+            </View>
+          </React.Fragment>
+        ))}
+
+        {vias.length < MAX_RIDE_VIAS ? (
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setVias((prev) => {
+                if (prev.length >= MAX_RIDE_VIAS) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: `via_${Date.now()}_${prev.length}`,
+                    address: "",
+                  },
+                ];
+              });
+            }}
+            style={s.addViaBtn}
+          >
+            <MaterialIcons name="add-location-alt" size={16} color="#F59E0B" />
+            <Text style={s.addViaText}>
+              Add stop ({vias.length}/{MAX_RIDE_VIAS})
+            </Text>
+          </Pressable>
+        ) : null}
+
         <View style={s.routeLine} />
         <View style={s.locationRow}>
           <View style={[s.routeDot, { backgroundColor: UTO_YELLOW }]} />
@@ -1125,6 +1220,20 @@ const s = StyleSheet.create({
     backgroundColor: "#E5E7EB",
     marginLeft: 4,
     marginVertical: 4,
+  },
+  addViaBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginLeft: 22,
+    marginTop: 4,
+    marginBottom: 4,
+    alignSelf: "flex-start",
+  },
+  addViaText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#F59E0B",
   },
 
   // Time card

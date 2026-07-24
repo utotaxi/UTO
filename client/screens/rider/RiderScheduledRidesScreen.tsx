@@ -31,6 +31,7 @@ interface ScheduledRide {
   id: string;
   pickup_address: string;
   dropoff_address: string;
+  vias?: Array<{ address: string; latitude?: number; longitude?: number }>;
   pickup_at: string;
   dropoff_by: string;
   status: BookingStatus;
@@ -149,6 +150,15 @@ function RideCard({
               {pickup.date} · {pickup.time}
             </Text>
           </View>
+          <View style={{ height: 14 }} />
+          {(ride.vias || []).map((via, index) => (
+            <View style={cs.addrBlock} key={`via-${index}`}>
+              <Text style={cs.addrLabel}>VIA {index + 1}</Text>
+              <Text style={cs.addrText} numberOfLines={2}>
+                {via.address}
+              </Text>
+            </View>
+          ))}
           <View style={{ height: 14 }} />
           <View style={cs.addrBlock}>
             <Text style={cs.addrLabel}>DROPOFF</Text>

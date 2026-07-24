@@ -3594,6 +3594,13 @@ export default function RideRequestScreen({ navigation, route }: any) {
                           pickupAt: finalPickup.toISOString(),
                           passengers: schedPassengers,
                           luggage: schedLuggage,
+                          vias: vias
+                            .filter((v) => v.address.trim())
+                            .map((v) => ({
+                              address: v.address,
+                              latitude: v.latitude ?? 0,
+                              longitude: v.longitude ?? 0,
+                            })),
                         }),
                       },
                     );

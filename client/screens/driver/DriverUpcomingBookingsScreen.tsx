@@ -31,6 +31,7 @@ interface LaterBooking {
   passenger_name?: string | null;
   pickup_address: string;
   dropoff_address: string;
+  vias?: Array<{ address: string; latitude?: number; longitude?: number }>;
   pickup_at: string;
   dropoff_by: string;
   status: string;
@@ -197,6 +198,14 @@ function UpcomingBookingCard({
             {item.pickup_address}
           </Text>
         </View>
+        {(item.vias || []).map((via, index) => (
+          <View style={s.detailRow} key={`via-${index}`}>
+            <Text style={s.detailLabel}>Via {index + 1}:</Text>
+            <Text style={s.detailValue} numberOfLines={2}>
+              {via.address}
+            </Text>
+          </View>
+        ))}
         <View style={s.detailRow}>
           <Text style={s.detailLabel}>Dropoff:</Text>
           <Text style={s.detailValue} numberOfLines={2}>

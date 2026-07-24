@@ -1805,6 +1805,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
       return false;
     }
 
+    // Persist any vias to the same ride_vias table used by ASAP rides so live
+    // route / driver navigation works the same way.
+    if (rideData.vias?.length) {
+      try {
+        await saveRideVias(rideData.id, rideData.vias);
+      } catch (viaErr) {
+        console.warn(
+          `⚠️ Could not save scheduled ride vias for ${rideData.id}:`,
+          viaErr,
+        );
+      }
+    }
+
     await supabase
       .from("drivers")
       .update({ is_available: false })

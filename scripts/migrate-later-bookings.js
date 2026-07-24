@@ -13,6 +13,8 @@ async function migrate() {
     `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS cancellation_fee NUMERIC(10,2) DEFAULT 0`,
     `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS cancellation_note TEXT DEFAULT NULL`,
     `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS cancelled_by TEXT DEFAULT NULL`,
+    `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS vias JSONB DEFAULT NULL`,
+    `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS vias JSONB DEFAULT NULL`,
   ];
 
   for (const sql of columns) {
