@@ -406,12 +406,12 @@ class MinHeap {
 
 const RADIUS_MILES = DEFAULT_DRIVER_RADIUS_MILES; // 5-mile radius for driver eligibility
 /** Accept window while the driver app has a live socket. */
-const DISPATCH_TIMEOUT_MS = 45_000;
+const DISPATCH_TIMEOUT_MS = 12_000;
 /** Fast cascade when only push/background — keeps first live driver within ~10–12s. */
 const DISPATCH_TIMEOUT_NO_SOCKET_MS = 8_000;
 /** How long to keep retrying when no eligible driver is found yet. */
 const NO_DRIVER_RETRY_MS = 90_000;
-const NO_DRIVER_RETRY_INTERVAL_MS = 5_000;
+const NO_DRIVER_RETRY_INTERVAL_MS = 2_000;
 /** Heartbeat window used for matching when there is no live socket. */
 const RECENT_DRIVER_SEEN_MS = 3 * 60 * 1000;
 const ARRIVED_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes waiting for rider
@@ -762,7 +762,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
   // ─── dispatchToNextDriver ──────────────────────────────────────────────
   // Pops the nearest driver from the heap and sends the ride exclusively to them.
-  // Sets a 15-second timeout; if the driver doesn't accept, moves to the next.
+  // Sets a 12-second timeout; if the driver doesn't accept, moves to the next.
   async function dispatchToNextDriver(rideId: string) {
     const state = dispatchQueues.get(rideId);
     if (!state || state.cancelled) {
@@ -978,7 +978,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
             interruptionLevel: "timeSensitive",
           };
 
-          const pushRes = await fetch("https://exp.host/--/api/v2/push/send", {
+          // Fire-and-forget so the accept timer and next-driver cascade are not
+          // blocked waiting for the Expo push HTTP round-trip.
+          fetch("https://exp.host/--/api/v2/push/send", {
             method: "POST",
             headers: {
               Accept: "application/json",
@@ -986,12 +988,20 @@ export function setupSocketIO(httpServer: HTTPServer) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify(pushMessage),
-          });
-          const pushBody = await pushRes.json().catch(() => null);
-          console.log(
-            `📲 Push notification sent to driver ${entry.driverId} (token: ${userRow.push_token.substring(0, 20)}...) status=${pushRes.status}`,
-            pushBody ? JSON.stringify(pushBody).slice(0, 300) : "",
-          );
+          })
+            .then(async (pushRes) => {
+              const pushBody = await pushRes.json().catch(() => null);
+              console.log(
+                `📲 Push notification sent to driver ${entry.driverId} (token: ${userRow.push_token.substring(0, 20)}...) status=${pushRes.status}`,
+                pushBody ? JSON.stringify(pushBody).slice(0, 300) : "",
+              );
+            })
+            .catch((pushErr) => {
+              console.warn(
+                `⚠️ Could not send push notification to driver ${entry.driverId}:`,
+                pushErr,
+              );
+            });
         } else {
           console.warn(
             `⚠️ Driver ${entry.driverId} has no push_token — background delivery may fail`,
@@ -2842,25 +2852,27 @@ export function setupSocketIO(httpServer: HTTPServer) {
           const ride = acceptedRide;
 
           if (ride) {
-            const driverLocation = await getLatestDriverLocation(
-              data.rideId,
-              actualDriverId,
-              socket.id,
-            );
-            const { data: driverProfile } = await supabase
-              .from("drivers")
-              .select(
-                "vehicle_make, vehicle_model, license_plate, rating, user_id",
-              )
-              .eq("id", actualDriverId)
-              .maybeSingle();
-            const { data: driverUser } = driverProfile?.user_id
+            // Parallelize the independent profile/location/user lookups so the
+            // rider sees the driver assigned as fast as possible.
+            const [driverLocation, driverProfile] = await Promise.all([
+              getLatestDriverLocation(data.rideId, actualDriverId, socket.id),
+              supabase
+                .from("drivers")
+                .select(
+                  "vehicle_make, vehicle_model, license_plate, rating, user_id",
+                )
+                .eq("id", actualDriverId)
+                .maybeSingle()
+                .then((res) => res.data),
+            ]);
+            const driverUser = driverProfile?.user_id
               ? await supabase
                 .from("users")
                 .select("full_name, phone")
                 .eq("id", driverProfile.user_id)
                 .maybeSingle()
-              : { data: null };
+                .then((res) => res.data)
+              : null;
             const driverInfo = {
               driverName: driverUser?.full_name || "Your Driver",
               driverPhone: driverUser?.phone || "",
