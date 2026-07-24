@@ -1981,7 +1981,7 @@ export default function RideTrackingScreen({ navigation }: any) {
                       },
                     ]}
                   >
-                    {`0:${(freeCancelSecondsLeft ?? 0).toString().padStart(2, "0")}`}
+                    {`${(freeCancelSecondsLeft ?? 0)}s`}
                   </ThemedText>
                   <ThemedText
                     style={[
@@ -1989,8 +1989,8 @@ export default function RideTrackingScreen({ navigation }: any) {
                       { color: theme.textSecondary },
                     ]}
                   >
-                    Cancel free within this time. After that the full fare will
-                    be charged.
+                    Cancel free within this time. After that 100% of the fare
+                    will be charged.
                   </ThemedText>
                 </AnimatedView>
               )}
@@ -2506,7 +2506,7 @@ export default function RideTrackingScreen({ navigation }: any) {
                       style={[styles.freeCancelBannerText, { color: theme.text }]}
                     >
                       Free cancel:{" "}
-                      {`0:${(freeCancelSecondsLeft ?? 0).toString().padStart(2, "0")}`}
+                      {`${(freeCancelSecondsLeft ?? 0)}s`}
                     </ThemedText>
                   </View>
                 )}
@@ -2643,7 +2643,7 @@ export default function RideTrackingScreen({ navigation }: any) {
                     },
                   ]}
                 >
-                  {`0:${(freeCancelSecondsLeft ?? 0).toString().padStart(2, "0")}`}
+                  {`${(freeCancelSecondsLeft ?? 0)}s`}
                 </ThemedText>
               </View>
             )}
@@ -2655,7 +2655,7 @@ export default function RideTrackingScreen({ navigation }: any) {
               ]}
             >
               {cancelFeeState.cancellationFeeApplies
-                ? `Your free 1-minute period has ended. Cancelling now will charge the full fare of £${cancelFeeState.fareAmount.toFixed(2)}.`
+                ? `Your free 1-minute period has ended. Cancelling now will charge 100% of the fare: £${cancelFeeState.fareAmount.toFixed(2)}.`
                 : showFreeCancelCountdown
                   ? "Cancel now and no fare will be charged."
                   : cancelFeeState.driverAssigned
