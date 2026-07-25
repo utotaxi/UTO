@@ -3898,8 +3898,57 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   }
                 }
 
+                // Product rule: even during the rider's free 1-minute window the
+                // assigned driver is still paid the full payable fare (platform
+                // covers it). Rider is not charged.
+                if (
+                  cancelledRide &&
+                  riderInitiatedCancellation &&
+                  !driverInitiatedCancellation &&
+                  driverHasAccepted &&
+                  !isAfterFreeMinute &&
+                  !alreadyProcessedRiderCancelFee
+                ) {
+                  const discount = Math.max(
+                    0,
+                    Number((cancelledRide as any).discount_amount || 0),
+                  );
+                  const driverCreditAmount = getDiscountedFare(
+                    cancelledRide.estimated_price ||
+                      cancelledRide.final_price ||
+                      0,
+                    discount,
+                  );
+                  const earningsDriverId =
+                    cancelledRide.driver_id || resolvedDriverId;
+                  if (earningsDriverId && driverCreditAmount > 0) {
+                    try {
+                      await ensureRiderCancellationEarningsCredit(
+                        update.rideId,
+                        earningsDriverId,
+                        driverCreditAmount,
+                      );
+                      // Separate from cancellationFee so the rider UI does not
+                      // show a "you were charged" alert on a free cancel.
+                      (update as any).driverEarningsCredit = driverCreditAmount;
+                      console.log(
+                        `💰 Free-minute rider cancel: credited driver ${earningsDriverId} £${driverCreditAmount.toFixed(2)} for ride ${update.rideId} (rider not charged)`,
+                      );
+                    } catch (earningsErr) {
+                      console.error(
+                        "❌ Failed to credit driver on free-minute rider cancel:",
+                        earningsErr,
+                      );
+                    }
+                  } else if (!earningsDriverId) {
+                    console.warn(
+                      `⚠️ Free-minute rider cancel but no driver_id on ride ${update.rideId}`,
+                    );
+                  }
+                }
+
                 console.log(
-                  `🆓 Free cancel for ride ${update.rideId}: policy=${(update as any).cancellationPolicy}, authReleased=${authReleased}`,
+                  `🆓 Free cancel for ride ${update.rideId}: policy=${(update as any).cancellationPolicy}, authReleased=${authReleased}, driverCredit=${Number((update as any).driverEarningsCredit || 0)}`,
                 );
               }
             } catch (cancelFeeErr) {

@@ -793,12 +793,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               setRideCancelledByRider(true);
 
               // 🔔 Notify driver of cancellation
+              // After free minute: cancellationFee is charged to rider + credited.
+              // Within free minute: rider pays nothing, but driverEarningsCredit
+              // is still applied so the driver is paid.
               const cancelFee = Number(
-                update.cancellationFee || update.cancellation_fee || 0,
+                update.cancellationFee ||
+                  update.cancellation_fee ||
+                  update.driverEarningsCredit ||
+                  0,
               );
               sendLocalNotification(
                 cancelFee > 0
-                  ? "💰 Ride Cancelled — Fee Credited"
+                  ? "💰 Ride Cancelled — Earnings Updated"
                   : "❌ Ride Cancelled",
                 cancelFee > 0
                   ? `${currentRide?.riderName || "The rider"} cancelled. £${cancelFee.toFixed(2)} was added to your earnings.`
@@ -1242,8 +1248,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         let inferredState: DriverRideState = "accepted";
         if (serverStatus === "at_pickup" || serverStatus === "arrived")
           inferredState = "at_pickup";
-        else if (serverStatus === "in_progress")
-          inferredState = "in_progress";
+        else if (serverStatus === "in_progress") inferredState = "in_progress";
         setRideState(inferredState);
       } else {
         setActiveRide(null);
@@ -1395,8 +1400,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         // Keep location + push delivery alive when the driver leaves the app.
         // Prefer the drivers-table id for location heartbeats when available.
         startBackgroundLocationTracking(driverProfile?.id || driverId).catch(
-          (err) =>
-            console.warn("⚠️ Failed to start background location:", err),
+          (err) => console.warn("⚠️ Failed to start background location:", err),
         );
       } else {
         goOffline(driverId);
