@@ -185,9 +185,9 @@ export default function RideTrackingScreen({ navigation }: any) {
       const a =
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
         Math.cos((driverLocation.latitude * Math.PI) / 180) *
-        Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+          Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const miles = R * c;
       const minutes = Math.max(1, Math.round(miles * 3));
@@ -283,13 +283,34 @@ export default function RideTrackingScreen({ navigation }: any) {
 
   // ─── 1-minute free-cancel countdown after driver is assigned ───────────
   useEffect(() => {
-    const status = String(rideStatus || activeRide?.status || "").toLowerCase();
-    const driverAssigned = [
-      "accepted",
-      "arrived",
-      "at_pickup",
-      "arriving",
-    ].includes(status);
+    if (!activeRide?.id) {
+      freeCancelAnchorRef.current = null;
+      setFreeCancelSecondsLeft(null);
+      return;
+    }
+
+    const socketStatus = String(rideStatus || "").toLowerCase();
+    const rideRowStatus = String(activeRide?.status || "").toLowerCase();
+    // Prefer the more advanced of socket vs context status so a stale
+    // "pending" socket status cannot hide the countdown after accept.
+    const rank: Record<string, number> = {
+      pending: 0,
+      accepted: 1,
+      arriving: 2,
+      arrived: 3,
+      at_pickup: 3,
+      in_progress: 4,
+    };
+    const status =
+      (rank[socketStatus] ?? -1) >= (rank[rideRowStatus] ?? -1)
+        ? socketStatus || rideRowStatus
+        : rideRowStatus || socketStatus;
+
+    const driverAssigned =
+      ["accepted", "arrived", "at_pickup", "arriving"].includes(status) ||
+      !!(activeRide as any)?.driverName ||
+      !!(activeRide as any)?.driverId ||
+      !!activeRide?.acceptedAt;
 
     if (!driverAssigned) {
       freeCancelAnchorRef.current = null;
@@ -324,8 +345,8 @@ export default function RideTrackingScreen({ navigation }: any) {
     activeRide?.status,
     activeRide?.acceptedAt,
     activeRide?.id,
+    (activeRide as any)?.driverName,
   ]);
-
   // ─── 10-minute countdown timer when driver arrives ────────────────────
   useEffect(() => {
     const status = rideStatus || activeRide?.status;
@@ -518,23 +539,38 @@ export default function RideTrackingScreen({ navigation }: any) {
     setShowCancelModal(true);
   };
 
+  const getEffectiveRideStatus = () => {
+    const socketStatus = String(rideStatus || "").toLowerCase();
+    const rideRowStatus = String(activeRide?.status || "").toLowerCase();
+    const rank: Record<string, number> = {
+      pending: 0,
+      accepted: 1,
+      arriving: 2,
+      arrived: 3,
+      at_pickup: 3,
+      in_progress: 4,
+      completed: 5,
+      payment_collected: 5,
+      cancelled: 5,
+    };
+    if ((rank[socketStatus] ?? -1) >= (rank[rideRowStatus] ?? -1)) {
+      return socketStatus || rideRowStatus;
+    }
+    return rideRowStatus || socketStatus;
+  };
+
   const getCancelFeeState = () => {
     // 1 free minute from the moment a driver is assigned; after that, full payable fare.
-    const status = String(
-      rideStatus || activeRide?.status || "",
-    ).toLowerCase();
+    const status = getEffectiveRideStatus();
     const acceptedAtMs =
       freeCancelAnchorRef.current ||
-      (activeRide?.acceptedAt
-        ? new Date(activeRide.acceptedAt).getTime()
-        : 0);
-    const driverAssigned = [
-      "accepted",
-      "arriving",
-      "arrived",
-      "at_pickup",
-      "in_progress",
-    ].includes(status);
+      (activeRide?.acceptedAt ? new Date(activeRide.acceptedAt).getTime() : 0);
+    const driverAssigned =
+      ["accepted", "arriving", "arrived", "at_pickup", "in_progress"].includes(
+        status,
+      ) ||
+      !!(activeRide as any)?.driverName ||
+      !!activeRide?.acceptedAt;
     const withinFreeMinute =
       driverAssigned &&
       freeCancelSecondsLeft != null &&
@@ -1683,7 +1719,7 @@ export default function RideTrackingScreen({ navigation }: any) {
   }
 
   const getStatusMessage = () => {
-    const status = String(rideStatus || activeRide.status || "").toLowerCase();
+    const status = getEffectiveRideStatus();
     switch (status) {
       case "pending":
         return "Finding your driver...";
@@ -1773,9 +1809,9 @@ export default function RideTrackingScreen({ navigation }: any) {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos((driverLocation.latitude * Math.PI) / 180) *
-      Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+        Math.cos((activeRide.pickupLocation.latitude * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const miles = R * c;
 
@@ -1788,12 +1824,10 @@ export default function RideTrackingScreen({ navigation }: any) {
     longitude: activeRide.pickupLocation.longitude + 0.003,
   };
 
-  const currentStatus = String(
-    rideStatus || activeRide.status || "",
-  ).toLowerCase();
+  const currentStatus = getEffectiveRideStatus();
   const cancelFeeState = getCancelFeeState();
   const showFreeCancelCountdown =
-    ["accepted", "arrived", "at_pickup", "arriving"].includes(currentStatus) &&
+    cancelFeeState.driverAssigned &&
     freeCancelSecondsLeft !== null &&
     freeCancelSecondsLeft > 0;
 
@@ -1940,60 +1974,56 @@ export default function RideTrackingScreen({ navigation }: any) {
 
             {/* ─── 1-minute free cancellation countdown after assign ─── */}
             {showFreeCancelCountdown && (
-                <AnimatedView
+              <AnimatedView
+                style={[
+                  styles.waitingTimerContainer,
+                  {
+                    backgroundColor: UTOColors.success + "18",
+                    borderColor: UTOColors.success + "40",
+                    marginTop: Spacing.md,
+                  },
+                  freeCancelSecondsLeft !== null && freeCancelSecondsLeft <= 15
+                    ? timerPulseStyle
+                    : {},
+                ]}
+              >
+                <View style={styles.waitingTimerHeader}>
+                  <MaterialIcons
+                    name="timer"
+                    size={18}
+                    color={UTOColors.success}
+                  />
+                  <ThemedText
+                    style={[styles.waitingTimerTitle, { color: theme.text }]}
+                  >
+                    Free cancellation ends in
+                  </ThemedText>
+                </View>
+                <ThemedText
                   style={[
-                    styles.waitingTimerContainer,
+                    styles.waitingTimerDigits,
                     {
-                      backgroundColor: UTOColors.success + "18",
-                      borderColor: UTOColors.success + "40",
-                      marginTop: Spacing.md,
+                      color:
+                        freeCancelSecondsLeft !== null &&
+                        freeCancelSecondsLeft <= 15
+                          ? "#EF4444"
+                          : UTOColors.success,
                     },
-                    freeCancelSecondsLeft !== null &&
-                    freeCancelSecondsLeft <= 15
-                      ? timerPulseStyle
-                      : {},
                   ]}
                 >
-                  <View style={styles.waitingTimerHeader}>
-                    <MaterialIcons
-                      name="timer"
-                      size={18}
-                      color={UTOColors.success}
-                    />
-                    <ThemedText
-                      style={[
-                        styles.waitingTimerTitle,
-                        { color: theme.text },
-                      ]}
-                    >
-                      Free cancellation ends in
-                    </ThemedText>
-                  </View>
-                  <ThemedText
-                    style={[
-                      styles.waitingTimerDigits,
-                      {
-                        color:
-                          freeCancelSecondsLeft !== null &&
-                          freeCancelSecondsLeft <= 15
-                            ? "#EF4444"
-                            : UTOColors.success,
-                      },
-                    ]}
-                  >
-                    {`${(freeCancelSecondsLeft ?? 0)}s`}
-                  </ThemedText>
-                  <ThemedText
-                    style={[
-                      styles.waitingTimerWarning,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Cancel free within this time. After that 100% of the fare
-                    will be charged.
-                  </ThemedText>
-                </AnimatedView>
-              )}
+                  {`${freeCancelSecondsLeft ?? 0}s`}
+                </ThemedText>
+                <ThemedText
+                  style={[
+                    styles.waitingTimerWarning,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Cancel free within this time. After that 100% of the fare will
+                  be charged.
+                </ThemedText>
+              </AnimatedView>
+            )}
 
             {currentStatus === "in_progress" && (
               <View style={styles.etaRow}>
@@ -2378,13 +2408,15 @@ export default function RideTrackingScreen({ navigation }: any) {
           <View style={styles.tripDetails}>
             <View style={[styles.routeContainer, { alignItems: "center" }]}>
               <View style={{ flex: 1 }}>
-
                 {/* Pickup Row */}
                 <View style={styles.routeRow}>
                   <View
                     style={[
                       styles.routeDot,
-                      { backgroundColor: UTOColors.success, marginRight: Spacing.md },
+                      {
+                        backgroundColor: UTOColors.success,
+                        marginRight: Spacing.md,
+                      },
                     ]}
                   />
                   <ThemedText style={styles.address} numberOfLines={1}>
@@ -2398,14 +2430,22 @@ export default function RideTrackingScreen({ navigation }: any) {
                     <View
                       style={[
                         styles.routeLine,
-                        { backgroundColor: theme.border, marginLeft: 4, height: 16, marginVertical: 2 },
+                        {
+                          backgroundColor: theme.border,
+                          marginLeft: 4,
+                          height: 16,
+                          marginVertical: 2,
+                        },
                       ]}
                     />
                     <View style={styles.routeRow}>
                       <View
                         style={[
                           styles.routeDot,
-                          { backgroundColor: "#F59E0B", marginRight: Spacing.md },
+                          {
+                            backgroundColor: "#F59E0B",
+                            marginRight: Spacing.md,
+                          },
                         ]}
                       />
                       <ThemedText style={styles.address} numberOfLines={1}>
@@ -2419,21 +2459,28 @@ export default function RideTrackingScreen({ navigation }: any) {
                 <View
                   style={[
                     styles.routeLine,
-                    { backgroundColor: theme.border, marginLeft: 4, height: 16, marginVertical: 2 },
+                    {
+                      backgroundColor: theme.border,
+                      marginLeft: 4,
+                      height: 16,
+                      marginVertical: 2,
+                    },
                   ]}
                 />
                 <View style={styles.routeRow}>
                   <View
                     style={[
                       styles.routeDot,
-                      { backgroundColor: UTOColors.error, marginRight: Spacing.md },
+                      {
+                        backgroundColor: UTOColors.error,
+                        marginRight: Spacing.md,
+                      },
                     ]}
                   />
                   <ThemedText style={styles.address} numberOfLines={1}>
                     {activeRide.dropoffLocation.address}
                   </ThemedText>
                 </View>
-
               </View>
 
               <ThemedText style={styles.farePrice}>
@@ -2503,10 +2550,12 @@ export default function RideTrackingScreen({ navigation }: any) {
                       }
                     />
                     <ThemedText
-                      style={[styles.freeCancelBannerText, { color: theme.text }]}
+                      style={[
+                        styles.freeCancelBannerText,
+                        { color: theme.text },
+                      ]}
                     >
-                      Free cancel:{" "}
-                      {`${(freeCancelSecondsLeft ?? 0)}s`}
+                      Free cancel: {`${freeCancelSecondsLeft ?? 0}s`}
                     </ThemedText>
                   </View>
                 )}
@@ -2521,7 +2570,10 @@ export default function RideTrackingScreen({ navigation }: any) {
                   ]}
                 >
                   <ThemedText
-                    style={[styles.cancelButtonText, { color: UTOColors.error }]}
+                    style={[
+                      styles.cancelButtonText,
+                      { color: UTOColors.error },
+                    ]}
                   >
                     Cancel Ride
                   </ThemedText>
@@ -2594,9 +2646,7 @@ export default function RideTrackingScreen({ navigation }: any) {
           >
             <MaterialIcons
               name={
-                cancelFeeState.cancellationFeeApplies
-                  ? "warning"
-                  : "cancel"
+                cancelFeeState.cancellationFeeApplies ? "warning" : "cancel"
               }
               size={36}
               color={
@@ -2643,7 +2693,7 @@ export default function RideTrackingScreen({ navigation }: any) {
                     },
                   ]}
                 >
-                  {`${(freeCancelSecondsLeft ?? 0)}s`}
+                  {`${freeCancelSecondsLeft ?? 0}s`}
                 </ThemedText>
               </View>
             )}

@@ -1177,10 +1177,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
           return newHistory;
         });
 
-        if (
-          nextStatus === "completed" ||
-          nextStatus === "payment_collected"
-        ) {
+        if (nextStatus === "completed" || nextStatus === "payment_collected") {
           setPendingRating({
             rideId,
             driverName: current.driverName || "Your Driver",
@@ -2287,6 +2284,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
           status: "cancelled",
           cancelledBy: "rider",
           expectsCancellationFee: withPenalty,
+          // Help the server decide the free-cancel window even if accepted_at
+          // was not persisted on the rides row.
+          acceptedAt: rideToCancel.acceptedAt || undefined,
         });
         emitted = true;
       } catch (err) {

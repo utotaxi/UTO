@@ -602,6 +602,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
       declinedBy: Set<string>;
       rideData?: any;
       driverSocketId?: string;
+      /** ISO timestamp when a driver accepted — used for cancel-fee timing. */
+      acceptedAt?: string;
     }
   >();
   const latestDriverLocations = new Map<string, DriverLocation>(); // driverId or socketId -> location
@@ -2851,6 +2853,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
         const rideInfo = activeRides.get(data.rideId);
         if (rideInfo) {
           rideInfo.driverSocketId = socket.id;
+          rideInfo.acceptedAt = acceptedAt;
         }
 
         try {
@@ -3447,15 +3450,30 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 }
               }
 
-              const acceptedAt = cancelledRide?.accepted_at
-                ? new Date(cancelledRide.accepted_at).getTime()
+              // Resolve accept time from DB, in-memory dispatch state, or client hint.
+              // Missing accepted_at used to silently skip the card charge even when
+              // the rider app countdown had already ended.
+              const memAcceptedAt = activeRides.get(update.rideId)?.acceptedAt;
+              const clientAcceptedAtRaw =
+                (update as any).acceptedAt || (update as any).accepted_at;
+              const acceptedAtIso =
+                cancelledRide?.accepted_at ||
+                memAcceptedAt ||
+                (typeof clientAcceptedAtRaw === "string"
+                  ? clientAcceptedAtRaw
+                  : null);
+              let acceptedAt = acceptedAtIso
+                ? new Date(acceptedAtIso).getTime()
                 : 0;
+              if (!Number.isFinite(acceptedAt) || acceptedAt <= 0)
+                acceptedAt = 0;
               const acceptedElapsedMs = acceptedAt
                 ? Date.now() - acceptedAt
                 : 0;
               const driverHasAccepted =
                 acceptedAt > 0 ||
                 !!cancelledRide?.driver_id ||
+                !!resolvedDriverId ||
                 [
                   "accepted",
                   "arriving",
@@ -3463,13 +3481,24 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   "at_pickup",
                   "in_progress",
                 ].includes(String(cancelledRide?.status || "").toLowerCase());
-              // 1 free minute from accept. If accepted_at is missing we cannot prove
-              // the free window has elapsed — do NOT charge (keeps app countdown +
-              // server fee decision aligned; rider gets benefit of the doubt).
+              const clientExpectsFee = !!(update as any).expectsCancellationFee;
+              // 1 free minute from accept. If the app countdown already expired
+              // (expectsCancellationFee) and a driver was assigned, charge even
+              // when accepted_at was not persisted.
               const isAfterFreeMinute =
                 driverHasAccepted &&
+                ((acceptedAt > 0 && acceptedElapsedMs >= 60_000) ||
+                  (clientExpectsFee &&
+                    (!!cancelledRide?.driver_id || !!resolvedDriverId)));
+              // Persist accepted_at when we recovered it from memory/client so
+              // later reconciliation and audits stay consistent.
+              if (
+                !cancelledRide?.accepted_at &&
                 acceptedAt > 0 &&
-                acceptedElapsedMs >= 60_000;
+                Number.isFinite(acceptedAt)
+              ) {
+                updateData.accepted_at = new Date(acceptedAt).toISOString();
+              }
               const cancelledByRaw = String(
                 (update as any).cancelledBy || "",
               ).toLowerCase();
@@ -3522,6 +3551,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 !driverInitiatedCancellation &&
                 isAfterFreeMinute &&
                 !alreadyProcessedRiderCancelFee;
+              console.log(
+                `🧾 Cancel-fee decision ride=${update.rideId}: rider=${riderInitiatedCancellation}, afterFreeMin=${isAfterFreeMinute}, expectsFee=${clientExpectsFee}, acceptedAt=${acceptedAtIso || "none"}, elapsedMs=${acceptedElapsedMs}, driverId=${cancelledRide?.driver_id || resolvedDriverId || "none"}`,
+              );
 
               if (cancelledRide && alreadyProcessedRiderCancelFee) {
                 (update as any).cancellationFee = existingCancelFee;
@@ -3639,6 +3671,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
                     let cardCaptureSuccess = false;
                     let capturedPaymentIntentId: string | undefined;
+                    const ridePaymentMethod = String(
+                      cancelledRide.payment_method || "card",
+                    ).toLowerCase();
 
                     if (cancellationAlreadyCaptured) {
                       cardCaptureSuccess = true;
@@ -3648,7 +3683,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                       (update as any).chargedVia = "prepaid";
                       (update as any).chargedAmount = cancellationFeeAmount;
                     } else if (
-                      cancelledRide.payment_method === "card" &&
+                      ridePaymentMethod === "card" &&
                       cancelledRide.payment_intent_id
                     ) {
                       const captureResult = await capturePaymentIntent(
@@ -3668,8 +3703,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
                           `⚠️ Cancellation fee card capture failed for ride ${update.rideId}: ${captureResult.error}`,
                         );
                       }
-                    } else if (
-                      cancelledRide.payment_method === "card" &&
+                    }
+
+                    // Prefer charging the rider's saved card (ASAP rides usually
+                    // have no booking-time PaymentIntent hold).
+                    if (
+                      !cardCaptureSuccess &&
+                      ridePaymentMethod === "card" &&
                       walletDebitAmount > 0
                     ) {
                       const { data: riderUser } = await supabase
@@ -3695,11 +3735,18 @@ export function setupSocketIO(httpServer: HTTPServer) {
                             capturedPaymentIntentId;
                           (update as any).chargedVia = "card";
                           (update as any).chargedAmount = walletDebitAmount;
+                          console.log(
+                            `✅ Cancellation fee £${walletDebitAmount.toFixed(2)} charged to saved card for ride ${update.rideId}`,
+                          );
                         } else {
                           console.warn(
                             `⚠️ Cancellation fee card charge failed for ride ${update.rideId}: ${chargeResult.error}`,
                           );
                         }
+                      } else {
+                        console.warn(
+                          `⚠️ No stripe_customer_id for rider ${riderId} — cannot charge cancel fee by card`,
+                        );
                       }
                     }
 
@@ -3728,6 +3775,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                         (update as any).chargedVia = "wallet";
                         (update as any).chargedAmount = walletDebitAmount;
                         (update as any).walletBalance = newBalance;
+                        console.log(
+                          `💳 Cancellation fee £${walletDebitAmount.toFixed(2)} debited from wallet for ride ${update.rideId} (balance ${currentBalance} → ${newBalance})`,
+                        );
                       } catch (walletErr) {
                         console.error(
                           "❌ Failed to adjust wallet for cancellation fee:",
@@ -3781,11 +3831,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
                       }
                     }
 
-                    if (cancelledRide.driver_id) {
+                    const earningsDriverId =
+                      cancelledRide.driver_id || resolvedDriverId;
+                    if (earningsDriverId) {
                       try {
                         await ensureRiderCancellationEarningsCredit(
                           update.rideId,
-                          cancelledRide.driver_id,
+                          earningsDriverId,
                           cancellationFeeAmount,
                         );
                       } catch (earningsErr) {
@@ -3968,6 +4020,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
         // When driver accepts, store their socket so we can notify them of cancellations
         if (update.status === "accepted" && rideInfo) {
           rideInfo.driverSocketId = socket.id;
+          if ((update as any).acceptedAt) {
+            rideInfo.acceptedAt = String((update as any).acceptedAt);
+          } else if (!rideInfo.acceptedAt) {
+            rideInfo.acceptedAt = new Date().toISOString();
+          }
           console.log(
             `🚗 Driver socket ${socket.id} linked to ride ${update.rideId}`,
           );
