@@ -282,10 +282,23 @@ export default function DriverMarketplaceScreen() {
       );
       if (!res.ok) throw new Error("Failed to load");
       const data = await res.json();
-      // Marketplace = open unassigned jobs only. Assigned pending offers live in Upcoming.
+      // Marketplace = open unassigned jobs only (still upcoming). Assigned pending offers live in Upcoming.
+      const nowTs = Date.now();
       const openJobs = (data.bookings || []).filter((b: LaterBooking) => {
         const status = String(b.status || "").toLowerCase();
         const assigned = !!(b.driver_id || b.assigned_driver_id);
+        const pickupTs = new Date(b.pickup_at).getTime();
+        if (
+          status === "cancelled" ||
+          status === "completed" ||
+          status === "expired" ||
+          status === "driver_accepted" ||
+          status === "in_progress"
+        ) {
+          return false;
+        }
+        // Never show past / expired pickup times as open marketplace jobs
+        if (Number.isFinite(pickupTs) && pickupTs <= nowTs) return false;
         return (
           (status === "scheduled" || status === "marketplace") && !assigned
         );
@@ -312,13 +325,18 @@ export default function DriverMarketplaceScreen() {
   useEffect(() => {
     const socket = getSocket();
     const onUpdate = (payload?: any) => {
-      // Instant refresh when a declined/assigned booking returns to marketplace
+      // Instant refresh when marketplace / status changes (incl. expired / cancelled)
       if (
         !payload?.type ||
         payload.type === "created" ||
         payload.type === "declined" ||
         payload.type === "released" ||
-        payload.type === "assigned"
+        payload.type === "assigned" ||
+        payload.type === "cancelled" ||
+        payload.type === "completed" ||
+        payload.type === "expired" ||
+        payload.type === "live_status" ||
+        payload.type === "accepted"
       ) {
         loadBookings();
       }

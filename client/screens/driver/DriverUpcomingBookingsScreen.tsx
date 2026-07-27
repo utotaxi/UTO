@@ -123,14 +123,30 @@ function UpcomingBookingCard({
 
   const now = Date.now();
   const msUntilPickup = new Date(item.pickup_at).getTime() - now;
-  const isUpcoming = msUntilPickup > 0;
-  const isExpired = msUntilPickup <= 0;
+  const status = String(item.status || "").toLowerCase();
+  const isTerminal =
+    status === "cancelled" || status === "completed" || status === "expired";
+  const isUpcoming = msUntilPickup > 0 && !isTerminal;
+  const isExpired =
+    isTerminal || msUntilPickup <= 0 || status === "expired";
   const hoursLeft = Math.floor(msUntilPickup / (1000 * 60 * 60));
   const minutesLeft = Math.floor(
     (msUntilPickup % (1000 * 60 * 60)) / (1000 * 60),
   );
-  const pending = isPendingAssignment(item);
+  const pending = !isTerminal && isPendingAssignment(item);
   const isBusy = busyId === item.id;
+
+  const statusLabel = isTerminal
+    ? status === "completed"
+      ? "COMPLETED"
+      : status === "cancelled"
+        ? "CANCELLED"
+        : "EXPIRED"
+    : pending
+      ? "ASSIGNED — ACTION NEEDED"
+      : isExpired
+        ? "EXPIRED"
+        : "ACCEPTED";
 
   return (
     <Pressable style={s.card} onPress={() => onPress(item)}>
@@ -155,11 +171,7 @@ function UpcomingBookingCard({
               },
             ]}
           >
-            {pending
-              ? "ASSIGNED — ACTION NEEDED"
-              : isExpired
-                ? "EXPIRED"
-                : "ACCEPTED"}
+            {statusLabel}
           </Text>
         </View>
         {isUpcoming ? (
@@ -171,7 +183,13 @@ function UpcomingBookingCard({
           </Text>
         ) : (
           <Text style={[s.countdownText, { color: "#DC2626" }]}>
-            Pickup time passed
+            {isTerminal
+              ? status === "completed"
+                ? "Trip completed"
+                : status === "cancelled"
+                  ? "Booking cancelled"
+                  : "Pickup window expired"
+              : "Pickup time passed"}
           </Text>
         )}
         <Feather name="chevron-right" size={20} color="#9CA3AF" />
@@ -281,20 +299,49 @@ export default function DriverUpcomingBookingsScreen() {
       );
       if (!res.ok) throw new Error("Failed to load");
       const data = await res.json();
-      // Upcoming = accepted by this driver OR pending assignment offers for this driver
+      // Upcoming = accepted / pending assignment that are still within the start window
+      const START_GRACE_MS = 30 * 60 * 1000;
+      const RECENT_TERMINAL_MS = 24 * 60 * 60 * 1000;
+      const nowTs = Date.now();
       const mine = (data.bookings || []).filter((b: LaterBooking) => {
         const status = String(b.status || "").toLowerCase();
-        if (status === "cancelled" || status === "completed") return false;
+        const pickupTs = new Date(b.pickup_at).getTime();
+        const isTerminal =
+          status === "cancelled" ||
+          status === "completed" ||
+          status === "expired";
+
+        if (isTerminal) {
+          return (
+            Number.isFinite(pickupTs) && nowTs - pickupTs <= RECENT_TERMINAL_MS
+          );
+        }
+
+        // Past pickup grace → not active upcoming
+        if (Number.isFinite(pickupTs) && pickupTs < nowTs - START_GRACE_MS) {
+          return false;
+        }
+
         if (status === "driver_accepted") return true;
         return isPendingAssignment(b);
       });
       mine.sort((a: LaterBooking, b: LaterBooking) => {
+        const aStatus = String(a.status || "").toLowerCase();
+        const bStatus = String(b.status || "").toLowerCase();
+        const aTerminal =
+          aStatus === "cancelled" ||
+          aStatus === "completed" ||
+          aStatus === "expired";
+        const bTerminal =
+          bStatus === "cancelled" ||
+          bStatus === "completed" ||
+          bStatus === "expired";
+        if (aTerminal !== bTerminal) return aTerminal ? 1 : -1;
         const aPending = isPendingAssignment(a) ? 0 : 1;
         const bPending = isPendingAssignment(b) ? 0 : 1;
         if (aPending !== bPending) return aPending - bPending;
         const aTs = new Date(a.pickup_at).getTime();
         const bTs = new Date(b.pickup_at).getTime();
-        const nowTs = Date.now();
         const aUpcoming = aTs >= nowTs;
         const bUpcoming = bTs >= nowTs;
         if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;

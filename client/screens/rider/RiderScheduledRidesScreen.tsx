@@ -27,7 +27,8 @@ type BookingStatus =
   | "driver_accepted"
   | "in_progress"
   | "completed"
-  | "cancelled";
+  | "cancelled"
+  | "expired";
 
 interface ScheduledRide {
   id: string;
@@ -119,6 +120,8 @@ function statusLabel(
       return { label: "Completed", color: "#fff", bg: "#6B7280" };
     case "cancelled":
       return { label: "Cancelled", color: "#fff", bg: "#EF4444" };
+    case "expired":
+      return { label: "Expired", color: "#fff", bg: "#F59E0B" };
     default:
       return { label: status, color: "#fff", bg: "#6B7280" };
   }
@@ -138,7 +141,8 @@ function RideCard({
   const hasDriver = !!(ride.driver_id || ride.assigned_driver_id);
   const badge = statusLabel(ride.status, hasDriver);
   const canCancel =
-    ride.status === "scheduled" || ride.status === "driver_accepted";
+    (ride.status === "scheduled" || ride.status === "driver_accepted") &&
+    new Date(ride.pickup_at).getTime() > Date.now() - 30 * 60 * 1000;
   const driverName =
     ride.driver_name || ride.assigned_driver_name || "Your Driver";
   const driverPhone = ride.driver_phone || ride.assigned_driver_phone || null;
@@ -348,7 +352,8 @@ function RideCard({
       {/* Ride PIN — generated at booking time; share with driver at pickup */}
       {ride.otp &&
       ride.status !== "completed" &&
-      ride.status !== "cancelled" ? (
+      ride.status !== "cancelled" &&
+      ride.status !== "expired" ? (
         <View style={cs.pinBox}>
           <View style={{ flex: 1 }}>
             <Text style={cs.pinLabel}>YOUR RIDE PIN</Text>
@@ -413,21 +418,65 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
         );
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load rides");
-        // Show future rides only (pickup in the future), sorted upcoming first
+        // Active upcoming + recently finished (so cancelled/completed/expired status is visible)
         const now = Date.now();
+        const RECENT_TERMINAL_MS = 24 * 60 * 60 * 1000;
+        const START_GRACE_MS = 30 * 60 * 1000;
         const upcoming = (json.bookings as ScheduledRide[])
           .filter((b) => {
             const pickupTs = new Date(b.pickup_at).getTime();
             const status = String(b.status || "").toLowerCase();
-            if (status === "in_progress" || status === "driver_accepted")
-              return true;
-            if (status === "cancelled" || status === "completed") return false;
-            return pickupTs > now - 30 * 60 * 1000; // keep visible through start grace
+            const isTerminal =
+              status === "cancelled" ||
+              status === "completed" ||
+              status === "expired";
+
+            if (status === "in_progress") return true;
+
+            if (isTerminal) {
+              // Keep terminal bookings visible for 24h so both parties see the update
+              return (
+                Number.isFinite(pickupTs) &&
+                now - pickupTs <= RECENT_TERMINAL_MS
+              );
+            }
+
+            // Past start grace and never started → treat as inactive (server also expires these)
+            if (
+              Number.isFinite(pickupTs) &&
+              pickupTs < now - START_GRACE_MS &&
+              status !== "driver_accepted"
+            ) {
+              return false;
+            }
+
+            // Accepted jobs stay visible through the start grace window
+            if (status === "driver_accepted") {
+              return (
+                !Number.isFinite(pickupTs) || pickupTs > now - START_GRACE_MS
+              );
+            }
+
+            // Scheduled / waiting for driver — only while still upcoming
+            return pickupTs > now - START_GRACE_MS;
           })
-          .sort(
-            (a, b) =>
-              new Date(a.pickup_at).getTime() - new Date(b.pickup_at).getTime(),
-          );
+          .sort((a, b) => {
+            const aStatus = String(a.status || "").toLowerCase();
+            const bStatus = String(b.status || "").toLowerCase();
+            const aTerminal =
+              aStatus === "cancelled" ||
+              aStatus === "completed" ||
+              aStatus === "expired";
+            const bTerminal =
+              bStatus === "cancelled" ||
+              bStatus === "completed" ||
+              bStatus === "expired";
+            // Active first, then terminal; within each group by pickup time
+            if (aTerminal !== bTerminal) return aTerminal ? 1 : -1;
+            return (
+              new Date(a.pickup_at).getTime() - new Date(b.pickup_at).getTime()
+            );
+          });
         setRides(upcoming);
       } catch (err: any) {
         setError(err.message || "Something went wrong");
@@ -470,10 +519,7 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
         if (!driver) {
           next[idx] = {
             ...current,
-            status:
-              payload.status === "cancelled"
-                ? current.status
-                : (payload.status as BookingStatus) || "scheduled",
+            status: (payload.status as BookingStatus) || "scheduled",
             driver_id: null,
             assigned_driver_id: null,
             assigned_driver_name: null,
@@ -520,7 +566,10 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
         payload?.type === "assigned" ||
         payload?.type === "released" ||
         payload?.type === "declined" ||
-        payload?.type === "cancelled"
+        payload?.type === "cancelled" ||
+        payload?.type === "completed" ||
+        payload?.type === "expired" ||
+        payload?.type === "live_status"
       ) {
         refresh();
       }

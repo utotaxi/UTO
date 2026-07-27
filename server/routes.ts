@@ -4314,13 +4314,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const bookingPickupTs = pickupTimestamp(booking);
           const isAssigned = !!bookingDriverId;
 
+          // Terminal bookings: only the assigned/accepted driver may see recent history.
+          // Completed stays off this feed; expired/cancelled are included for that driver.
+          if (status === "completed" || status === "cancelled_no_drivers") {
+            return false;
+          }
+          if (status === "expired" || status === "cancelled") {
+            if (driverId && driverIdentity) {
+              return bookingMatchesDriverIdentity(booking, driverIdentity);
+            }
+            return false;
+          }
+
+          // Past the start grace window → not active (expiry engine also marks these).
+          const START_LATE_MS = 30 * 60 * 1000;
+          if (bookingPickupTs && bookingPickupTs < nowTs - START_LATE_MS) {
+            return false;
+          }
+
           if (driverId && driverIdentity) {
             // Accepted rides for this driver
             if (status === "driver_accepted") {
               return bookingMatchesDriverIdentity(booking, driverIdentity);
             }
-            // Cancelled history for this driver
-            if (status === "cancelled") {
+            // Cancelled / expired history for this driver (handled above)
+            if (status === "cancelled" || status === "expired") {
               return bookingMatchesDriverIdentity(booking, driverIdentity);
             }
             // Pending assignment offer — only the assigned driver sees it (Upcoming)
@@ -4512,7 +4530,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const booking = normalizeLaterBooking(raw, sourceTable);
         const status = String(booking.status || "").toLowerCase();
-        if (status === "completed" || status === "cancelled") {
+        if (status === "completed" || status === "cancelled" || status === "expired") {
           return res
             .status(400)
             .json({ error: `Cannot start a ${status} booking` });
@@ -6189,6 +6207,209 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Scheduled activation engine error:", err);
     }
   }, 60000); // 1 minute interval
+
+  // ─── Expire past scheduled bookings (no longer active) ───
+  // After the pickup start window (30 min past pickup), any booking that was
+  // never completed / cancelled and is not on an active live trip is marked
+  // expired so rider upcoming + driver upcoming/marketplace stop showing it
+  // as active. Both parties receive later-booking:update.
+  const SCHEDULED_BOOKING_EXPIRE_GRACE_MS = 30 * 60 * 1000;
+  const ACTIVE_SCHEDULED_STATUSES = new Set([
+    "scheduled",
+    "marketplace",
+    "assigned",
+    "driver_assigned",
+    "driver_accepted",
+  ]);
+  const missingLaterBookingExpireColumns = new Set<string>();
+
+  const expirePastScheduledBookings = async () => {
+    try {
+      const [laterBookingsRaw, webBookerRaw] = await Promise.all([
+        fetchLaterBookingsFromTable("later_bookings"),
+        fetchLaterBookingsFromTable("web_booker"),
+      ]);
+      const nowTs = Date.now();
+      const candidates = [
+        ...laterBookingsRaw.map((row: any) =>
+          normalizeLaterBooking(row, "later_bookings"),
+        ),
+        ...webBookerRaw.map((row: any) =>
+          normalizeLaterBooking(row, "web_booker"),
+        ),
+      ].filter((booking: any) => {
+        const status = String(booking.status || "").toLowerCase();
+        if (!ACTIVE_SCHEDULED_STATUSES.has(status)) return false;
+        if (status === "in_progress" || status === "completed") return false;
+        if (status === "cancelled" || status === "expired") return false;
+        const pickupTs = pickupTimestamp(booking);
+        if (!pickupTs) return false;
+        // Still within the start / ASAP grace window — leave active.
+        if (pickupTs + SCHEDULED_BOOKING_EXPIRE_GRACE_MS >= nowTs) return false;
+        return true;
+      });
+
+      for (const booking of candidates) {
+        try {
+          // If a live ride is still active, do not expire the booking yet.
+          const liveId = booking.live_ride_id
+            ? String(booking.live_ride_id)
+            : null;
+          if (liveId) {
+            const { data: liveRide } = await sb
+              .from("rides")
+              .select("id, status")
+              .eq("id", liveId)
+              .maybeSingle();
+            const liveStatus = String(liveRide?.status || "").toLowerCase();
+            if (
+              liveRide &&
+              !["cancelled", "completed", "cancelled_no_drivers"].includes(
+                liveStatus,
+              )
+            ) {
+              continue;
+            }
+          } else if (booking.id) {
+            // Fallback: sched_ live ride may exist without live_ride_id column
+            const { data: schedRide } = await sb
+              .from("rides")
+              .select("id, status")
+              .like("id", `sched_${booking.id}_%`)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            const liveStatus = String(schedRide?.status || "").toLowerCase();
+            if (
+              schedRide &&
+              !["cancelled", "completed", "cancelled_no_drivers"].includes(
+                liveStatus,
+              )
+            ) {
+              continue;
+            }
+          }
+
+          const sourceTable = (booking.source_table ||
+            "later_bookings") as "later_bookings" | "web_booker";
+          const updatePayload: any = {
+            status: "expired",
+            updated_at: new Date().toISOString(),
+            live_ride_id: null,
+            cancellation_reason: "pickup_window_expired",
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: "system",
+          };
+          for (const col of missingLaterBookingExpireColumns) {
+            delete updatePayload[col];
+          }
+
+          const updateResult = await updateLaterBookingWithFallbackColumns(
+            sourceTable,
+            booking.id,
+            updatePayload,
+            missingLaterBookingExpireColumns,
+          );
+
+          // Some schemas may reject "expired" — fall back to cancelled.
+          if (
+            updateResult.error &&
+            /expired|status|check|constraint|invalid/i.test(
+              String(updateResult.error.message || ""),
+            )
+          ) {
+            const fallbackPayload: any = {
+              status: "cancelled",
+              updated_at: new Date().toISOString(),
+              live_ride_id: null,
+              cancellation_reason: "pickup_window_expired",
+              cancelled_at: new Date().toISOString(),
+              cancelled_by: "system",
+            };
+            for (const col of missingLaterBookingExpireColumns) {
+              delete fallbackPayload[col];
+            }
+            const fallback = await updateLaterBookingWithFallbackColumns(
+              sourceTable,
+              booking.id,
+              fallbackPayload,
+              missingLaterBookingExpireColumns,
+            );
+            if (fallback.error || !fallback.data) {
+              console.warn(
+                `⚠️ Could not expire booking ${booking.id}:`,
+                fallback.error?.message || updateResult.error?.message,
+              );
+              continue;
+            }
+            const expiredBooking = normalizeLaterBooking(
+              fallback.data,
+              sourceTable,
+            );
+            emitLaterBookingSignal("expired", expiredBooking);
+            notifyRiderOfScheduledDriverChange({
+              ...expiredBooking,
+              driver_id: null,
+              assigned_driver_id: null,
+            });
+            console.log(
+              `⏰ Expired past scheduled booking ${booking.id} (as cancelled)`,
+            );
+            continue;
+          }
+
+          if (updateResult.error || !updateResult.data) {
+            console.warn(
+              `⚠️ Could not expire booking ${booking.id}:`,
+              updateResult.error?.message,
+            );
+            continue;
+          }
+
+          const expiredBooking = normalizeLaterBooking(
+            updateResult.data,
+            sourceTable,
+          );
+          emitLaterBookingSignal("expired", expiredBooking);
+          notifyRiderOfScheduledDriverChange({
+            ...expiredBooking,
+            driver_id: null,
+            assigned_driver_id: null,
+          });
+          // Also clear marketplace so open jobs disappear immediately.
+          try {
+            io.emit("later-booking:marketplace", {
+              type: "expired",
+              bookingId: expiredBooking.id,
+              status: expiredBooking.status,
+            });
+          } catch (_) {
+            /* non-critical */
+          }
+          console.log(
+            `⏰ Expired past scheduled booking ${booking.id} (status=${expiredBooking.status})`,
+          );
+        } catch (err) {
+          console.warn(
+            `⚠️ Expire loop failed for booking ${booking?.id}:`,
+            err,
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Scheduled booking expiry engine error:", err);
+    }
+  };
+
+  setInterval(() => {
+    expirePastScheduledBookings().catch((err) => {
+      console.error("Scheduled booking expiry engine tick error:", err);
+    });
+  }, 60 * 1000);
+
+  expirePastScheduledBookings().catch((err) => {
+    console.error("Initial scheduled booking expiry check failed:", err);
+  });
 
   // ─── Stale pending ASAP ride cleanup ───
   // Cancels leftover pending rides so they can never be re-offered to drivers.
