@@ -552,7 +552,7 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
 
     const title = willCharge ? "Cancellation Fee Applies" : "Cancel Ride";
     const message = willCharge
-      ? `You are cancelling within 3 hours of your scheduled pickup. A 100% cancellation fee${fare ? ` (£${(parseFloat(fare) * 1).toFixed(2)})` : ""} will be charged to your wallet.\n\nDo you want to proceed?`
+      ? `You are cancelling within 3 hours of your scheduled pickup. A 100% cancellation fee${fare ? ` (£${(parseFloat(fare) * 1).toFixed(2)})` : ""} will be charged to your payment method.\n\nDo you want to proceed?`
       : "Are you sure you want to cancel and proceed to get the refund?";
 
     Alert.alert(title, message, [

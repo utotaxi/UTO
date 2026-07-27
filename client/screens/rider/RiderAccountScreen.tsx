@@ -82,8 +82,9 @@ export default function RiderAccountScreen({ navigation }: any) {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [isAddingCard, setIsAddingCard] = React.useState(false);
   const [savedCards, setSavedCards] = React.useState<any[]>([]);
-  const walletBalance =
-    typeof user?.walletBalance === "number" ? user.walletBalance : 0;
+  // Rider wallet UI disabled
+  // const walletBalance =
+  //   typeof user?.walletBalance === "number" ? user.walletBalance : 0;
 
   React.useEffect(() => {
     fetchSavedCards();
@@ -256,6 +257,8 @@ export default function RiderAccountScreen({ navigation }: any) {
             subtitle="Edit your personal information"
             onPress={() => navigation.navigate("RiderProfile")}
           />
+          {/* Rider wallet UI disabled — WalletScreen kept in codebase */}
+          {/*
           <MenuItem
             icon="account-balance-wallet"
             title="Wallet"
@@ -264,6 +267,7 @@ export default function RiderAccountScreen({ navigation }: any) {
             showBadge={walletBalance !== 0}
             badgeColor={walletBalance < 0 ? "#EF4444" : "#10B981"}
           />
+          */}
           <MenuItem
             icon="payment"
             title="Payment Methods"

@@ -1963,7 +1963,9 @@ export default function RideRequestScreen({ navigation, route }: any) {
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [durationMin, setDurationMin] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"card">("card");
-  const [useWalletBalance, setUseWalletBalance] = useState(false);
+  // Rider wallet disabled — never offer / apply wallet balance.
+  // const [useWalletBalance, setUseWalletBalance] = useState(false);
+  const useWalletBalance = false;
 
   // const MAX_RIDE_DISTANCE_MILES = 5;
   // const distanceMiles = distanceKm !== null ? distanceKm * 0.621371 : null;
@@ -2921,6 +2923,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                 )}
               </View>
 
+              {/* Rider wallet disabled
               {user?.walletBalance && user.walletBalance > 0 ? (
                 <Pressable
                   onPress={() => setUseWalletBalance(!useWalletBalance)}
@@ -2965,6 +2968,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
                   />
                 </Pressable>
               ) : null}
+              */}
 
               {/* ── Coupon Code Section ── */}
               <View

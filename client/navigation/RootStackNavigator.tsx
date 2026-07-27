@@ -118,8 +118,9 @@ import DriverTabNavigator from "@/navigation/DriverTabNavigator";
 import RideRequestScreen from "@/screens/rider/RideRequestScreen";
 import LaterRideScreen from "@/screens/rider/LaterRideScreen";
 import RideTrackingScreen from "@/screens/rider/RideTrackingScreen";
-import WalletScreen from "@/screens/rider/WalletScreen";
-import WithdrawalScreen from "@/screens/rider/WithdrawalScreen";
+// Rider wallet UI disabled — screen kept in codebase but not registered.
+// import WalletScreen from "@/screens/rider/WalletScreen";
+// import WithdrawalScreen from "@/screens/rider/WithdrawalScreen";
 import RiderProfileScreen from "@/screens/rider/RiderProfileScreen";
 import RiderNotificationsScreen from "@/screens/rider/RiderNotificationsScreen";
 import RiderSafetyScreen from "@/screens/rider/RiderSafetyScreen";
@@ -152,8 +153,9 @@ export type RootStackParamList = {
   AirportBooking: undefined;
   RideTracking: undefined;
   Settings: undefined;
-  Wallet: undefined;
-  Withdrawal: undefined;
+  // Wallet / Withdrawal disabled for riders
+  // Wallet: undefined;
+  // Withdrawal: undefined;
   RiderProfile: undefined;
   DriverProfile: undefined;
   RiderNotifications: undefined;
@@ -312,6 +314,8 @@ export default function RootStackNavigator() {
               presentation: "card",
             }}
           />
+          {/* Rider wallet UI disabled — WalletScreen kept in codebase commented out */}
+          {/*
           <Stack.Screen
             name="Wallet"
             component={WalletScreen}
@@ -328,6 +332,7 @@ export default function RootStackNavigator() {
               presentation: "card",
             }}
           />
+          */}
           <Stack.Screen
             name="Terms"
             component={TermsScreen}
