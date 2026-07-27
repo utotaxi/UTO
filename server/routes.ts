@@ -2616,9 +2616,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!token) return false;
     try {
       // Prefer the long-lived ride-request channel so older APKs (without
-      // uto-scheduled-v2) still display marketplace / assignment alerts.
+      // uto-scheduled-v3) still display marketplace / assignment alerts.
       const ttlSeconds = options.ttlSeconds ?? 3600;
-      const channelId = options.channelId || "uto-ride-requests-v2";
+      const channelId = options.channelId || "uto-ride-requests-v3";
 
       // Expo/FCM on Android expects flat string data — null/objects can be dropped.
       const safeData: Record<string, string> = {};
@@ -2890,7 +2890,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const body = `A booking has been scheduled by ${riderLabel}${fareLabel}. Open Marketplace to pick up ride ${booking.id}.`;
 
-      // Use the ride-requests channel — present on all shipped APKs. uto-scheduled-v2
+      // Use the ride-requests channel — present on all shipped APKs. uto-scheduled-v3
       // is missing on older builds and Android silently drops those notifications.
       const results = await Promise.all(
         tokens.map((token) =>
@@ -2907,7 +2907,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               target: "Marketplace",
               screen: "Marketplace",
             },
-            { channelId: "uto-ride-requests-v2", ttlSeconds: 3600 },
+            { channelId: "uto-ride-requests-v3", ttlSeconds: 3600 },
           ),
         ),
       );
@@ -3030,7 +3030,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           assignedDriverId: identity.tableId || "",
           assignedUserId: identity.userId || "",
         },
-        { channelId: "uto-ride-requests-v2", ttlSeconds: 3600 },
+        { channelId: "uto-ride-requests-v3", ttlSeconds: 3600 },
       );
       if (ok) {
         console.log(
@@ -5703,7 +5703,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           reminderBucket: reminderBucket.key,
         },
         // High-importance scheduled channel with sound.
-        { channelId: "uto-scheduled-v2", ttlSeconds: 900 },
+        { channelId: "uto-scheduled-v3", ttlSeconds: 900 },
       );
 
       handled.add(reminderBucket.key);
@@ -5794,7 +5794,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             screen: "Marketplace",
             slotKey,
           },
-          { channelId: "uto-ride-requests-v2", ttlSeconds: 900 },
+          { channelId: "uto-ride-requests-v3", ttlSeconds: 900 },
         ),
       ),
     );
@@ -5836,12 +5836,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── Scheduled Bookings Live Activation Engine ───
-  // Runs every minute. Any booking within 60 minutes of its pickup time is
-  // converted into a real live ride:
-  //   • already accepted by a driver → lands directly on that driver's home
-  //     screen in the "accepted" phase (same flow as an immediate booking).
-  //   • still unassigned → dispatched to the nearest online drivers exactly
-  //     like an immediate (ASAP) booking.
+  // Runs every minute. Within 60 minutes of pickup:
+  //   • driver_accepted (Upcoming) → leave for the ASSIGNED driver to start via
+  //     prepare-start / PIN. Never broadcast as ASAP to other drivers.
+  //   • unassigned OR not yet accepted → dispatch as ASAP to nearby drivers.
   // From that point all live-ride policies apply (PIN verification, no-show,
   // rider cancellation rules, completion, etc.).
   const SCHEDULED_ACTIVATION_RETRY_MS = 5 * 60 * 1000; // retry dispatch every 5 min if no driver found
@@ -5864,8 +5862,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ),
       ].filter((booking: any) => {
         const status = String(booking.status || "").toLowerCase();
-        if (status !== "scheduled" && status !== "driver_accepted")
-          return false;
+        // Accepted upcoming jobs are started by the assigned driver via
+        // prepare-start — never auto-converted into an ASAP dispatch here.
+        if (status === "driver_accepted") return false;
+        if (status !== "scheduled" && status !== "marketplace") return false;
         if (!booking.rider_id || !booking.pickup_at) return false;
 
         const pickupTs = pickupTimestamp(booking);
@@ -5992,6 +5992,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
             vias: normalizeVias(booking.vias),
           };
 
+          // Clear any pending (not-accepted) assignee so ASAP dispatch is open
+          // to every eligible online driver.
+          const pendingAssignee =
+            booking.assigned_driver_id || booking.driver_id;
+          if (pendingAssignee) {
+            console.log(
+              `♻️ Releasing pending assignee ${pendingAssignee} on booking ${booking.id} before ASAP dispatch (not yet accepted)`,
+            );
+            await updateLaterBookingWithFallbackColumns(
+              booking.source_table,
+              booking.id,
+              {
+                driver_id: null,
+                assigned_driver_id: null,
+                assigned_driver_name: null,
+                accepted_by_driver_at: null,
+                status:
+                  booking.source_table === "web_booker"
+                    ? "marketplace"
+                    : "scheduled",
+              },
+              missingLaterBookingActivationColumns,
+            );
+          }
+
           // Mark as activated BEFORE dispatching so a slow dispatch can't double-fire
           const markResult = await updateLaterBookingWithFallbackColumns(
             booking.source_table,
@@ -5999,6 +6024,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             {
               activated_at: new Date().toISOString(),
               live_ride_id: liveRideId,
+              status:
+                booking.source_table === "web_booker"
+                  ? "marketplace"
+                  : "scheduled",
             },
             missingLaterBookingActivationColumns,
           );
@@ -6019,40 +6048,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
 
-          const assignedDriverId =
-            booking.driver_id || booking.assigned_driver_id;
-          if (
-            assignedDriverId &&
-            String(booking.status).toLowerCase() === "driver_accepted"
-          ) {
-            console.log(
-              `🚀 Activating accepted scheduled booking ${booking.id} → live ride ${liveRideId} (driver ${assignedDriverId})`,
-            );
-            const handedOver =
-              await scheduledRideHooks.activateAcceptedScheduledRide?.(
-                rideData,
-                assignedDriverId,
-              );
-            if (!handedOver) {
-              // Could not hand over to the assigned driver — release for a later retry
-              await updateLaterBookingWithFallbackColumns(
-                booking.source_table,
-                booking.id,
-                { live_ride_id: null },
-                missingLaterBookingActivationColumns,
-              );
-              continue;
-            }
-          } else {
-            console.log(
-              `🚀 Dispatching unassigned scheduled booking ${booking.id} → live ride ${liveRideId} (treated like an immediate booking)`,
-            );
-            await scheduledRideHooks.dispatchScheduledRide?.(rideData);
-          }
+          console.log(
+            `🚀 ASAP-dispatching unassigned/unaccepted scheduled booking ${booking.id} → live ride ${liveRideId}`,
+          );
+          await scheduledRideHooks.dispatchScheduledRide?.(rideData);
 
           emitLaterBookingSignal("activated", {
             ...booking,
             live_ride_id: liveRideId,
+            driver_id: null,
+            assigned_driver_id: null,
           });
         } catch (activationErr) {
           console.error(

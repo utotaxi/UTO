@@ -116,38 +116,42 @@ export interface NotificationData {
 }
 
 const ANDROID_CHANNELS = {
-  default: "uto-general-v2",
-  rideRequests: "uto-ride-requests-v2",
-  scheduled: "uto-scheduled-v2",
+  default: "uto-general-v3",
+  rideRequests: "uto-ride-requests-v3",
+  scheduled: "uto-scheduled-v3",
 } as const;
 
 async function ensureAndroidChannels() {
   if (Platform.OS !== "android" || !Notifications) return;
-  // New channel ids so soft settings apply (Android freezes channel config after create).
+  // New channel ids (v3) so MAX volume / vibration settings apply
+  // (Android freezes channel config after the first create).
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.default, {
     name: "General",
-    importance: Notifications.AndroidImportance.DEFAULT,
-    vibrationPattern: [0, 120],
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 120, 250],
     lightColor: "#F7C948",
     sound: "default",
+    enableVibrate: true,
   });
   await Notifications.setNotificationChannelAsync(
     ANDROID_CHANNELS.rideRequests,
     {
       name: "Ride Requests",
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 180],
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 300, 120, 300, 120, 400],
       lightColor: "#F7C948",
       sound: "default",
+      enableVibrate: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     },
   );
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.scheduled, {
     name: "Scheduled Bookings",
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 180],
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 300, 120, 300, 120, 400],
     lightColor: "#F7C948",
     sound: "default",
+    enableVibrate: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
 }
@@ -373,7 +377,7 @@ export async function sendLocalNotification(
     await ensureAndroidChannels();
     const type = payload?.type ? String(payload.type) : undefined;
     // Prefer ride-requests channel for scheduled alerts too — older APKs may
-    // not have uto-scheduled-v2, and Android drops unknown channels silently.
+    // not have uto-scheduled-v3, and Android drops unknown channels silently.
     const channelId =
       type === "ride_request" || type === "ride_requested"
         ? ANDROID_CHANNELS.rideRequests

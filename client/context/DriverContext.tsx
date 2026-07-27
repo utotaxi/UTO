@@ -290,7 +290,7 @@ function mapRidePayload(ride: any): RideRequest {
 
 // Trip history is always loaded from AsyncStorage cache + refreshed from Supabase
 
-// Single pleasant beep for ride / booking alerts (no looping flood).
+// Single loud alert for ride / booking notices (max volume, double play).
 const playRideAlert = () => playSoftBeep();
 
 export function DriverProvider({ children }: { children: ReactNode }) {

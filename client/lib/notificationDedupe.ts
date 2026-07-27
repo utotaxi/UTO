@@ -62,7 +62,11 @@ export function notificationDedupeKey(
   ].join(":");
 }
 
-/** Soft in-app beep (single play). Used instead of looping ride alerts for most notices. */
+/**
+ * Loud in-app ride alert for drivers.
+ * Max volume, plays twice, strong vibration — used for ride requests,
+ * marketplace, assignments, and scheduled start notices.
+ */
 export async function playSoftBeep(): Promise<void> {
   try {
     const { Audio } = await import("expo-av");
@@ -71,25 +75,44 @@ export async function playSoftBeep(): Promise<void> {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
     });
 
-    const { sound } = await Audio.Sound.createAsync(
-      require("../../assets/ride_alert.wav"),
-      { shouldPlay: true, volume: 0.45, isLooping: false },
-    );
-
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if ("didJustFinish" in status && status.didJustFinish) {
-        sound.unloadAsync().catch(() => {});
-      }
-    });
+    const playOnce = async () => {
+      const { sound } = await Audio.Sound.createAsync(
+        require("../../assets/ride_alert.wav"),
+        { shouldPlay: true, volume: 1.0, isLooping: false, rate: 1.0 },
+      );
+      await new Promise<void>((resolve) => {
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if ("didJustFinish" in status && status.didJustFinish) {
+            sound.unloadAsync().catch(() => {});
+            resolve();
+          }
+        });
+        // Safety timeout if status callback never fires
+        setTimeout(() => {
+          sound.unloadAsync().catch(() => {});
+          resolve();
+        }, 2500);
+      });
+    };
 
     if (Platform.OS !== "web") {
-      Vibration.vibrate(Platform.OS === "ios" ? 40 : 120);
+      Vibration.vibrate(
+        Platform.OS === "ios"
+          ? [0, 200, 100, 200, 100, 300]
+          : [0, 280, 120, 280, 120, 400],
+      );
     }
+
+    await playOnce();
+    // Second blast so drivers don't miss the alert in noisy environments
+    await new Promise((r) => setTimeout(r, 180));
+    await playOnce();
   } catch (err) {
-    console.warn("🔇 Soft beep failed:", err);
+    console.warn("🔇 Loud ride alert failed:", err);
   }
 }

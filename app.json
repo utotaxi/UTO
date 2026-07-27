@@ -82,7 +82,7 @@
         {
           "icon": "./assets/images/icon.png",
           "color": "#F7C948",
-          "defaultChannel": "uto-ride-requests-v2",
+          "defaultChannel": "uto-ride-requests-v3",
           "sounds": []
         }
       ],

@@ -971,7 +971,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               },
             },
             priority: "high",
-            channelId: "uto-ride-requests-v2",
+            channelId: "uto-ride-requests-v3",
             ttl: 120,
             expiration: Math.floor(Date.now() / 1000) + 120,
             _contentAvailable: true,
@@ -1920,7 +1920,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 audience: "driver",
               },
               priority: "high",
-              channelId: "uto-scheduled-v2",
+              channelId: "uto-scheduled-v3",
             }),
           }).catch((pushErr) => {
             console.warn(

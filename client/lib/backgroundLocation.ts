@@ -44,12 +44,13 @@ async function maybeNotifyPendingAssigned(pending: any) {
 
     const Notifications = await import("expo-notifications");
     if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("uto-scheduled-v2", {
+      await Notifications.setNotificationChannelAsync("uto-scheduled-v3", {
         name: "Scheduled Bookings",
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 180],
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 300, 120, 300, 120, 400],
         lightColor: "#F7C948",
         sound: "default",
+        enableVibrate: true,
       });
     }
 
@@ -71,8 +72,8 @@ async function maybeNotifyPendingAssigned(pending: any) {
           screen: "UpcomingBookings",
         },
         sound: "default",
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-        ...(Platform.OS === "android" ? { channelId: "uto-scheduled-v2" } : {}),
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === "android" ? { channelId: "uto-scheduled-v3" } : {}),
       },
       trigger: null,
     });
@@ -99,12 +100,13 @@ async function maybeNotifyPendingRide(pending: any) {
 
     const Notifications = await import("expo-notifications");
     if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("uto-rides-v2", {
+      await Notifications.setNotificationChannelAsync("uto-ride-requests-v3", {
         name: "Ride Requests",
         importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 150, 250],
+        vibrationPattern: [0, 300, 120, 300, 120, 400],
         lightColor: "#F7C948",
         sound: "default",
+        enableVibrate: true,
       });
     }
 
@@ -131,7 +133,9 @@ async function maybeNotifyPendingRide(pending: any) {
         },
         sound: "default",
         priority: Notifications.AndroidNotificationPriority.MAX,
-        ...(Platform.OS === "android" ? { channelId: "uto-rides-v2" } : {}),
+        ...(Platform.OS === "android"
+          ? { channelId: "uto-ride-requests-v3" }
+          : {}),
       },
       trigger: null,
     });
