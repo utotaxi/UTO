@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Linking,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -54,8 +55,10 @@ interface ScheduledRide {
   driver_vehicle_make?: string | null;
   driver_vehicle_model?: string | null;
   driver_vehicle_color?: string | null;
+  driver_vehicle_year?: string | number | null;
   driver_license_plate?: string | null;
   driver_vehicle_info?: string | null;
+  driver_vehicle_type?: string | null;
   driver_rating?: number | null;
 }
 
@@ -75,6 +78,24 @@ function fmtDateTime(iso: string) {
     timeZone: "Europe/London",
   });
   return { date, time };
+}
+
+function formatVehicleTypeLabel(value?: string | null) {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+  if (raw === "people_carrier" || raw === "people-carrier")
+    return "People Carrier";
+  if (raw === "minibus" || raw === "mini_bus") return "Minibus";
+  if (raw === "saloon" || raw === "standard") return "Saloon";
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function getDialablePhone(phone?: string | null) {
+  if (!phone) return null;
+  const cleaned = String(phone).replace(/[^\d+]/g, "");
+  return cleaned.length >= 7 ? cleaned : null;
 }
 
 function statusLabel(
@@ -121,17 +142,55 @@ function RideCard({
   const driverName =
     ride.driver_name || ride.assigned_driver_name || "Your Driver";
   const driverPhone = ride.driver_phone || ride.assigned_driver_phone || null;
+  const dialablePhone = getDialablePhone(driverPhone);
+  const vehicleTypeLabel = formatVehicleTypeLabel(
+    ride.driver_vehicle_type || ride.vehicle_type,
+  );
   const vehicleInfo =
     ride.driver_vehicle_info ||
     [
       ride.driver_vehicle_color,
       ride.driver_vehicle_make,
       ride.driver_vehicle_model,
+      ride.driver_vehicle_year,
     ]
-      .filter(Boolean)
+      .filter((part) => {
+        const text = String(part || "")
+          .trim()
+          .toLowerCase();
+        return (
+          !!text &&
+          text !== "pending" &&
+          text !== "null" &&
+          text !== "undefined" &&
+          text !== "n/a"
+        );
+      })
       .join(" ") ||
+    vehicleTypeLabel ||
     null;
   const licensePlate = ride.driver_license_plate || null;
+
+  const handleCallDriver = async () => {
+    if (!dialablePhone) {
+      Alert.alert(
+        "Phone unavailable",
+        "This driver has not shared a phone number yet.",
+      );
+      return;
+    }
+    const telUrl = `tel:${dialablePhone}`;
+    try {
+      const canCall = await Linking.canOpenURL(telUrl);
+      if (canCall) {
+        await Linking.openURL(telUrl);
+      } else {
+        Alert.alert("Call Failed", "Unable to place a call on this device.");
+      }
+    } catch {
+      Alert.alert("Call Failed", "Unable to call the driver right now.");
+    }
+  };
 
   // Cancellation policy: within 3 hours = fee applies
   const now = Date.now();
@@ -242,15 +301,33 @@ function RideCard({
           </View>
           <Text style={cs.driverName}>{driverName}</Text>
           {driverPhone ? (
+            <Pressable style={cs.driverMetaRow} onPress={handleCallDriver}>
+              <MaterialIcons name="phone" size={14} color={UTO_YELLOW} />
+              <Text style={[cs.driverMetaText, cs.driverPhoneText]}>
+                {driverPhone}
+              </Text>
+              <Text style={cs.callHint}>Tap to call</Text>
+            </Pressable>
+          ) : (
             <View style={cs.driverMetaRow}>
-              <MaterialIcons name="phone" size={14} color="#9CA3AF" />
-              <Text style={cs.driverMetaText}>{driverPhone}</Text>
+              <MaterialIcons name="phone" size={14} color="#6B7280" />
+              <Text style={[cs.driverMetaText, { color: "#6B7280" }]}>
+                Phone not shared yet
+              </Text>
             </View>
-          ) : null}
+          )}
           {vehicleInfo ? (
             <View style={cs.driverMetaRow}>
               <MaterialIcons name="directions-car" size={14} color="#9CA3AF" />
               <Text style={cs.driverMetaText}>{vehicleInfo}</Text>
+            </View>
+          ) : null}
+          {vehicleTypeLabel &&
+          vehicleInfo &&
+          vehicleInfo !== vehicleTypeLabel ? (
+            <View style={cs.driverMetaRow}>
+              <MaterialIcons name="category" size={14} color="#9CA3AF" />
+              <Text style={cs.driverMetaText}>{vehicleTypeLabel}</Text>
             </View>
           ) : null}
           {licensePlate ? (
@@ -406,8 +483,10 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
             driver_vehicle_make: null,
             driver_vehicle_model: null,
             driver_vehicle_color: null,
+            driver_vehicle_year: null,
             driver_license_plate: null,
             driver_vehicle_info: null,
+            driver_vehicle_type: null,
             driver_rating: null,
           };
           return next;
@@ -424,8 +503,10 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
           driver_vehicle_make: driver.vehicleMake || null,
           driver_vehicle_model: driver.vehicleModel || null,
           driver_vehicle_color: driver.vehicleColor || null,
+          driver_vehicle_year: driver.vehicleYear || null,
           driver_license_plate: driver.licensePlate || null,
           driver_vehicle_info: driver.vehicleInfo || null,
+          driver_vehicle_type: driver.vehicleType || null,
           driver_rating: driver.rating != null ? Number(driver.rating) : null,
         };
         return next;
@@ -763,7 +844,9 @@ const cs = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  driverMetaText: { fontSize: 13, color: "#D1D5DB" },
+  driverMetaText: { fontSize: 13, color: "#D1D5DB", flexShrink: 1 },
+  driverPhoneText: { color: UTO_YELLOW, fontWeight: "600" },
+  callHint: { fontSize: 11, color: "#9CA3AF", marginLeft: "auto" },
   plateBadge: {
     alignSelf: "flex-start",
     marginTop: 4,

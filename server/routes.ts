@@ -3629,11 +3629,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     driver_vehicle_make: null,
     driver_vehicle_model: null,
     driver_vehicle_color: null,
+    driver_vehicle_year: null,
     driver_license_plate: null,
     driver_vehicle_info: null,
     driver_vehicle_type: null,
     driver_rating: null,
   });
+
+  const isPlaceholderDriverField = (value: any): boolean => {
+    const text = String(value ?? "")
+      .trim()
+      .toLowerCase();
+    return (
+      !text ||
+      text === "null" ||
+      text === "undefined" ||
+      text === "pending" ||
+      text === "n/a" ||
+      text === "na" ||
+      text === "-"
+    );
+  };
+
+  const firstRealDriverField = (...values: any[]): string | null => {
+    for (const value of values) {
+      if (isPlaceholderDriverField(value)) continue;
+      return String(value).trim();
+    }
+    return null;
+  };
+
+  const formatDriverVehicleTypeLabel = (value: any): string | null => {
+    const raw = firstRealDriverField(value);
+    if (!raw) return null;
+    const normalized = normalizeVehicleType(raw);
+    if (normalized === "people_carrier") return "People Carrier";
+    if (normalized === "minibus") return "Minibus";
+    if (normalized === "saloon") return "Saloon";
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  };
 
   const attachDriverDetails = async (bookings: any[]): Promise<any[]> => {
     if (!Array.isArray(bookings) || bookings.length === 0)
@@ -3652,31 +3686,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return bookings.map((b: any) => clearDriverDetailsOnBooking(b));
     }
 
-    let driverMap = new Map<string, any>();
+    // Bookings may store either drivers.id or users.id — index both.
+    let driverByLookupId = new Map<string, any>();
     let userMap = new Map<string, any>();
     try {
-      const { data: drivers, error } = await sb
+      const driverSelect =
+        "id, user_id, vehicle_make, vehicle_model, vehicle_color, vehicle_year, license_plate, vehicle_type, rating";
+
+      const { data: driversById, error } = await sb
         .from("drivers")
-        .select(
-          "id, user_id, vehicle_make, vehicle_model, vehicle_color, license_plate, vehicle_type, rating",
-        )
+        .select(driverSelect)
         .in("id", driverIds);
       if (error) {
         console.warn(
           "⚠️ Could not fetch driver details for bookings:",
           error.message,
         );
-      } else {
-        driverMap = new Map((drivers || []).map((d: any) => [d.id, d]));
+      }
+
+      const foundDriverIds = new Set(
+        (driversById || []).map((d: any) => String(d.id)),
+      );
+      const foundUserIds = new Set(
+        (driversById || [])
+          .map((d: any) => d?.user_id)
+          .filter((id: any) => typeof id === "string" && id.length > 0)
+          .map(String),
+      );
+      const unresolvedIds = driverIds.filter(
+        (id) => !foundDriverIds.has(id) && !foundUserIds.has(id),
+      );
+
+      let driversByUser: any[] = [];
+      if (unresolvedIds.length > 0) {
+        const byUser = await sb
+          .from("drivers")
+          .select(driverSelect)
+          .in("user_id", unresolvedIds);
+        if (byUser.error) {
+          console.warn(
+            "⚠️ Could not fetch driver details by user_id:",
+            byUser.error.message,
+          );
+        } else {
+          driversByUser = byUser.data || [];
+        }
+      }
+
+      for (const driver of [...(driversById || []), ...driversByUser]) {
+        if (!driver?.id) continue;
+        driverByLookupId.set(String(driver.id), driver);
+        if (driver.user_id) {
+          driverByLookupId.set(String(driver.user_id), driver);
+        }
       }
 
       const userIds = Array.from(
         new Set(
-          Array.from(driverMap.values())
+          Array.from(driverByLookupId.values())
             .map((d: any) => d?.user_id)
-            .filter((id: any) => typeof id === "string" && id.length > 0),
+            .filter((id: any) => typeof id === "string" && id.length > 0)
+            .map(String),
         ),
       );
+      // Also try looking up users directly for unresolved booking ids
+      // (covers rare cases where a drivers row is missing but users.phone exists).
+      for (const id of driverIds) {
+        if (!userIds.includes(id)) userIds.push(id);
+      }
+
       if (userIds.length > 0) {
         const { data: users, error: usersErr } = await sb
           .from("users")
@@ -3709,14 +3787,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status === "driver_accepted" || status === "in_progress"
           ? booking.driver_id || booking.assigned_driver_id
           : booking.assigned_driver_id || booking.driver_id;
-      const driver = preferredId ? driverMap.get(String(preferredId)) : null;
-      if (!driver) {
+      const preferredKey = preferredId ? String(preferredId) : "";
+      const driver = preferredKey
+        ? driverByLookupId.get(preferredKey) || null
+        : null;
+
+      const user =
+        (driver?.user_id ? userMap.get(String(driver.user_id)) : null) ||
+        (preferredKey ? userMap.get(preferredKey) : null) ||
+        null;
+
+      if (!driver && !user) {
         // Keep any stored name from the booking row if the driver row is missing.
         return {
           ...booking,
           assigned_driver_name:
             booking.assigned_driver_name || booking.driver_name || null,
-          assigned_driver_phone: booking.assigned_driver_phone || null,
+          assigned_driver_phone:
+            booking.assigned_driver_phone || booking.driver_phone || null,
           driver_name:
             booking.driver_name || booking.assigned_driver_name || null,
           driver_phone:
@@ -3731,27 +3819,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       }
 
-      const user = driver.user_id ? userMap.get(driver.user_id) : null;
       const driverName = firstNonEmpty(
         user?.full_name,
         booking.assigned_driver_name,
         booking.driver_name,
       );
-      const driverPhone = firstNonEmpty(
+      const driverPhone = firstRealDriverField(
         user?.phone,
         booking.assigned_driver_phone,
         booking.driver_phone,
       );
-      const vehicleMake = firstNonEmpty(driver.vehicle_make);
-      const vehicleModel = firstNonEmpty(driver.vehicle_model);
-      const vehicleColor = firstNonEmpty(driver.vehicle_color);
-      const licensePlate = firstNonEmpty(driver.license_plate);
+      const vehicleMake = firstRealDriverField(
+        driver?.vehicle_make,
+        booking.driver_vehicle_make,
+      );
+      const vehicleModel = firstRealDriverField(
+        driver?.vehicle_model,
+        booking.driver_vehicle_model,
+      );
+      const vehicleColor = firstRealDriverField(
+        driver?.vehicle_color,
+        booking.driver_vehicle_color,
+      );
+      const vehicleYear = firstRealDriverField(
+        driver?.vehicle_year,
+        booking.driver_vehicle_year,
+      );
+      const licensePlate = firstRealDriverField(
+        driver?.license_plate,
+        booking.driver_license_plate,
+      );
+      const vehicleType = firstRealDriverField(
+        driver?.vehicle_type,
+        booking.driver_vehicle_type,
+        booking.vehicle_type,
+      );
+      const vehicleTypeLabel = formatDriverVehicleTypeLabel(vehicleType);
       const vehicleInfo =
-        [vehicleColor, vehicleMake, vehicleModel].filter(Boolean).join(" ") ||
+        [vehicleColor, vehicleMake, vehicleModel, vehicleYear]
+          .filter(Boolean)
+          .join(" ") ||
+        vehicleTypeLabel ||
         null;
 
       return {
         ...booking,
+        // Prefer canonical drivers.id when we resolved one.
+        driver_id: driver?.id || booking.driver_id || null,
+        assigned_driver_id: driver?.id || booking.assigned_driver_id || null,
         assigned_driver_name: driverName,
         assigned_driver_phone: driverPhone,
         driver_name: driverName,
@@ -3759,13 +3874,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         driver_vehicle_make: vehicleMake,
         driver_vehicle_model: vehicleModel,
         driver_vehicle_color: vehicleColor,
+        driver_vehicle_year: vehicleYear,
         driver_license_plate: licensePlate,
         driver_vehicle_info: vehicleInfo,
-        driver_vehicle_type: firstNonEmpty(
-          driver.vehicle_type,
-          booking.vehicle_type,
-        ),
-        driver_rating: driver.rating != null ? Number(driver.rating) : null,
+        driver_vehicle_type: vehicleType,
+        driver_rating:
+          driver?.rating != null
+            ? Number(driver.rating)
+            : booking.driver_rating != null
+              ? Number(booking.driver_rating)
+              : null,
       };
     });
   };
@@ -3790,6 +3908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               vehicleMake: booking.driver_vehicle_make || null,
               vehicleModel: booking.driver_vehicle_model || null,
               vehicleColor: booking.driver_vehicle_color || null,
+              vehicleYear: booking.driver_vehicle_year || null,
               licensePlate: booking.driver_license_plate || null,
               vehicleInfo: booking.driver_vehicle_info || null,
               vehicleType: booking.driver_vehicle_type || null,
