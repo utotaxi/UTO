@@ -1071,7 +1071,7 @@ export default function RideTrackingScreen({ navigation }: any) {
   //                 </View>
   //               </View>
   //               <ThemedText style={[styles.searchingText, { color: theme.textSecondary }]}>
-  //                 Matching you with a nearby driver
+  //                 We're still finding a nearby driver for you
   //               </ThemedText>
   //             </View>
   //           )}
@@ -2277,7 +2277,7 @@ export default function RideTrackingScreen({ navigation }: any) {
               <ThemedText
                 style={[styles.searchingText, { color: theme.textSecondary }]}
               >
-                Matching you with a nearby driver
+                We're still finding a nearby driver for you
               </ThemedText>
             </View>
           )}

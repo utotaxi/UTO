@@ -1090,6 +1090,51 @@ export function RideProvider({ children }: { children: ReactNode }) {
       if (!current || current.id !== serverRide.id) return;
 
       const nextStatus = String(serverRide.status || "").toLowerCase();
+      const serverHasDriver = !!(
+        serverRide.driverId ||
+        serverRide.driver_id ||
+        serverRide.driverName
+      );
+
+      // Server says pending/searching again (e.g. driver cancelled → rematch).
+      // Clear assigned-driver UI even if status string looked unchanged.
+      if (nextStatus === "pending" && !serverHasDriver) {
+        if (
+          current.status !== "pending" ||
+          current.driverName ||
+          current.acceptedAt
+        ) {
+          const searching: Ride = {
+            ...current,
+            status: "pending",
+            driverName: undefined,
+            driverPhone: undefined,
+            driverRating: undefined,
+            vehicleInfo: undefined,
+            licensePlate: undefined,
+            acceptedAt: undefined,
+            driverArrivedAt: undefined,
+          };
+          if (
+            current.status !== "pending" &&
+            lastDriverCancellationNoticeRef.current !== serverRide.id
+          ) {
+            lastDriverCancellationNoticeRef.current = serverRide.id;
+            Alert.alert(
+              "Driver Cancelled",
+              "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+              [{ text: "OK" }],
+            );
+          }
+          setActiveRide(searching);
+          AsyncStorage.setItem(
+            ACTIVE_RIDE_KEY,
+            JSON.stringify(searching),
+          ).catch(console.error);
+        }
+        return;
+      }
+
       if (!nextStatus || nextStatus === current.status) {
         // Still sync driver details / acceptedAt if accept landed without them.
         if (
@@ -1194,23 +1239,36 @@ export function RideProvider({ children }: { children: ReactNode }) {
       }
 
       const syncedAcceptedAt =
-        serverRide.acceptedAt ||
-        (serverRide as any).accepted_at ||
-        current.acceptedAt ||
-        (nextStatus === "accepted" ? new Date().toISOString() : undefined);
+        nextStatus === "pending"
+          ? undefined
+          : serverRide.acceptedAt ||
+            (serverRide as any).accepted_at ||
+            current.acceptedAt ||
+            (nextStatus === "accepted" ? new Date().toISOString() : undefined);
       const updated: Ride = {
         ...current,
         status: nextStatus as RideStatus,
-        ...(syncedAcceptedAt ? { acceptedAt: syncedAcceptedAt } : {}),
-        driverName: serverRide.driverName || current.driverName,
-        driverPhone: serverRide.driverPhone || current.driverPhone,
-        vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
-        licensePlate: serverRide.licensePlate || current.licensePlate,
-        driverRating: serverRide.driverRating ?? current.driverRating,
-        driverArrivedAt:
-          serverRide.arrivedAt ||
-          serverRide.driverArrivedAt ||
-          current.driverArrivedAt,
+        ...(syncedAcceptedAt ? { acceptedAt: syncedAcceptedAt } : { acceptedAt: undefined }),
+        ...(nextStatus === "pending"
+          ? {
+              driverName: undefined,
+              driverPhone: undefined,
+              vehicleInfo: undefined,
+              licensePlate: undefined,
+              driverRating: undefined,
+              driverArrivedAt: undefined,
+            }
+          : {
+              driverName: serverRide.driverName || current.driverName,
+              driverPhone: serverRide.driverPhone || current.driverPhone,
+              vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
+              licensePlate: serverRide.licensePlate || current.licensePlate,
+              driverRating: serverRide.driverRating ?? current.driverRating,
+              driverArrivedAt:
+                serverRide.arrivedAt ||
+                serverRide.driverArrivedAt ||
+                current.driverArrivedAt,
+            }),
       };
       console.log(
         `🔄 [RideContext] Synced ride ${rideId} from server: ${current.status} → ${nextStatus}`,
@@ -1633,17 +1691,29 @@ export function RideProvider({ children }: { children: ReactNode }) {
           lastDriverCancellationNoticeRef.current = update.rideId;
           Alert.alert(
             "Driver Cancelled",
-            "Your driver cancelled this ride. We're finding another available driver for you.",
+            (update as any).message ||
+              "Your driver cancelled this ride. We're still finding a nearby driver for you.",
             [{ text: "OK" }],
+          );
+          sendLocalNotification(
+            "Driver cancelled",
+            "We're still finding a nearby driver for you.",
+            {
+              type: "driver_cancelled_rematch",
+              rideId: update.rideId,
+              audience: "rider",
+            },
           );
         }
 
         setActiveRide((current) => {
           if (current && (current.id === update.rideId || !update.rideId)) {
+            const driverCancelledRematch =
+              update.status === "pending" && (update as any).driverCancelled;
             const updated: Ride = {
               ...current,
               status: update.status as RideStatus,
-              ...(update.status === "pending" && (update as any).driverCancelled
+              ...(driverCancelledRematch
                 ? {
                     driverName: undefined,
                     driverPhone: undefined,
@@ -1673,9 +1743,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
                       new Date().toISOString(),
                   }
                 : {}),
-              // Keep the original accept timestamp across later status updates
-              // so the 1-minute free-cancel countdown stays accurate.
-              ...(update.status !== "accepted" &&
+              // Keep accept timestamp across later status updates — but NEVER
+              // after a driver-cancel rematch back to pending searching.
+              ...(!driverCancelledRematch &&
+              update.status !== "accepted" &&
+              update.status !== "pending" &&
               (current.acceptedAt ||
                 (update as any).acceptedAt ||
                 (update as any).accepted_at)

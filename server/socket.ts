@@ -2533,10 +2533,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 .eq("id", actualDriverId);
             }
 
-            // Remove the current driver assignment and reset the ride to pending.
-            // Do NOT charge the rider — driver cancel never imposes rider fees.
             // If the original request is already stale (old/yesterday), fully cancel
-            // instead of redistributing it as a "new" offer.
+            // instead of redistributing it as a "new" offer — but ALWAYS notify the rider.
             try {
               const { data: ageRow } = await supabase
                 .from("rides")
@@ -2564,6 +2562,29 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 dispatchQueues.delete(data.rideId);
                 activeRides.delete(data.rideId);
                 await syncScheduledBookingForRide(data.rideId, "cancelled");
+                const stalePayload = {
+                  rideId: data.rideId,
+                  status: "cancelled_no_drivers",
+                  cancellationFee: 0,
+                  chargedVia: "none",
+                  cancelledBy: "driver",
+                  driverCancelled: true,
+                  message:
+                    "Your driver cancelled this ride. No other drivers were available.",
+                };
+                if (ride.rider_id) {
+                  io.to(`rider:${ride.rider_id}`).emit(
+                    "ride:update",
+                    stalePayload,
+                  );
+                }
+                if (rideInfo?.riderSocketId) {
+                  io.to(rideInfo.riderSocketId).emit(
+                    "ride:update",
+                    stalePayload,
+                  );
+                }
+                notifyDriversRideExpired(data.rideId);
                 console.log(
                   `🛑 Driver cancel on stale ride ${data.rideId} — fully cancelled, not redistributed`,
                 );
@@ -2576,7 +2597,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
               );
             }
 
-            await supabase
+            // Exclude the cancelling driver from rematch (table id + raw ids).
+            if (actualDriverId) declinedBy.add(actualDriverId);
+            if (data.driverId) declinedBy.add(String(data.driverId));
+            if (ride.driver_id) declinedBy.add(String(ride.driver_id));
+
+            const { error: resetErr } = await supabase
               .from("rides")
               .update({
                 status: "pending",
@@ -2588,26 +2614,49 @@ export function setupSocketIO(httpServer: HTTPServer) {
               })
               .eq("id", data.rideId);
 
+            if (resetErr) {
+              console.error(
+                `❌ Failed to reset ride ${data.rideId} after driver cancel:`,
+                resetErr.message,
+              );
+            }
+
+            const riderDriverCancelledPayload = {
+              rideId: data.rideId,
+              status: "pending",
+              driverCancelled: true,
+              driverId: null,
+              driverInfo: null,
+              cancellationFee: 0,
+              chargedVia: "none",
+              cancelledBy: "driver",
+              message:
+                "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+            };
             if (ride.rider_id) {
-              const riderDriverCancelledPayload = {
-                rideId: data.rideId,
-                status: "pending",
-                driverCancelled: true,
-                driverId: null,
-                cancellationFee: 0,
-                chargedVia: "none",
-                cancelledBy: "driver",
-              };
               io.to(`rider:${ride.rider_id}`).emit(
                 "ride:update",
                 riderDriverCancelledPayload,
               );
-              if (rideInfo?.riderSocketId) {
-                io.to(rideInfo.riderSocketId).emit(
-                  "ride:update",
-                  riderDriverCancelledPayload,
-                );
-              }
+            }
+            if (rideInfo?.riderSocketId) {
+              io.to(rideInfo.riderSocketId).emit(
+                "ride:update",
+                riderDriverCancelledPayload,
+              );
+            }
+            // Fallback: resolve live rider socket from connected map
+            const liveRiderSocket = ride.rider_id
+              ? connectedRiders.get(ride.rider_id)
+              : null;
+            if (
+              liveRiderSocket &&
+              liveRiderSocket !== rideInfo?.riderSocketId
+            ) {
+              io.to(liveRiderSocket).emit(
+                "ride:update",
+                riderDriverCancelledPayload,
+              );
             }
 
             if (actualDriverId) {
@@ -2616,16 +2665,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
               });
             }
 
+            // Always rebuild a fresh dispatch queue — the previous one was deleted
+            // on accept, and any leftover entry must not be reused as-is.
             const existingDispatch = dispatchQueues.get(data.rideId);
-            if (existingDispatch) {
-              if (existingDispatch.timer) clearTimeout(existingDispatch.timer);
-              existingDispatch.cancelled = false;
-              existingDispatch.declinedBy = declinedBy;
-              console.log(
-                `🔃 Reassigning ride ${data.rideId} after cancellation by driver ${actualDriverId || data.driverId}`,
-              );
-              return dispatchToNextDriver(data.rideId);
-            }
+            if (existingDispatch?.timer) clearTimeout(existingDispatch.timer);
+            dispatchQueues.delete(data.rideId);
 
             const riderSocketId =
               rideInfo?.riderSocketId ||
@@ -2633,22 +2677,31 @@ export function setupSocketIO(httpServer: HTTPServer) {
               "";
             const rideData =
               rideInfo?.rideData || (await buildRideDataFromDbRide(ride));
+            // Clear any previously assigned driver fields on rematch payload
+            const rematchRideData = {
+              ...rideData,
+              driverId: undefined,
+              driverName: undefined,
+              driverPhone: undefined,
+              vehicleInfo: undefined,
+              licensePlate: undefined,
+            };
             activeRides.set(data.rideId, {
               riderSocketId,
               riderId: ride.rider_id,
               declinedBy,
-              rideData,
+              rideData: rematchRideData,
             });
 
             const newDispatchState = await buildDispatchState(
-              rideData,
+              rematchRideData,
               riderSocketId,
               declinedBy,
             );
             if (newDispatchState) {
               dispatchQueues.set(data.rideId, newDispatchState);
               console.log(
-                `🔃 Reassigning ride ${data.rideId} to next available driver after cancellation`,
+                `🔃 Reassigning ride ${data.rideId} after cancellation by driver ${actualDriverId || data.driverId} — excluding ${declinedBy.size} declined driver(s)`,
               );
               return dispatchToNextDriver(data.rideId);
             }
@@ -2695,6 +2748,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 cancellationFee: 0,
                 chargedVia: "none",
                 cancelledBy: "driver",
+                driverCancelled: true,
+                message:
+                  "Your driver cancelled this ride. No other nearby drivers are available right now.",
               });
             }
 

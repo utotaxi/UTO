@@ -1541,13 +1541,18 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const declineRide = (isAtPickup = false) => {
     if (activeRideRequest) {
-      if (rideState === "accepted" || rideState === "at_pickup") {
+      const postAcceptStates = new Set([
+        "accepted",
+        "at_pickup",
+        "in_progress",
+      ]);
+      if (postAcceptStates.has(rideState)) {
         try {
           const socket = getSocket();
           socket.emit("ride:driver_cancel_at_pickup", {
             rideId: activeRideRequest.id,
             driverId: driverProfile?.id || user?.id || undefined,
-            applyPenalty: isAtPickup,
+            applyPenalty: isAtPickup || rideState === "at_pickup",
             cancelledFrom: rideState,
             cancelledBy: "driver",
           });
@@ -1555,7 +1560,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           console.warn("Failed to emit cancel:", e);
         }
 
-        if (isAtPickup && activeRideRequest.estimatedFare > 0) {
+        if (
+          (isAtPickup || rideState === "at_pickup") &&
+          activeRideRequest.estimatedFare > 0
+        ) {
           const penaltyAmount = getDriverCancelPenalty(
             activeRideRequest.estimatedFare,
             0, // estimatedFare is already the discounted payable amount
