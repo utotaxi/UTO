@@ -110,6 +110,8 @@ export default function RideTrackingScreen({ navigation }: any) {
   const hasInitialized = useRef(false);
   /** Stable anchor for the free-cancel window (avoids resetting on re-renders). */
   const freeCancelAnchorRef = useRef<number | null>(null);
+  /** Ride id the free-cancel anchor belongs to — reset on every new/rebooked ride. */
+  const freeCancelRideIdRef = useRef<string | null>(null);
 
   const pulseScale = useSharedValue(1);
   const cancelScale = useSharedValue(1);
@@ -282,11 +284,20 @@ export default function RideTrackingScreen({ navigation }: any) {
   }, []);
 
   // ─── 1-minute free-cancel countdown after driver is assigned ───────────
+  // Must run for EVERY new ASAP accept (including Activity rebooks / rematches).
   useEffect(() => {
     if (!activeRide?.id) {
       freeCancelAnchorRef.current = null;
+      freeCancelRideIdRef.current = null;
       setFreeCancelSecondsLeft(null);
       return;
+    }
+
+    // New ride id (rebook / rematch / fresh ASAP) → always restart the window.
+    if (freeCancelRideIdRef.current !== activeRide.id) {
+      freeCancelRideIdRef.current = activeRide.id;
+      freeCancelAnchorRef.current = null;
+      setFreeCancelSecondsLeft(null);
     }
 
     const socketStatus = String(rideStatus || "").toLowerCase();
@@ -308,23 +319,34 @@ export default function RideTrackingScreen({ navigation }: any) {
 
     const driverAssigned =
       ["accepted", "arrived", "at_pickup", "arriving"].includes(status) ||
-      !!(activeRide as any)?.driverName ||
-      !!(activeRide as any)?.driverId ||
-      !!activeRide?.acceptedAt;
+      (!!activeRide?.acceptedAt && status !== "pending") ||
+      ((!!(activeRide as any)?.driverName ||
+        !!(activeRide as any)?.driverId) &&
+        status !== "pending");
 
-    if (!driverAssigned) {
-      freeCancelAnchorRef.current = null;
-      setFreeCancelSecondsLeft(null);
+    if (!driverAssigned || status === "pending" || status === "in_progress") {
+      if (status === "pending") {
+        freeCancelAnchorRef.current = null;
+        setFreeCancelSecondsLeft(null);
+      } else if (status === "in_progress") {
+        setFreeCancelSecondsLeft(0);
+      }
       return;
     }
 
     const parsedAcceptedAt = activeRide?.acceptedAt
       ? new Date(activeRide.acceptedAt).getTime()
       : NaN;
-    // Prefer the real accept timestamp from the server; only fall back to "now"
-    // once so the countdown does not reset on every re-render.
+    // Prefer the real accept timestamp from the server; fall back to "now"
+    // for this ride only so the countdown is always visible after assign.
     if (Number.isFinite(parsedAcceptedAt) && parsedAcceptedAt > 0) {
-      freeCancelAnchorRef.current = parsedAcceptedAt;
+      // Ignore absurdly old timestamps (e.g. leaked from a previous ride).
+      const ageMs = Date.now() - parsedAcceptedAt;
+      if (ageMs >= 0 && ageMs < 10 * 60 * 1000) {
+        freeCancelAnchorRef.current = parsedAcceptedAt;
+      } else if (!freeCancelAnchorRef.current) {
+        freeCancelAnchorRef.current = Date.now();
+      }
     } else if (!freeCancelAnchorRef.current) {
       freeCancelAnchorRef.current = Date.now();
     }
@@ -346,6 +368,7 @@ export default function RideTrackingScreen({ navigation }: any) {
     activeRide?.acceptedAt,
     activeRide?.id,
     (activeRide as any)?.driverName,
+    (activeRide as any)?.driverId,
   ]);
   // ─── 10-minute countdown timer when driver arrives ────────────────────
   useEffect(() => {
@@ -1827,7 +1850,11 @@ export default function RideTrackingScreen({ navigation }: any) {
   const currentStatus = getEffectiveRideStatus();
   const cancelFeeState = getCancelFeeState();
   const showFreeCancelCountdown =
-    cancelFeeState.driverAssigned &&
+    !!cancelFeeState.driverAssigned &&
+    currentStatus !== "pending" &&
+    currentStatus !== "in_progress" &&
+    currentStatus !== "completed" &&
+    currentStatus !== "cancelled" &&
     freeCancelSecondsLeft !== null &&
     freeCancelSecondsLeft > 0;
 

@@ -1033,10 +1033,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
         setActiveRide((current) => {
           if (!current || current.id !== data.rideId) return current;
 
+          // Always start a fresh 1-minute free-cancel window on this accept.
           const acceptedAt =
             data.acceptedAt ||
             (data as any).accepted_at ||
-            current.acceptedAt ||
             new Date().toISOString();
 
           const updated: Ride = {
@@ -1243,12 +1243,25 @@ export function RideProvider({ children }: { children: ReactNode }) {
           ? undefined
           : serverRide.acceptedAt ||
             (serverRide as any).accepted_at ||
-            current.acceptedAt ||
-            (nextStatus === "accepted" ? new Date().toISOString() : undefined);
+            (nextStatus === "accepted" ||
+            nextStatus === "arrived" ||
+            nextStatus === "at_pickup" ||
+            nextStatus === "arriving"
+              ? // New assign (rebook / rematch): start free-cancel clock now if
+                // the server has not yet persisted accepted_at.
+                current.status === "accepted" ||
+                current.status === "arrived" ||
+                current.status === "at_pickup" ||
+                current.status === "arriving"
+                ? current.acceptedAt || new Date().toISOString()
+                : new Date().toISOString()
+              : current.acceptedAt);
       const updated: Ride = {
         ...current,
         status: nextStatus as RideStatus,
-        ...(syncedAcceptedAt ? { acceptedAt: syncedAcceptedAt } : { acceptedAt: undefined }),
+        ...(syncedAcceptedAt
+          ? { acceptedAt: syncedAcceptedAt }
+          : { acceptedAt: undefined }),
         ...(nextStatus === "pending"
           ? {
               driverName: undefined,
@@ -1736,10 +1749,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 : {}),
               ...(update.status === "accepted"
                 ? {
+                    // Fresh accept (including rematch / rebook) always gets a
+                    // new free-cancel clock — never reuse a prior ride's stamp.
                     acceptedAt:
                       (update as any).acceptedAt ||
                       (update as any).accepted_at ||
-                      current.acceptedAt ||
                       new Date().toISOString(),
                   }
                 : {}),
@@ -2309,6 +2323,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
     );
 
     finalizedTerminalRideRef.current = null;
+    lastDriverCancellationNoticeRef.current = null;
     setActiveRide(newRide);
     await AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(newRide));
 
