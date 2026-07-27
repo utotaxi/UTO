@@ -56,6 +56,9 @@ export default function SignInScreen({ navigation, route }: any) {
   const { setUserRole } = useMode();
 
   const selectedRole = (route.params?.role as UserRole) || "rider";
+  const isDriver = selectedRole === "driver";
+  /** Google OAuth is rider-only — drivers must use email + password. */
+  const allowGoogleAuth = !isDriver;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -91,6 +94,11 @@ export default function SignInScreen({ navigation, route }: any) {
 
   // ── Process the OAuth redirect URL (works for both WebBrowser and deep-link) ──
   const processOAuthRedirect = async (url: string) => {
+    if (!allowGoogleAuth) {
+      setError("Drivers must sign in with email and password.");
+      setIsGoogleLoading(false);
+      return;
+    }
     console.log("🔑 Google OAuth: processing redirect URL");
     setIsGoogleLoading(true);
 
@@ -163,6 +171,8 @@ export default function SignInScreen({ navigation, route }: any) {
 
   // ── Deep-link listener for Google OAuth redirect (Fallback for cold starts) ──
   useEffect(() => {
+    if (!allowGoogleAuth) return;
+
     WebBrowser.maybeCompleteAuthSession();
 
     const handleRedirect = (event: { url: string }) => {
@@ -181,7 +191,7 @@ export default function SignInScreen({ navigation, route }: any) {
     });
 
     return () => sub.remove();
-  }, []);
+  }, [allowGoogleAuth]);
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -220,6 +230,10 @@ export default function SignInScreen({ navigation, route }: any) {
   };
 
   const handleGoogleSignIn = async () => {
+    if (!allowGoogleAuth) {
+      setError("Drivers must sign in with email and password.");
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsGoogleLoading(true);
     setError("");
@@ -313,10 +327,12 @@ export default function SignInScreen({ navigation, route }: any) {
             style={styles.headerSection}
           >
             <ThemedText style={styles.title}>
-              Sign in as {selectedRole === "driver" ? "Driver" : "Rider"}
+              Sign in as {isDriver ? "Driver" : "Rider"}
             </ThemedText>
             <ThemedText style={styles.subtitle}>
-              Welcome back! Enter your details
+              {isDriver
+                ? "Welcome back! Sign in with your email and password"
+                : "Welcome back! Enter your details"}
             </ThemedText>
           </Animated.View>
 
@@ -324,33 +340,37 @@ export default function SignInScreen({ navigation, route }: any) {
             entering={FadeInDown.delay(200).duration(500)}
             style={styles.form}
           >
-            <AnimatedPressable
-              onPress={handleGoogleSignIn}
-              onPressIn={() => (googleButtonScale.value = withSpring(0.98))}
-              onPressOut={() => (googleButtonScale.value = withSpring(1))}
-              disabled={isGoogleLoading}
-              style={[styles.googleButton, googleButtonAnimatedStyle]}
-            >
-              {isGoogleLoading ? (
-                <ActivityIndicator color="#000000" />
-              ) : (
-                <>
-                  <Image
-                    source={{ uri: "https://www.google.com/favicon.ico" }}
-                    style={styles.googleIcon}
-                  />
-                  <ThemedText style={styles.googleButtonText}>
-                    Continue with Google
-                  </ThemedText>
-                </>
-              )}
-            </AnimatedPressable>
+            {allowGoogleAuth ? (
+              <>
+                <AnimatedPressable
+                  onPress={handleGoogleSignIn}
+                  onPressIn={() => (googleButtonScale.value = withSpring(0.98))}
+                  onPressOut={() => (googleButtonScale.value = withSpring(1))}
+                  disabled={isGoogleLoading}
+                  style={[styles.googleButton, googleButtonAnimatedStyle]}
+                >
+                  {isGoogleLoading ? (
+                    <ActivityIndicator color="#000000" />
+                  ) : (
+                    <>
+                      <Image
+                        source={{ uri: "https://www.google.com/favicon.ico" }}
+                        style={styles.googleIcon}
+                      />
+                      <ThemedText style={styles.googleButtonText}>
+                        Continue with Google
+                      </ThemedText>
+                    </>
+                  )}
+                </AnimatedPressable>
 
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <ThemedText style={styles.dividerText}>or</ThemedText>
-              <View style={styles.dividerLine} />
-            </View>
+                <View style={styles.divider}>
+                  <View style={styles.dividerLine} />
+                  <ThemedText style={styles.dividerText}>or</ThemedText>
+                  <View style={styles.dividerLine} />
+                </View>
+              </>
+            ) : null}
 
             <View style={styles.inputContainer}>
               <ThemedText style={styles.inputLabel}>Email address</ThemedText>
