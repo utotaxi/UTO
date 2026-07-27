@@ -380,7 +380,8 @@ function RideCard({
       {canCancel && isLateCancelWindow && (
         <View style={cs.lateCancelWarning}>
           <Text style={cs.lateCancelText}>
-            ⚠️ Cancelling now will charge a 100% fee
+            Scheduled rides are not eligible for free cancellation within 3
+            hours of pickup.
           </Text>
         </View>
       )}
@@ -601,7 +602,7 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
 
     const title = willCharge ? "Cancellation Fee Applies" : "Cancel Ride";
     const message = willCharge
-      ? `You are cancelling within 3 hours of your scheduled pickup. A 100% cancellation fee${fare ? ` (£${(parseFloat(fare) * 1).toFixed(2)})` : ""} will be charged to your payment method.\n\nDo you want to proceed?`
+      ? "Scheduled rides are not eligible for free cancellation within 3 hours of pickup."
       : "Are you sure you want to cancel and proceed to get the refund?";
 
     Alert.alert(title, message, [
