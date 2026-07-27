@@ -5842,7 +5842,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //   • unassigned OR not yet accepted → dispatch as ASAP to nearby drivers.
   // From that point all live-ride policies apply (PIN verification, no-show,
   // rider cancellation rules, completion, etc.).
-  const SCHEDULED_ACTIVATION_RETRY_MS = 5 * 60 * 1000; // retry dispatch every 5 min if no driver found
+  const SCHEDULED_ACTIVATION_RETRY_MS = 2 * 60 * 1000; // re-offer every 2 min (~30 waves in last 60 min)
   const SCHEDULED_ACTIVATION_GRACE_MS = 30 * 60 * 1000; // keep trying up to 30 min past pickup
 
   setInterval(async () => {

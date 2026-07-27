@@ -403,10 +403,15 @@ class MinHeap {
 }
 
 const RADIUS_MILES = DEFAULT_DRIVER_RADIUS_MILES; // 5-mile radius for driver eligibility
-/** Accept window while the driver app has a live socket. */
+/** Accept window while the driver app has a live socket (normal ASAP). */
 const DISPATCH_TIMEOUT_MS = 12_000;
 /** Fast cascade when only push/background — keeps first live driver within ~10–12s. */
 const DISPATCH_TIMEOUT_NO_SOCKET_MS = 8_000;
+/**
+ * Offer window for scheduled→ASAP fallback rides. Each driver sees the request
+ * for 30s before it cascades / the next 2-minute wave.
+ */
+const SCHEDULED_DISPATCH_TIMEOUT_MS = 30_000;
 /** How long to keep retrying when no eligible driver is found yet. */
 const NO_DRIVER_RETRY_MS = 90_000;
 const NO_DRIVER_RETRY_INTERVAL_MS = 2_000;
@@ -1017,6 +1022,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     // Live socket → accept window. No live socket → short cascade (8s) so the
     // next available app gets the offer within ~10–12s overall.
+    // Scheduled→ASAP fallback offers always last 30s per driver.
     const mappedSocketId = connectedDrivers.get(entry.driverId);
     const liveSock = mappedSocketId
       ? io.sockets.sockets.get(mappedSocketId)
@@ -1025,11 +1031,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
       (entry.liveSocket || liveSock) &&
       (!liveSock || (liveSock as any).connected !== false)
     );
-    const dispatchTimeoutMs = driverSocketConnected
-      ? DISPATCH_TIMEOUT_MS
-      : DISPATCH_TIMEOUT_NO_SOCKET_MS;
+    const isScheduledOffer =
+      isScheduledLiveRideId(rideId) ||
+      !!(state.rideData as any)?.isScheduledBooking;
+    const dispatchTimeoutMs = isScheduledOffer
+      ? SCHEDULED_DISPATCH_TIMEOUT_MS
+      : driverSocketConnected
+        ? DISPATCH_TIMEOUT_MS
+        : DISPATCH_TIMEOUT_NO_SOCKET_MS;
     console.log(
-      `⏱️ Dispatch window for driver ${entry.driverId}: ${dispatchTimeoutMs / 1000}s (${driverSocketConnected ? "live socket" : "no live socket / push"})`,
+      `⏱️ Dispatch window for driver ${entry.driverId}: ${dispatchTimeoutMs / 1000}s (${isScheduledOffer ? "scheduled→ASAP" : driverSocketConnected ? "live socket" : "no live socket / push"})`,
     );
     state.timer = setTimeout(() => {
       console.log(
