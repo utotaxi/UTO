@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -107,6 +107,7 @@ export default function ScheduledJobDetailsScreen() {
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState(false);
+  const pinInputRef = useRef<TextInput>(null);
   const [isStartingTrip, setIsStartingTrip] = useState(false);
   const [isFinishingTrip, setIsFinishingTrip] = useState(false);
   const [showEarlyCompleteModal, setShowEarlyCompleteModal] = useState(false);
@@ -1050,16 +1051,38 @@ export default function ScheduledJobDetailsScreen() {
                 Wrong PIN. Please try again.
               </Text>
             ) : null}
+            <View style={s.pinBoxes}>
+              {[0, 1, 2, 3].map((i) => (
+                <View
+                  key={i}
+                  style={[
+                    s.pinBox,
+                    pinValue[i] ? s.pinBoxFilled : null,
+                    pinError ? s.pinBoxError : null,
+                  ]}
+                >
+                  <Text style={s.pinBoxText}>{pinValue[i] || ""}</Text>
+                </View>
+              ))}
+            </View>
             <TextInput
+              ref={pinInputRef}
               style={s.pinInput}
               value={pinValue}
-              onChangeText={(text) =>
-                setPinValue(text.replace(/\D/g, "").slice(0, 4))
-              }
+              onChangeText={(text) => {
+                setPinError(false);
+                setPinValue(text.replace(/\D/g, "").slice(0, 4));
+              }}
               keyboardType="number-pad"
               maxLength={4}
-              placeholder="••••"
-              secureTextEntry
+              autoFocus
+              placeholder="Enter 4-digit PIN"
+              placeholderTextColor="#9CA3AF"
+              // Must stay visible — secureTextEntry hid digits from drivers.
+              secureTextEntry={false}
+              textContentType="oneTimeCode"
+              importantForAutofill="no"
+              selectionColor={UTOColors.primary}
             />
             <View style={s.modalActions}>
               <Pressable
@@ -1461,12 +1484,43 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#D1D5DB",
     borderRadius: 12,
-    padding: 16,
-    marginTop: 16,
-    fontSize: 24,
-    letterSpacing: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginTop: 14,
+    fontSize: 28,
+    letterSpacing: 10,
     textAlign: "center",
-    fontWeight: "700",
+    fontWeight: "800",
+    color: "#111827",
+    backgroundColor: "#FFFFFF",
+  },
+  pinBoxes: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 12,
+    marginTop: 16,
+  },
+  pinBox: {
+    width: 56,
+    height: 64,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#D1D5DB",
+    backgroundColor: "#F9FAFB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pinBoxFilled: {
+    borderColor: UTOColors.primary,
+    backgroundColor: "#FFFBEB",
+  },
+  pinBoxError: {
+    borderColor: "#DC2626",
+  },
+  pinBoxText: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#111827",
   },
 });
 
