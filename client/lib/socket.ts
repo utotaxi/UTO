@@ -122,6 +122,22 @@ export function onRideUpdate(callback: (update: any) => void): () => void {
   };
 }
 
+/** Dedicated ASAP rematch notice when the assigned driver cancels. */
+export function onDriverCancelled(
+  callback: (data: {
+    rideId: string;
+    status?: string;
+    message?: string;
+    driverCancelled?: boolean;
+  }) => void,
+): () => void {
+  const socket = getSocket();
+  socket.on("ride:driver_cancelled", callback);
+  return () => {
+    socket.off("ride:driver_cancelled", callback);
+  };
+}
+
 // Listen for ride accepted (for riders)
 export function onRideAccepted(callback: (data: any) => void): () => void {
   const socket = getSocket();

@@ -1543,6 +1543,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
     if (activeRideRequest) {
       const postAcceptStates = new Set([
         "accepted",
+        "arrived",
         "at_pickup",
         "in_progress",
       ]);
@@ -1552,7 +1553,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           socket.emit("ride:driver_cancel_at_pickup", {
             rideId: activeRideRequest.id,
             driverId: driverProfile?.id || user?.id || undefined,
-            applyPenalty: isAtPickup || rideState === "at_pickup",
+            applyPenalty: isAtPickup || rideState === "at_pickup" || rideState === "arrived",
             cancelledFrom: rideState,
             cancelledBy: "driver",
           });

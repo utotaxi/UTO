@@ -3166,7 +3166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Reminder cadence for accepted scheduled jobs (with sound via Expo push):
-  // 3h → 2h → 30m → 15m → 5m before pickup.
+  // 3h → 2.5h → 2h → 1.5h → 1h → 30m → 15m → 5m before pickup.
   const SCHEDULED_REMINDER_THRESHOLDS: {
     key: string;
     ms: number;
@@ -3177,7 +3177,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const hour = 60 * minute;
     return [
       { key: "3h", ms: 3 * hour, label: "3 hours", contactPassenger: false },
+      {
+        key: "2.5h",
+        ms: 2.5 * hour,
+        label: "2 and a half hours",
+        contactPassenger: false,
+      },
       { key: "2h", ms: 2 * hour, label: "2 hours", contactPassenger: false },
+      {
+        key: "1.5h",
+        ms: 1.5 * hour,
+        label: "1 and a half hours",
+        contactPassenger: false,
+      },
+      { key: "1h", ms: 1 * hour, label: "1 hour", contactPassenger: false },
       {
         key: "30m",
         ms: 30 * minute,
@@ -3212,6 +3225,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
 
+    // Fire the largest remaining threshold we have already reached
+    // (thresholds are ordered farthest → nearest).
     for (const threshold of SCHEDULED_REMINDER_THRESHOLDS) {
       if (msUntilPickup <= threshold.ms && !alreadyHandled.has(threshold.key)) {
         return threshold;
@@ -5819,14 +5834,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? "Pickup in 5 minutes!"
           : reminderBucket.key === "15m"
             ? "Pickup in 15 minutes"
-            : reminderBucket.contactPassenger
-              ? "Upcoming booking soon"
-              : "Upcoming booking reminder";
+            : reminderBucket.key === "30m"
+              ? "Pickup in 30 minutes"
+              : reminderBucket.key === "1h"
+                ? "Pickup in 1 hour"
+                : reminderBucket.key === "1.5h"
+                  ? "Pickup in 1.5 hours"
+                  : reminderBucket.key === "2h"
+                    ? "Pickup in 2 hours"
+                    : reminderBucket.key === "2.5h"
+                      ? "Pickup in 2.5 hours"
+                      : reminderBucket.key === "3h"
+                        ? "Pickup in 3 hours"
+                        : reminderBucket.contactPassenger
+                          ? "Upcoming booking soon"
+                          : "Upcoming booking reminder";
       const body = reminderBucket.contactPassenger
-        ? `Your ride ${rideDetails} starts in ${reminderBucket.label}. Contact the passenger if needed and head to pickup.`
-        : `Your ride ${rideDetails} starts in ${reminderBucket.label}. Please plan to reach the pickup location on time.`;
+        ? `Your scheduled ride ${rideDetails} starts in ${reminderBucket.label}. Contact the passenger if needed and head to pickup.`
+        : `Your scheduled ride ${rideDetails} starts in ${reminderBucket.label}. Please plan to reach the pickup location on time.`;
 
-      await sendExpoPushNotification(
+      const pushOk = await sendExpoPushNotification(
         userRow.push_token,
         title,
         body,
@@ -5845,7 +5872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       handled.add(reminderBucket.key);
       console.log(
-        `🔔 Scheduled reminder ${reminderBucket.key} sent for booking ${booking.id}`,
+        `🔔 Scheduled reminder ${reminderBucket.key} ${pushOk ? "sent" : "failed"} for booking ${booking.id} (driver ${assignedDriverId}, in ${Math.round(msUntilPickup / 60000)}m)`,
       );
     }
 

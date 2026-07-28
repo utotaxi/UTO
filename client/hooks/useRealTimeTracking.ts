@@ -169,6 +169,7 @@ import {
   onDriverLocation,
   onRideAccepted,
   onRideUpdate,
+  onDriverCancelled,
   DriverLocation,
   RideUpdate,
 } from "@/lib/socket";
@@ -327,9 +328,23 @@ export function useRiderTracking({ riderId, rideId }: UseRiderTrackingOptions) {
       const activeRideId = rideIdRef.current;
       if (!activeRideId || update.rideId === activeRideId) {
         setRideStatus(update.status);
-        if (update.driverLocation) {
+        // Driver-cancel rematch: drop last driver's pin so UI returns to searching.
+        if (
+          update.status === "pending" ||
+          (update as any).driverCancelled === true
+        ) {
+          setDriverLocation(null);
+        } else if (update.driverLocation) {
           setDriverLocation(update.driverLocation);
         }
+      }
+    });
+
+    const unsubDriverCancelled = onDriverCancelled((data) => {
+      const activeRideId = rideIdRef.current;
+      if (!activeRideId || data.rideId === activeRideId) {
+        setRideStatus("pending");
+        setDriverLocation(null);
       }
     });
 
@@ -338,6 +353,7 @@ export function useRiderTracking({ riderId, rideId }: UseRiderTrackingOptions) {
       if (typeof unsubLocation === "function") unsubLocation();
       if (typeof unsubAccepted === "function") unsubAccepted();
       if (typeof unsubRide === "function") unsubRide();
+      if (typeof unsubDriverCancelled === "function") unsubDriverCancelled();
     };
   }, [riderId]);
 

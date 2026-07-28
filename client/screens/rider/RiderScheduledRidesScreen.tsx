@@ -598,7 +598,6 @@ export default function RiderScheduledRidesScreen({ navigation }: any) {
     const isLateCancel = msUntilPickup >= 0 && msUntilPickup <= THREE_HOURS_MS;
     const isPastPickup = msUntilPickup < 0;
     const willCharge = isLateCancel || isPastPickup;
-    const fare = (ride as any).estimated_fare;
 
     const title = willCharge ? "Cancellation Fee Applies" : "Cancel Ride";
     const message = willCharge

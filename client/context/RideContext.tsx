@@ -867,6 +867,7 @@ import {
   connectAsRider,
   onRideAccepted,
   onRideUpdate,
+  onDriverCancelled,
 } from "@/lib/socket";
 import { getApiUrl } from "@/lib/query-client";
 import { normalizeBackendTimestamp } from "@/lib/dateTime";
@@ -926,6 +927,8 @@ export interface Ride {
   discountedFare?: number;
   driverArrivedAt?: string;
   acceptedAt?: string;
+  /** True after assigned driver cancels while we rematch nearby drivers. */
+  awaitingRematch?: boolean;
   createdAt: string;
   completedAt?: string;
 }
@@ -1030,6 +1033,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
     try {
       cleanup = onRideAccepted((data) => {
+        // Allow another cancel notice if this rematched driver later cancels.
+        lastDriverCancellationNoticeRef.current = null;
         setActiveRide((current) => {
           if (!current || current.id !== data.rideId) return current;
 
@@ -1043,6 +1048,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
             ...current,
             status: "accepted",
             acceptedAt,
+            awaitingRematch: false,
             ...((data as any).driverInfo
               ? {
                   driverName: (data as any).driverInfo.driverName,
@@ -1114,16 +1120,35 @@ export function RideProvider({ children }: { children: ReactNode }) {
             licensePlate: undefined,
             acceptedAt: undefined,
             driverArrivedAt: undefined,
+            awaitingRematch: true,
           };
+          // Notify whenever we leave an assigned state for rematch — not only
+          // when the previous status string was non-pending (driver details may
+          // still be present while status already flipped).
+          const wasAssigned =
+            current.status !== "pending" ||
+            !!current.driverName ||
+            !!current.acceptedAt;
           if (
-            current.status !== "pending" &&
+            wasAssigned &&
             lastDriverCancellationNoticeRef.current !== serverRide.id
           ) {
             lastDriverCancellationNoticeRef.current = serverRide.id;
-            Alert.alert(
-              "Driver Cancelled",
-              "Your driver cancelled this ride. We're still finding a nearby driver for you.",
-              [{ text: "OK" }],
+            setTimeout(() => {
+              Alert.alert(
+                "Driver Cancelled",
+                "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+                [{ text: "OK" }],
+              );
+            }, 100);
+            sendLocalNotification(
+              "Driver cancelled",
+              "We're still finding a nearby driver for you.",
+              {
+                type: "driver_cancelled_rematch",
+                rideId: serverRide.id,
+                audience: "rider",
+              },
             );
           }
           setActiveRide(searching);
@@ -1702,12 +1727,14 @@ export function RideProvider({ children }: { children: ReactNode }) {
           lastDriverCancellationNoticeRef.current !== update.rideId
         ) {
           lastDriverCancellationNoticeRef.current = update.rideId;
-          Alert.alert(
-            "Driver Cancelled",
-            (update as any).message ||
-              "Your driver cancelled this ride. We're still finding a nearby driver for you.",
-            [{ text: "OK" }],
-          );
+          setTimeout(() => {
+            Alert.alert(
+              "Driver Cancelled",
+              (update as any).message ||
+                "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+              [{ text: "OK" }],
+            );
+          }, 100);
           sendLocalNotification(
             "Driver cancelled",
             "We're still finding a nearby driver for you.",
@@ -1735,6 +1762,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
                     licensePlate: undefined,
                     acceptedAt: undefined,
                     driverArrivedAt: undefined,
+                    awaitingRematch: true,
                   }
                 : {}),
               // If the driver sent their real info on accept, use it
@@ -1745,6 +1773,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
                     vehicleInfo: (update as any).driverInfo.vehicleInfo,
                     licensePlate: (update as any).driverInfo.licensePlate,
                     driverRating: (update as any).driverInfo.driverRating,
+                    awaitingRematch: false,
                   }
                 : {}),
               ...(update.status === "accepted"
@@ -1755,6 +1784,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
                       (update as any).acceptedAt ||
                       (update as any).accepted_at ||
                       new Date().toISOString(),
+                    awaitingRematch: false,
                   }
                 : {}),
               // Keep accept timestamp across later status updates — but NEVER
@@ -1784,6 +1814,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
             // 🔔 Notify rider when driver accepts
             if (update.status === "accepted") {
+              // Allow another cancel notice if this rematched driver later cancels.
+              lastDriverCancellationNoticeRef.current = null;
               const driverName =
                 (update as any).driverInfo?.driverName || "Your driver";
               sendLocalNotification(
@@ -1822,6 +1854,70 @@ export function RideProvider({ children }: { children: ReactNode }) {
       console.warn("Socket not available:", err);
     }
 
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, []);
+
+  // Dedicated rematch notice — more reliable than only watching ride:update
+  // (tracking UI used to prefer a stale socket "accepted" over context "pending").
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    try {
+      cleanup = onDriverCancelled((data) => {
+        const rideId = data?.rideId;
+        if (!rideId) return;
+        const myRideId =
+          activeRideRef.current?.id ||
+          pendingCancelledRideRef.current?.id ||
+          null;
+        if (myRideId && rideId !== myRideId) return;
+
+        if (lastDriverCancellationNoticeRef.current !== rideId) {
+          lastDriverCancellationNoticeRef.current = rideId;
+          setTimeout(() => {
+            Alert.alert(
+              "Driver Cancelled",
+              data.message ||
+                "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+              [{ text: "OK" }],
+            );
+          }, 100);
+          sendLocalNotification(
+            "Driver cancelled",
+            "We're still finding a nearby driver for you.",
+            {
+              type: "driver_cancelled_rematch",
+              rideId,
+              audience: "rider",
+            },
+          );
+        }
+
+        setActiveRide((current) => {
+          if (!current || current.id !== rideId) return current;
+          const updated: Ride = {
+            ...current,
+            status: "pending",
+            driverName: undefined,
+            driverPhone: undefined,
+            driverRating: undefined,
+            vehicleInfo: undefined,
+            licensePlate: undefined,
+            acceptedAt: undefined,
+            driverArrivedAt: undefined,
+            awaitingRematch: true,
+          };
+          AsyncStorage.setItem(
+            ACTIVE_RIDE_KEY,
+            JSON.stringify(updated),
+          ).catch(console.error);
+          return updated;
+        });
+      });
+    } catch (err) {
+      console.warn("Socket not available for driver-cancelled listener:", err);
+    }
     return () => {
       if (cleanup) cleanup();
     };

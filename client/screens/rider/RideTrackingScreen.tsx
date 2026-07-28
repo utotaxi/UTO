@@ -303,7 +303,12 @@ export default function RideTrackingScreen({ navigation }: any) {
     const socketStatus = String(rideStatus || "").toLowerCase();
     const rideRowStatus = String(activeRide?.status || "").toLowerCase();
     // Prefer the more advanced of socket vs context status so a stale
-    // "pending" socket status cannot hide the countdown after accept.
+    // "pending" socket status cannot hide the countdown after accept —
+    // EXCEPT after driver-cancel rematch (context pending, no driver).
+    const rematching =
+      rideRowStatus === "pending" &&
+      !activeRide?.driverName &&
+      !activeRide?.acceptedAt;
     const rank: Record<string, number> = {
       pending: 0,
       accepted: 1,
@@ -312,8 +317,9 @@ export default function RideTrackingScreen({ navigation }: any) {
       at_pickup: 3,
       in_progress: 4,
     };
-    const status =
-      (rank[socketStatus] ?? -1) >= (rank[rideRowStatus] ?? -1)
+    const status = rematching
+      ? "pending"
+      : (rank[socketStatus] ?? -1) >= (rank[rideRowStatus] ?? -1)
         ? socketStatus || rideRowStatus
         : rideRowStatus || socketStatus;
 
@@ -565,6 +571,16 @@ export default function RideTrackingScreen({ navigation }: any) {
   const getEffectiveRideStatus = () => {
     const socketStatus = String(rideStatus || "").toLowerCase();
     const rideRowStatus = String(activeRide?.status || "").toLowerCase();
+
+    // After driver-cancel rematch, context is authoritative. Poll can move
+    // activeRide → pending while useRiderTracking still holds a stale
+    // "accepted"/"arrived" — never keep showing the old assigned-driver UI.
+    const rematching =
+      rideRowStatus === "pending" &&
+      !activeRide?.driverName &&
+      !activeRide?.acceptedAt;
+    if (rematching) return "pending";
+
     const rank: Record<string, number> = {
       pending: 0,
       accepted: 1,
@@ -1745,7 +1761,7 @@ export default function RideTrackingScreen({ navigation }: any) {
     const status = getEffectiveRideStatus();
     switch (status) {
       case "pending":
-        return "Finding your driver...";
+        return "We're still finding a nearby driver for you...";
       case "accepted":
         return "Driver is on the way";
       case "arrived":
@@ -2301,10 +2317,22 @@ export default function RideTrackingScreen({ navigation }: any) {
                   </View>
                 </View>
               </View>
+              {!!activeRide.awaitingRematch && (
+                <ThemedText
+                  style={[
+                    styles.rematchTitle,
+                    { color: theme.text },
+                  ]}
+                >
+                  Driver cancelled
+                </ThemedText>
+              )}
               <ThemedText
                 style={[styles.searchingText, { color: theme.textSecondary }]}
               >
-                We're still finding a nearby driver for you
+                {activeRide.awaitingRematch
+                  ? "We're finding another nearby driver for you"
+                  : "We're still finding a nearby driver for you"}
               </ThemedText>
             </View>
           )}
@@ -3033,6 +3061,13 @@ const styles = StyleSheet.create({
   searchingText: {
     fontSize: 14,
     textAlign: "center",
+  },
+  rematchTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 16,
+    marginBottom: 4,
   },
   // ─── Waiting Timer Styles ─────────────────────────────
   waitingTimerContainer: {
