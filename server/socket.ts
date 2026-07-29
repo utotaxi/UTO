@@ -647,6 +647,80 @@ export function setupSocketIO(httpServer: HTTPServer) {
     return driverByUserId?.id || null;
   };
 
+  /** Resolve the first valid drivers.id from a list of candidate ids. */
+  const resolveFirstDriverTableId = async (
+    ...candidates: Array<string | null | undefined>
+  ): Promise<string | null> => {
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const resolved = await resolveDriverTableId(candidate);
+      if (resolved) return resolved;
+    }
+    return null;
+  };
+
+  /**
+   * Expand a driver identity into every id we might see in dispatch
+   * (drivers.id + drivers.user_id + raw candidate strings).
+   */
+  const expandDriverIdentityIds = async (
+    ...candidates: Array<string | null | undefined>
+  ): Promise<Set<string>> => {
+    const ids = new Set<string>();
+    for (const candidate of candidates) {
+      if (candidate == null || candidate === "") continue;
+      ids.add(String(candidate));
+    }
+    const tableId = await resolveFirstDriverTableId(...candidates);
+    if (tableId) {
+      ids.add(tableId);
+      try {
+        const { data: row } = await supabase
+          .from("drivers")
+          .select("id, user_id")
+          .eq("id", tableId)
+          .maybeSingle();
+        if (row?.id) ids.add(String(row.id));
+        if (row?.user_id) ids.add(String(row.user_id));
+      } catch (_) {
+        /* non-critical */
+      }
+    }
+    return ids;
+  };
+
+  const markDriversDeclined = async (
+    declinedBy: Set<string>,
+    ...candidates: Array<string | null | undefined>
+  ): Promise<Set<string>> => {
+    const expanded = await expandDriverIdentityIds(...candidates);
+    for (const id of expanded) declinedBy.add(id);
+    return expanded;
+  };
+
+  const isDriverDeclined = (
+    declinedBy: Set<string> | undefined | null,
+    driverId?: string | null,
+  ): boolean => {
+    if (!declinedBy || declinedBy.size === 0 || !driverId) return false;
+    if (declinedBy.has(String(driverId))) return true;
+    return false;
+  };
+
+  /** Async check that also resolves user_id ↔ drivers.id aliases. */
+  const isDriverDeclinedResolved = async (
+    declinedBy: Set<string> | undefined | null,
+    driverId?: string | null,
+  ): Promise<boolean> => {
+    if (!declinedBy || declinedBy.size === 0 || !driverId) return false;
+    if (declinedBy.has(String(driverId))) return true;
+    const aliases = await expandDriverIdentityIds(driverId);
+    for (const id of aliases) {
+      if (declinedBy.has(id)) return true;
+    }
+    return false;
+  };
+
   const buildRideDataFromDbRide = async (ride: any) => {
     const normalizedRideType = normalizeVehicleType(
       ride.vehicle_type || "saloon",
@@ -785,6 +859,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     const liveInfo = activeRides.get(rideId);
     const declined = liveInfo?.declinedBy || declinedBy;
+    // Re-apply any persisted exclusion list from the ride payload.
+    const excludedFromPayload = Array.isArray(rideData?.excludedDriverIds)
+      ? rideData.excludedDriverIds
+      : Array.isArray(liveInfo?.rideData?.excludedDriverIds)
+        ? liveInfo?.rideData?.excludedDriverIds
+        : [];
+    if (excludedFromPayload.length > 0) {
+      await markDriversDeclined(declined, ...excludedFromPayload);
+    }
     const socketId =
       riderSocketId ||
       liveInfo?.riderSocketId ||
@@ -973,10 +1056,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
     // Pop nearest available driver from the heap
     let entry: DriverHeapEntry | undefined;
     while ((entry = state.heap.pop()) !== undefined) {
-      if (state.declinedBy.has(entry.driverId)) {
+      const declined =
+        isDriverDeclined(state.declinedBy, entry.driverId) ||
+        (await isDriverDeclinedResolved(state.declinedBy, entry.driverId));
+      if (declined) {
         console.log(
           `⏭️ Skipping driver ${entry.driverId} — already declined or cancelled for ride ${rideId}`,
         );
+        // Keep the set fully expanded so later rebuilds stay correct.
+        await markDriversDeclined(state.declinedBy, entry.driverId);
+        const rideInfo = activeRides.get(rideId);
+        if (rideInfo?.declinedBy) {
+          await markDriversDeclined(rideInfo.declinedBy, entry.driverId);
+        }
         entry = undefined;
         continue;
       }
@@ -1051,6 +1143,18 @@ export function setupSocketIO(httpServer: HTTPServer) {
     }
 
     state.currentDriverId = entry.driverId;
+
+    // Final exclusion gate — never offer a rematch back to a cancelling driver.
+    if (
+      isDriverDeclined(state.declinedBy, entry.driverId) ||
+      (await isDriverDeclinedResolved(state.declinedBy, entry.driverId))
+    ) {
+      console.log(
+        `🚫 Refusing to dispatch ride ${rideId} to excluded driver ${entry.driverId} — advancing`,
+      );
+      await markDriversDeclined(state.declinedBy, entry.driverId);
+      return dispatchToNextDriver(rideId);
+    }
 
     // Annotate ride data with the actual distances so the driver sees it.
     // farePrice = coupon-adjusted payable; estimatedPrice kept as full for math.
@@ -1666,10 +1770,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
           );
           continue;
         }
-        if (declinedBy.has(driver.id)) {
+        if (
+          isDriverDeclined(declinedBy, driver.id) ||
+          (await isDriverDeclinedResolved(declinedBy, driver.id))
+        ) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — already declined or cancelled for ride ${rideData.id}`,
           );
+          await markDriversDeclined(declinedBy, driver.id);
           continue;
         }
 
@@ -1749,7 +1857,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
     }
 
     for (const [driverId, socketId] of connectedDrivers) {
-      if (addedDriverIds.has(driverId) || declinedBy.has(driverId)) continue;
+      if (addedDriverIds.has(driverId)) continue;
+      if (
+        isDriverDeclined(declinedBy, driverId) ||
+        (await isDriverDeclinedResolved(declinedBy, driverId))
+      ) {
+        await markDriversDeclined(declinedBy, driverId);
+        continue;
+      }
       if (busyDriverIds.has(driverId)) continue;
 
       let vehicleOk = true;
@@ -2530,9 +2645,18 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     socket.on(
       "ride:declined",
-      async (data: { rideId: string; rideData?: any; driverId?: string }) => {
-        const decliningDriverId = await resolveDriverTableId(
-          data.driverId || getDriverIdForSocket(socket.id),
+      async (data: {
+        rideId: string;
+        rideData?: any;
+        driverId?: string;
+        driverUserId?: string;
+        driverTableId?: string;
+      }) => {
+        const decliningDriverId = await resolveFirstDriverTableId(
+          data.driverTableId,
+          data.driverId,
+          data.driverUserId,
+          getDriverIdForSocket(socket.id),
         );
         console.log(
           "❌ Ride declined by driver:",
@@ -2564,13 +2688,13 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         if (rideInfo) {
-          rideInfo.declinedBy.add(decliningDriverId);
+          await markDriversDeclined(rideInfo.declinedBy, decliningDriverId);
         }
 
         // Advance the dispatch queue to the next nearest driver
         if (dispState) {
           if (dispState.timer) clearTimeout(dispState.timer);
-          dispState.declinedBy.add(decliningDriverId);
+          await markDriversDeclined(dispState.declinedBy, decliningDriverId);
           console.log(
             `⏭️ Driver ${decliningDriverId} declined — dispatching to next nearest driver`,
           );
@@ -2584,6 +2708,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
       async (data: {
         rideId: string;
         driverId?: string;
+        driverUserId?: string;
+        driverTableId?: string;
         applyPenalty?: boolean;
         cancelledFrom?: string;
       }) => {
@@ -2595,10 +2721,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
             .single();
 
           if (ride) {
-            const actualDriverId = await resolveDriverTableId(
-              data.driverId ||
-                getDriverIdForSocket(socket.id) ||
-                ride.driver_id,
+            // Resolve against EACH candidate independently — a truthy but invalid
+            // data.driverId must not block fallback to socket / ride.driver_id.
+            const actualDriverId = await resolveFirstDriverTableId(
+              data.driverTableId,
+              data.driverId,
+              data.driverUserId,
+              getDriverIdForSocket(socket.id),
+              ride.driver_id,
             );
             // Penalty is 50% of the discounted (payable) fare when a coupon was applied.
             // This is deducted from the DRIVER only — the rider is never charged on driver cancel.
@@ -2674,8 +2804,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
             const rideInfo = activeRides.get(data.rideId);
             const declinedBy = rideInfo?.declinedBy || new Set<string>();
+            // Permanently exclude this driver from rematch for THIS ride
+            // (drivers.id + user_id aliases) so they never get the offer again.
+            const excludedIds = await markDriversDeclined(
+              declinedBy,
+              actualDriverId,
+              data.driverTableId,
+              data.driverId,
+              data.driverUserId,
+              getDriverIdForSocket(socket.id),
+              ride.driver_id,
+            );
+            console.log(
+              `🚫 Excluding cancelled driver identities from rematch for ${data.rideId}:`,
+              Array.from(excludedIds).join(", ") || "(none resolved)",
+            );
             if (actualDriverId) {
-              declinedBy.add(actualDriverId);
               await supabase
                 .from("drivers")
                 .update({ is_available: true })
@@ -2751,9 +2895,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
             }
 
             // Exclude the cancelling driver from rematch (table id + raw ids).
-            if (actualDriverId) declinedBy.add(actualDriverId);
-            if (data.driverId) declinedBy.add(String(data.driverId));
-            if (ride.driver_id) declinedBy.add(String(ride.driver_id));
+            await markDriversDeclined(
+              declinedBy,
+              actualDriverId,
+              data.driverTableId,
+              data.driverId,
+              data.driverUserId,
+              getDriverIdForSocket(socket.id),
+              ride.driver_id,
+            );
 
             // Reset to pending AND refresh requested_at so offerability / stale
             // checks allow continued rematch after a long accepted period.
@@ -2819,12 +2969,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
               rideInfo?.riderSocketId || connectedRiders.get(ride.rider_id),
             );
 
-            if (actualDriverId) {
-              io.to(`driver:${actualDriverId}`).emit("ride:expired", {
-                rideId: data.rideId,
-              });
-            }
-
             // Always rebuild a fresh dispatch queue — the previous one was deleted
             // on accept, and any leftover entry must not be reused as-is.
             const existingDispatch = dispatchQueues.get(data.rideId);
@@ -2847,6 +2991,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
               driverPhone: undefined,
               vehicleInfo: undefined,
               licensePlate: undefined,
+              // Persist exclusion list on the ride payload for rebuilds / logs.
+              excludedDriverIds: Array.from(declinedBy),
             };
             activeRides.set(data.rideId, {
               riderSocketId,
@@ -2856,8 +3002,17 @@ export function setupSocketIO(httpServer: HTTPServer) {
               dispatchRetryUntil: Date.now() + REMATCH_NO_DRIVER_RETRY_MS,
             });
 
+            // Clear any leftover offer UI / stale push on the cancelling driver
+            // for every known identity room before offering to others.
+            for (const excludedId of declinedBy) {
+              io.to(`driver:${excludedId}`).emit("ride:expired", {
+                rideId: data.rideId,
+                reason: "driver_cancelled_excluded",
+              });
+            }
+
             console.log(
-              `🔃 Rematching ride ${data.rideId} after cancellation by driver ${actualDriverId || data.driverId} — excluding ${declinedBy.size} declined driver(s), searching up to ${REMATCH_NO_DRIVER_RETRY_MS / 1000}s`,
+              `🔃 Rematching ride ${data.rideId} after cancellation by driver ${actualDriverId || data.driverId} — excluding ${declinedBy.size} declined identity(ies), searching up to ${REMATCH_NO_DRIVER_RETRY_MS / 1000}s`,
             );
             return startDispatchWithRetries(
               data.rideId,
@@ -2895,6 +3050,25 @@ export function setupSocketIO(httpServer: HTTPServer) {
           console.log(
             `🔄 ride:accept — Resolved auth user_id ${data.driverId} → driver table id ${actualDriverId}`,
           );
+        }
+
+        // Never let a driver who cancelled/declined THIS ride reclaim it on rematch.
+        const rideInfoForDecline = activeRides.get(data.rideId);
+        const declinedSet =
+          rideInfoForDecline?.declinedBy ||
+          dispatchQueues.get(data.rideId)?.declinedBy;
+        if (
+          declinedSet &&
+          (await isDriverDeclinedResolved(declinedSet, actualDriverId))
+        ) {
+          console.log(
+            `🚫 Rejecting accept of ride ${data.rideId} from excluded driver ${actualDriverId}`,
+          );
+          io.to(`driver:${actualDriverId}`).emit("ride:expired", {
+            rideId: data.rideId,
+            reason: "driver_excluded_after_cancel",
+          });
+          return;
         }
 
         const dispState = dispatchQueues.get(data.rideId);

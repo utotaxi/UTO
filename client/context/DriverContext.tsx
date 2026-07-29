@@ -326,6 +326,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const activeRideRequestRef = useRef(activeRideRequest);
   const activeRideRef = useRef(activeRide);
   const rideStateRef = useRef(rideState);
+  /** Rides this driver cancelled/declined — never show rematch offers for these. */
+  const locallyExcludedRideIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     isOnlineRef.current = isOnline;
@@ -525,6 +527,16 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const handleRidePayload = useCallback((ride: any) => {
     const mappedRequest = mapRidePayload(ride);
+    const rideId = String(mappedRequest?.id || ride?.id || "");
+
+    // After this driver cancels/declines a ride, the server rematches others.
+    // Never re-open that same ride as an incoming offer on this device.
+    if (rideId && locallyExcludedRideIdsRef.current.has(rideId)) {
+      console.log(
+        `🚫 Ignoring rematch offer for ride ${rideId} — this driver already cancelled/declined it`,
+      );
+      return;
+    }
 
     if (ride.scheduledPreAccepted) {
       if (
@@ -1541,6 +1553,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
   const declineRide = (isAtPickup = false) => {
     if (activeRideRequest) {
+      const cancelledRideId = activeRideRequest.id;
+      if (cancelledRideId) {
+        locallyExcludedRideIdsRef.current.add(cancelledRideId);
+      }
       const postAcceptStates = new Set([
         "accepted",
         "arrived",
@@ -1550,10 +1566,17 @@ export function DriverProvider({ children }: { children: ReactNode }) {
       if (postAcceptStates.has(rideState)) {
         try {
           const socket = getSocket();
+          // Always send BOTH drivers.id and user.id so the server can exclude
+          // every identity alias from rematch offers.
           socket.emit("ride:driver_cancel_at_pickup", {
-            rideId: activeRideRequest.id,
+            rideId: cancelledRideId,
             driverId: driverProfile?.id || user?.id || undefined,
-            applyPenalty: isAtPickup || rideState === "at_pickup" || rideState === "arrived",
+            driverUserId: user?.id || undefined,
+            driverTableId: driverProfile?.id || undefined,
+            applyPenalty:
+              isAtPickup ||
+              rideState === "at_pickup" ||
+              rideState === "arrived",
             cancelledFrom: rideState,
             cancelledBy: "driver",
           });
@@ -1562,7 +1585,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         }
 
         if (
-          (isAtPickup || rideState === "at_pickup") &&
+          (isAtPickup || rideState === "at_pickup" || rideState === "arrived") &&
           activeRideRequest.estimatedFare > 0
         ) {
           const penaltyAmount = getDriverCancelPenalty(
@@ -1570,10 +1593,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             0, // estimatedFare is already the discounted payable amount
           );
           const penaltyLabel = formatLiveRideCancellationPenalty(
-            activeRideRequest.id,
+            cancelledRideId,
           );
           const localDeduction: DriverDeduction = {
-            id: `local_cancel_${activeRideRequest.id}`,
+            id: `local_cancel_${cancelledRideId}`,
             driverId: driverProfile?.id || user?.id || "",
             amount: -Math.abs(penaltyAmount),
             type: DRIVER_DEDUCTION_TYPE.PENALTY,
@@ -1595,9 +1618,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         try {
           const socket = getSocket();
           socket.emit("ride:declined", {
-            rideId: activeRideRequest.id,
+            rideId: cancelledRideId,
             rideData: activeRideRequest,
             driverId: driverProfile?.id || user?.id || undefined,
+            driverUserId: user?.id || undefined,
+            driverTableId: driverProfile?.id || undefined,
           });
         } catch (e) {
           console.warn("Failed to emit declined:", e);
