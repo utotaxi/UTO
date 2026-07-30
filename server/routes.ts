@@ -470,11 +470,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             require("fs").writeFileSync(
               "debug.log",
               String(createErr) +
-                "\n" +
-                JSON.stringify(
-                  createErr,
-                  Object.getOwnPropertyNames(createErr as Error),
-                ),
+              "\n" +
+              JSON.stringify(
+                createErr,
+                Object.getOwnPropertyNames(createErr as Error),
+              ),
             );
             return res.status(500).json({ error: "Failed to create account" });
           }
@@ -1261,12 +1261,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             status === "completed"
               ? { status: "completed" }
               : {
-                  status: "cancelled",
-                  cancelled_at: ride.cancelled_at || new Date().toISOString(),
-                  cancelled_by: ride.cancelled_by || "system",
-                  cancellation_fee: 0,
-                  cancellation_reason: reason,
-                };
+                status: "cancelled",
+                cancelled_at: ride.cancelled_at || new Date().toISOString(),
+                cancelled_by: ride.cancelled_by || "system",
+                cancellation_fee: 0,
+                cancellation_reason: reason,
+              };
 
           let cleanup = await supabase
             .from("rides")
@@ -1282,10 +1282,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 status === "completed"
                   ? { status: "completed" }
                   : {
-                      status: "cancelled",
-                      cancelled_at:
-                        ride.cancelled_at || new Date().toISOString(),
-                    },
+                    status: "cancelled",
+                    cancelled_at:
+                      ride.cancelled_at || new Date().toISOString(),
+                  },
               )
               .eq("id", ride.id)
               .in("status", activeStatuses);
@@ -1348,9 +1348,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const anchorValue =
             status === "in_progress"
               ? ride.started_at ||
-                ride.accepted_at ||
-                ride.requested_at ||
-                ride.created_at
+              ride.accepted_at ||
+              ride.requested_at ||
+              ride.created_at
               : ride.accepted_at || ride.requested_at || ride.created_at;
           const anchorMs = anchorValue
             ? new Date(anchorValue).getTime()
@@ -1432,13 +1432,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             walletDeduction: ride.wallet_deduction || 0,
             expectedCollectAmount:
               ride.expected_collect_amount !== undefined &&
-              ride.expected_collect_amount !== null
+                ride.expected_collect_amount !== null
                 ? ride.expected_collect_amount
                 : Math.max(
-                    0,
-                    Number(ride.estimated_price || 0) -
-                      Number(ride.discount_amount || 0),
-                  ),
+                  0,
+                  Number(ride.estimated_price || 0) -
+                  Number(ride.discount_amount || 0),
+                ),
           };
         });
 
@@ -2770,10 +2770,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { data: driverByUser } = driverById
       ? { data: null as any }
       : await sb
-          .from("drivers")
-          .select("id, user_id")
-          .eq("user_id", driverIdOrUserId)
-          .maybeSingle();
+        .from("drivers")
+        .select("id, user_id")
+        .eq("user_id", driverIdOrUserId)
+        .maybeSingle();
     const driverRow = driverById || driverByUser;
     if (driverRow?.user_id) {
       const { data: userRow } = await sb
@@ -2882,9 +2882,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch {
         const fallback = Number(
           booking?.driver_fare ??
-            booking?.estimated_fare ??
-            booking?.estimated_price ??
-            0,
+          booking?.estimated_fare ??
+          booking?.estimated_price ??
+          0,
         );
         fareLabel = fallback > 0 ? ` — £${fallback.toFixed(2)}` : "";
       }
@@ -3203,6 +3203,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         label: "15 minutes",
         contactPassenger: true,
       },
+      {
+        key: "10m",
+        ms: 10 * minute,
+        label: "10 minutes",
+        contactPassenger: true,
+      },
       { key: "5m", ms: 5 * minute, label: "5 minutes", contactPassenger: true },
     ];
   })();
@@ -3303,9 +3309,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const estimated = toFiniteNumber(booking?.estimated_fare);
     const altFull = toFiniteNumber(
       booking?.estimated_price ??
-        booking?.fare ??
-        booking?.full_fare ??
-        booking?.original_fare,
+      booking?.fare ??
+      booking?.full_fare ??
+      booking?.original_fare,
     );
     const driverFareCol = toFiniteNumber(booking?.driver_fare);
 
@@ -3443,27 +3449,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const passengers = toFiniteNumber(
       booking?.passengers ??
-        booking?.passenger_count ??
-        booking?.num_passengers ??
-        booking?.pax,
+      booking?.passenger_count ??
+      booking?.num_passengers ??
+      booking?.pax,
     );
     const luggage = toFiniteNumber(
       booking?.luggage ??
-        booking?.bags ??
-        booking?.suitcases ??
-        booking?.num_luggage,
+      booking?.bags ??
+      booking?.suitcases ??
+      booking?.num_luggage,
     );
     const distanceMiles = toFiniteNumber(
       booking?.distance_miles ??
-        booking?.distance ??
-        booking?.trip_distance ??
-        booking?.miles,
+      booking?.distance ??
+      booking?.trip_distance ??
+      booking?.miles,
     );
     const durationMinutes = toFiniteNumber(
       booking?.duration_minutes ??
-        booking?.estimated_duration ??
-        booking?.duration ??
-        booking?.trip_duration,
+      booking?.estimated_duration ??
+      booking?.duration ??
+      booking?.trip_duration,
     );
 
     return {
@@ -3496,9 +3502,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       driver_fare: driverFare > 0 ? driverFare : null,
       vehicle_type: normalizeVehicleType(
         booking?.vehicle_type ??
-          booking?.ride_type ??
-          booking?.vehicleType ??
-          booking?.car_type,
+        booking?.ride_type ??
+        booking?.vehicleType ??
+        booking?.car_type,
       ),
       booking_type:
         firstNonEmpty(
@@ -3916,19 +3922,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: booking?.status ?? null,
         driver: hasDriver
           ? {
-              id: booking.driver_id || booking.assigned_driver_id || null,
-              name: booking.assigned_driver_name || booking.driver_name || null,
-              phone:
-                booking.assigned_driver_phone || booking.driver_phone || null,
-              vehicleMake: booking.driver_vehicle_make || null,
-              vehicleModel: booking.driver_vehicle_model || null,
-              vehicleColor: booking.driver_vehicle_color || null,
-              vehicleYear: booking.driver_vehicle_year || null,
-              licensePlate: booking.driver_license_plate || null,
-              vehicleInfo: booking.driver_vehicle_info || null,
-              vehicleType: booking.driver_vehicle_type || null,
-              rating: booking.driver_rating ?? null,
-            }
+            id: booking.driver_id || booking.assigned_driver_id || null,
+            name: booking.assigned_driver_name || booking.driver_name || null,
+            phone:
+              booking.assigned_driver_phone || booking.driver_phone || null,
+            vehicleMake: booking.driver_vehicle_make || null,
+            vehicleModel: booking.driver_vehicle_model || null,
+            vehicleColor: booking.driver_vehicle_color || null,
+            vehicleYear: booking.driver_vehicle_year || null,
+            licensePlate: booking.driver_license_plate || null,
+            vehicleInfo: booking.driver_vehicle_info || null,
+            vehicleType: booking.driver_vehicle_type || null,
+            rating: booking.driver_rating ?? null,
+          }
           : null,
       });
     } catch (err) {
@@ -5409,7 +5415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     .single();
                   if (riderRow?.stripe_customer_id) {
                     await releaseAuthorization(bookingPaymentIntentId).catch(
-                      () => {},
+                      () => { },
                     );
                     const chargeResult = await chargeSavedCard(
                       riderRow.stripe_customer_id,
@@ -5681,11 +5687,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const clearedForRider =
           cancelledBy === "driver" && releaseDriverAssignment
             ? clearDriverDetailsOnBooking({
-                ...normalizedUpdatedBooking,
-                driver_id: null,
-                assigned_driver_id: null,
-                assigned_driver_name: null,
-              })
+              ...normalizedUpdatedBooking,
+              driver_id: null,
+              assigned_driver_id: null,
+              assigned_driver_name: null,
+            })
             : normalizedUpdatedBooking;
         const [enrichedForRider] = await attachDriverDetails([clearedForRider]);
         emitLaterBookingSignal(
@@ -5753,8 +5759,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Look ahead 3 hours so the 3h reminder can fire.
   const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 3 * 60 * 60 * 1000;
-  // Tick every 60s so 15m / 5m reminders are not missed by a coarse interval.
-  const SCHEDULED_DRIVER_REMINDER_TICK_MS = 60 * 1000;
+  // Tick every 30s so 10m / 5m reminders are not missed.
+  const SCHEDULED_DRIVER_REMINDER_TICK_MS = 30 * 1000;
 
   const triggerScheduledDriverReminders = async () => {
     const nowTs = Date.now();
@@ -5808,11 +5814,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { data: driverRow } = await sb
         .from("drivers")
-        .select("user_id")
+        .select("id, user_id")
         .or(`id.eq.${assignedDriverId},user_id.eq.${assignedDriverId}`)
         .limit(1)
         .maybeSingle();
 
+      const driverTableId = driverRow?.id || assignedDriverId;
       const driverUserId = driverRow?.user_id || assignedDriverId;
       const { data: userRow } = await sb
         .from("users")
@@ -5820,59 +5827,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .eq("id", driverUserId)
         .maybeSingle();
 
-      if (!userRow?.push_token) {
-        // Still mark handled so we do not retry forever without a token.
-        handled.add(reminderBucket.key);
-        continue;
-      }
-
       const pickupLabel = booking.pickup_address || "pickup location";
       const dropoffLabel = booking.dropoff_address || "destination";
       const rideDetails = `${pickupLabel} → ${dropoffLabel}`;
       const title =
         reminderBucket.key === "5m"
           ? "Pickup in 5 minutes!"
-          : reminderBucket.key === "15m"
-            ? "Pickup in 15 minutes"
-            : reminderBucket.key === "30m"
-              ? "Pickup in 30 minutes"
-              : reminderBucket.key === "1h"
-                ? "Pickup in 1 hour"
-                : reminderBucket.key === "1.5h"
-                  ? "Pickup in 1.5 hours"
-                  : reminderBucket.key === "2h"
-                    ? "Pickup in 2 hours"
-                    : reminderBucket.key === "2.5h"
-                      ? "Pickup in 2.5 hours"
-                      : reminderBucket.key === "3h"
-                        ? "Pickup in 3 hours"
-                        : reminderBucket.contactPassenger
-                          ? "Upcoming booking soon"
-                          : "Upcoming booking reminder";
+          : reminderBucket.key === "10m"
+            ? "Pickup in 10 minutes!"
+            : reminderBucket.key === "15m"
+              ? "Pickup in 15 minutes"
+              : reminderBucket.key === "30m"
+                ? "Pickup in 30 minutes"
+                : reminderBucket.key === "1h"
+                  ? "Pickup in 1 hour"
+                  : reminderBucket.key === "1.5h"
+                    ? "Pickup in 1.5 hours"
+                    : reminderBucket.key === "2h"
+                      ? "Pickup in 2 hours"
+                      : reminderBucket.key === "2.5h"
+                        ? "Pickup in 2.5 hours"
+                        : reminderBucket.key === "3h"
+                          ? "Pickup in 3 hours"
+                          : reminderBucket.contactPassenger
+                            ? "Upcoming booking soon"
+                            : "Upcoming booking reminder";
       const body = reminderBucket.contactPassenger
         ? `Your scheduled ride ${rideDetails} starts in ${reminderBucket.label}. Contact the passenger if needed and head to pickup.`
         : `Your scheduled ride ${rideDetails} starts in ${reminderBucket.label}. Please plan to reach the pickup location on time.`;
 
-      const pushOk = await sendExpoPushNotification(
-        userRow.push_token,
-        title,
-        body,
-        {
+      // Emit socket notification to active driver app session
+      try {
+        const payload = {
           type: "scheduled_booking_reminder",
           bookingId: booking.id,
           sourceTable: booking.source_table,
           audience: "driver",
-          target: "ScheduledJobDetails",
-          screen: "ScheduledJobDetails",
+          title,
+          body,
           reminderBucket: reminderBucket.key,
-        },
-        // High-importance scheduled channel with sound.
-        { channelId: "uto-scheduled-v3", ttlSeconds: 900 },
-      );
+        };
+        io.to(`driver:${driverTableId}`).emit("scheduled:reminder", payload);
+        if (driverUserId) {
+          io.to(`user:${driverUserId}`).emit("scheduled:reminder", payload);
+        }
+      } catch (sockErr) {
+        console.warn("⚠️ Socket emission failed for scheduled reminder:", sockErr);
+      }
+
+      let pushOk = false;
+      if (userRow?.push_token) {
+        pushOk = await sendExpoPushNotification(
+          userRow.push_token,
+          title,
+          body,
+          {
+            type: "scheduled_booking_reminder",
+            bookingId: booking.id,
+            sourceTable: booking.source_table,
+            audience: "driver",
+            target: "ScheduledJobDetails",
+            screen: "ScheduledJobDetails",
+            reminderBucket: reminderBucket.key,
+          },
+          // High-importance scheduled channel with sound.
+          { channelId: "uto-scheduled-v3", ttlSeconds: 900 },
+        );
+      }
 
       handled.add(reminderBucket.key);
       console.log(
-        `🔔 Scheduled reminder ${reminderBucket.key} ${pushOk ? "sent" : "failed"} for booking ${booking.id} (driver ${assignedDriverId}, in ${Math.round(msUntilPickup / 60000)}m)`,
+        `🔔 Scheduled reminder ${reminderBucket.key} ${pushOk ? "(push sent)" : "(socket sent/token missing)"} for booking ${booking.id} (driver ${assignedDriverId}, in ${Math.round(msUntilPickup / 60000)}m)`,
       );
     }
 
