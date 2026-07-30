@@ -10,20 +10,30 @@ import { io } from "../socket";
  *
  * @param rideId - ID of the ride to reassign
  */
-export async function reassignRide(rideId: string): Promise<void> {
+export async function reassignRide(
+  rideId: string,
+  excludedDriverIds: string[] = [],
+): Promise<void> {
   try {
     // Fetch ride details (pickup location & current driver if any)
     const { data: ride, error: rideErr } = await supabase
       .from("rides")
       .select("id, pickup_latitude, pickup_longitude, driver_id")
       .eq("id", rideId)
-      .single();
+      .maybeSingle();
     if (rideErr) throw rideErr;
     if (!ride) return;
 
     const { pickup_latitude, pickup_longitude, driver_id } = ride as any;
 
-    // Find available drivers (is_available = true) that are not the current driver
+    // Build exclusion set of all driver identity IDs to skip
+    const excludedSet = new Set<string>();
+    if (driver_id) excludedSet.add(String(driver_id));
+    for (const exId of excludedDriverIds) {
+      if (exId) excludedSet.add(String(exId));
+    }
+
+    // Find available drivers (is_available = true) that are not excluded
     const { data: drivers, error: driversErr } = await supabase
       .from("drivers")
       .select("id, latitude, longitude, is_available")
@@ -56,7 +66,7 @@ export async function reassignRide(rideId: string): Promise<void> {
     let nearestDriver: any = null;
     let minDist = Infinity;
     for (const d of drivers) {
-      if (driver_id && d.id === driver_id) continue; // exclude current driver
+      if (excludedSet.has(String(d.id))) continue; // exclude current/cancelling drivers
       if (d.latitude == null || d.longitude == null) continue;
       const dist = haversine(
         pickup_latitude,
