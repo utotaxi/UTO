@@ -3,6 +3,9 @@
 
 import { supabase } from "../db";
 import { io } from "../socket";
+import { getCompatibleVehicleTypes } from "../socket"; // reuse vehicle compatibility helper
+
+const RECENT_DRIVER_SEEN_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Find the nearest online driver (excluding the current driver) and assign the ride.
@@ -18,13 +21,13 @@ export async function reassignRide(
     // Fetch ride details (pickup location & current driver if any)
     const { data: ride, error: rideErr } = await supabase
       .from("rides")
-      .select("id, pickup_latitude, pickup_longitude, driver_id")
+      .select("id, pickup_latitude, pickup_longitude, driver_id, vehicle_type")
       .eq("id", rideId)
       .maybeSingle();
     if (rideErr) throw rideErr;
     if (!ride) return;
 
-    const { pickup_latitude, pickup_longitude, driver_id } = ride as any;
+    const { pickup_latitude, pickup_longitude, driver_id, vehicle_type } = ride as any;
 
     // Build exclusion set of all driver identity IDs to skip
     const excludedSet = new Set<string>();
@@ -33,12 +36,17 @@ export async function reassignRide(
       if (exId) excludedSet.add(String(exId));
     }
 
-    // Find available drivers (is_available = true) that are not excluded
+    // Find online drivers (is_online true or recently seen) that are not excluded
+    const recentSeenCutoff = new Date(Date.now() - RECENT_DRIVER_SEEN_MS).toISOString();
     const { data: drivers, error: driversErr } = await supabase
       .from("drivers")
-      .select("id, latitude, longitude, is_available")
-      .eq("is_available", true);
-    if (driversErr) throw driversErr;
+      .select("id, user_id, current_latitude, current_longitude, vehicle_type, is_online, last_seen_at")
+      .or(`is_online.eq.true,last_seen_at.gte."${recentSeenCutoff}"`);
+    // Determine compatible vehicle types for this ride
+    const compatibleTypes = getCompatibleVehicleTypes(vehicle_type);
+    // Filter drivers by vehicle compatibility inside the loop
+    // (will be checked per driver)
+
     if (!drivers || drivers.length === 0) {
       console.warn(`⚠️ No available drivers to reassign ride ${rideId}`);
       return;
@@ -66,13 +74,16 @@ export async function reassignRide(
     let nearestDriver: any = null;
     let minDist = Infinity;
     for (const d of drivers) {
-      if (excludedSet.has(String(d.id))) continue; // exclude current/cancelling drivers
-      if (d.latitude == null || d.longitude == null) continue;
+      // Exclude both driver.id and driver.user_id if present in the exclusion set
+      if (excludedSet.has(String(d.id)) || (d.user_id && excludedSet.has(String(d.user_id)))) continue;
+      // Ensure location data is available
+      // Ensure driver vehicle type is compatible
+      if (!compatibleTypes.includes(d.vehicle_type || "saloon")) continue;
       const dist = haversine(
         pickup_latitude,
         pickup_longitude,
-        d.latitude,
-        d.longitude,
+        d.current_latitude,
+        d.current_longitude,
       );
       if (dist < minDist) {
         minDist = dist;

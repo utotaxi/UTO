@@ -210,10 +210,10 @@ function mapRidePayload(ride: any): RideRequest {
   // Prefer full pre-discount amount from estimatedPrice when present; farePrice may already be payable.
   const fullFare = Number(
     ride.estimatedPrice ??
-      ride.estimated_price ??
-      ride.farePrice ??
-      ride.fare_price ??
-      0,
+    ride.estimated_price ??
+    ride.farePrice ??
+    ride.fare_price ??
+    0,
   );
   const payableFare = getDiscountedFare(fullFare, discountAmount);
   return {
@@ -277,10 +277,10 @@ function mapRidePayload(ride: any): RideRequest {
     rideType:
       String(
         ride.rideType ||
-          ride.vehicleType ||
-          ride.vehicle_type ||
-          ride.ride_type ||
-          "saloon",
+        ride.vehicleType ||
+        ride.vehicle_type ||
+        ride.ride_type ||
+        "saloon",
       )
         .trim()
         .toLowerCase()
@@ -460,7 +460,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           skipWhenForeground: false,
           bypassAudienceCheck: true,
         },
-      ).catch(() => {});
+      ).catch(() => { });
       playRideAlert();
       if (AppState.currentState === "active") {
         Alert.alert(title, body, [{ text: "OK" }]);
@@ -510,7 +510,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           screen: "Marketplace",
         },
         { alreadyClaimed: true, bypassAudienceCheck: true },
-      ).catch(() => {});
+      ).catch(() => { });
       playRideAlert();
       if (AppState.currentState === "active") {
         Alert.alert(title, body, [{ text: "OK" }]);
@@ -616,10 +616,10 @@ export function DriverProvider({ children }: { children: ReactNode }) {
         (() => {
           const typeRaw = String(
             ride.rideType ||
-              ride.vehicleType ||
-              ride.vehicle_type ||
-              mappedRequest.rideType ||
-              "saloon",
+            ride.vehicleType ||
+            ride.vehicle_type ||
+            mappedRequest.rideType ||
+            "saloon",
           )
             .trim()
             .toLowerCase()
@@ -810,9 +810,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
               // is still applied so the driver is paid.
               const cancelFee = Number(
                 update.cancellationFee ||
-                  update.cancellation_fee ||
-                  update.driverEarningsCredit ||
-                  0,
+                update.cancellation_fee ||
+                update.driverEarningsCredit ||
+                0,
               );
               sendLocalNotification(
                 cancelFee > 0
@@ -862,7 +862,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             setRideCancelledByRider(true);
             setActiveRideRequest(null);
             setActiveRide(null);
-            saveActiveRide(null).catch(() => {});
+            saveActiveRide(null).catch(() => { });
             setRideState("none");
           }
         }
@@ -1126,8 +1126,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
                       : driverPenaltyLabel,
                     createdAt: normalizeBackendTimestamp(
                       ride.cancelledAt ||
-                        ride.updatedAt ||
-                        new Date().toISOString(),
+                      ride.updatedAt ||
+                      new Date().toISOString(),
                     ),
                   });
                 }
@@ -1552,11 +1552,9 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   };
 
   const declineRide = (isAtPickup = false) => {
-    if (activeRideRequest) {
-      const cancelledRideId = activeRideRequest.id;
-      if (cancelledRideId) {
-        locallyExcludedRideIdsRef.current.add(cancelledRideId);
-      }
+    const cancelledRideId = activeRideRequest?.id || activeRide?.id;
+    if (cancelledRideId) {
+      locallyExcludedRideIdsRef.current.add(cancelledRideId);
       const postAcceptStates = new Set([
         "accepted",
         "arrived",
@@ -1584,12 +1582,13 @@ export function DriverProvider({ children }: { children: ReactNode }) {
           console.warn("Failed to emit cancel:", e);
         }
 
+        const estimatedFare = activeRideRequest?.estimatedFare || activeRide?.farePrice || 0;
         if (
           (isAtPickup || rideState === "at_pickup" || rideState === "arrived") &&
-          activeRideRequest.estimatedFare > 0
+          estimatedFare > 0
         ) {
           const penaltyAmount = getDriverCancelPenalty(
-            activeRideRequest.estimatedFare,
+            estimatedFare,
             0, // estimatedFare is already the discounted payable amount
           );
           const penaltyLabel = formatLiveRideCancellationPenalty(
@@ -1602,7 +1601,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             type: DRIVER_DEDUCTION_TYPE.PENALTY,
             reason: penaltyLabel,
             createdAt: new Date().toISOString(),
-            cancelled_by: activeRideRequest.cancelled_by,
+            cancelled_by: activeRideRequest?.cancelled_by || "driver",
           };
           setDriverDeductions((prev) => [
             localDeduction,

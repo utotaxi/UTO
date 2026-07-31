@@ -673,19 +673,26 @@ export function setupSocketIO(httpServer: HTTPServer) {
     const ids = new Set<string>();
     for (const candidate of candidates) {
       if (candidate == null || candidate === "") continue;
-      ids.add(String(candidate));
-    }
-    const tableId = await resolveFirstDriverTableId(...candidates);
-    if (tableId) {
-      ids.add(tableId);
+      const strVal = String(candidate).trim();
+      if (!strVal) continue;
+      ids.add(strVal);
+
       try {
-        const { data: row } = await supabase
+        const { data: rowByTable } = await supabase
           .from("drivers")
           .select("id, user_id")
-          .eq("id", tableId)
+          .eq("id", strVal)
           .maybeSingle();
-        if (row?.id) ids.add(String(row.id));
-        if (row?.user_id) ids.add(String(row.user_id));
+        if (rowByTable?.id) ids.add(String(rowByTable.id));
+        if (rowByTable?.user_id) ids.add(String(rowByTable.user_id));
+
+        const { data: rowByUser } = await supabase
+          .from("drivers")
+          .select("id, user_id")
+          .eq("user_id", strVal)
+          .maybeSingle();
+        if (rowByUser?.id) ids.add(String(rowByUser.id));
+        if (rowByUser?.user_id) ids.add(String(rowByUser.user_id));
       } catch (_) {
         /* non-critical */
       }
@@ -1582,7 +1589,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
     );
   };
 
-  const getCompatibleVehicleTypes = (rideType: string): string[] => {
+  export const getCompatibleVehicleTypes = (rideType: string): string[] => {
     const normalizedRideType = normalizeVehicleType(rideType);
     switch (normalizedRideType) {
       case "economy":
@@ -1656,7 +1663,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
       supabase
         .from("drivers")
         .select(
-          "id, current_latitude, current_longitude, is_available, vehicle_type, last_seen_at, is_online",
+          "id, user_id, current_latitude, current_longitude, is_available, vehicle_type, last_seen_at, is_online",
         )
         .or(`is_online.eq.true,last_seen_at.gte."${recentSeenCutoff}"`),
       supabase
@@ -1768,7 +1775,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
     if (onlineDrivers && onlineDrivers.length > 0) {
       for (const driver of onlineDrivers) {
-        if (busyDriverIds.has(driver.id)) {
+        if (
+          busyDriverIds.has(driver.id) ||
+          (driver.user_id && busyDriverIds.has(driver.user_id))
+        ) {
           console.log(
             `   ⏭️ Skipping driver ${driver.id} — already handling an active ride`,
           );
@@ -1776,12 +1786,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
         if (
           isDriverDeclined(declinedBy, driver.id) ||
-          (await isDriverDeclinedResolved(declinedBy, driver.id))
+          isDriverDeclined(declinedBy, driver.user_id) ||
+          (await isDriverDeclinedResolved(declinedBy, driver.id)) ||
+          (await isDriverDeclinedResolved(declinedBy, driver.user_id))
         ) {
           console.log(
-            `   ⏭️ Skipping driver ${driver.id} — already declined or cancelled for ride ${rideData.id}`,
+            `   ⏭️ Skipping driver ${driver.id} (user ${driver.user_id}) — already declined or cancelled for ride ${rideData.id}`,
           );
-          await markDriversDeclined(declinedBy, driver.id);
+          await markDriversDeclined(declinedBy, driver.id, driver.user_id);
           continue;
         }
 
