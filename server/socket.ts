@@ -446,6 +446,40 @@ const normalizeVehicleType = (value: any): string => {
   }
 };
 
+export const getCompatibleVehicleTypes = (rideType: string): string[] => {
+  const normalizedRideType = normalizeVehicleType(rideType);
+  switch (normalizedRideType) {
+    case "economy":
+    case "standard":
+    case "comfort":
+    case "saloon":
+      // Saloon requests can be fulfilled by saloon and larger classes
+      return [
+        "saloon",
+        "economy",
+        "standard",
+        "comfort",
+        "people_carrier",
+        "minibus",
+      ];
+    case "people_carrier":
+      // People carrier requests can be fulfilled by people carrier and larger
+      return ["people_carrier", "minibus"];
+    case "minibus":
+      // Minibus requests must stay minibus-only
+      return ["minibus"];
+    default:
+      return [
+        "saloon",
+        "economy",
+        "standard",
+        "comfort",
+        "people_carrier",
+        "minibus",
+      ];
+  }
+};
+
 async function saveRideVias(rideId: string, rawVias: any): Promise<RideVia[]> {
   const vias = normalizeVias(rawVias);
   if (!rideId || vias.length === 0) return [];
@@ -1589,39 +1623,6 @@ export function setupSocketIO(httpServer: HTTPServer) {
     );
   };
 
-  export const getCompatibleVehicleTypes = (rideType: string): string[] => {
-    const normalizedRideType = normalizeVehicleType(rideType);
-    switch (normalizedRideType) {
-      case "economy":
-      case "standard":
-      case "comfort":
-      case "saloon":
-        // Saloon requests can be fulfilled by saloon and larger classes
-        return [
-          "saloon",
-          "economy",
-          "standard",
-          "comfort",
-          "people_carrier",
-          "minibus",
-        ];
-      case "people_carrier":
-        // People carrier requests can be fulfilled by people carrier and larger
-        return ["people_carrier", "minibus"];
-      case "minibus":
-        // Minibus requests must stay minibus-only
-        return ["minibus"];
-      default:
-        return [
-          "saloon",
-          "economy",
-          "standard",
-          "comfort",
-          "people_carrier",
-          "minibus",
-        ];
-    }
-  };
 
   async function buildDispatchState(
     rideData: any,

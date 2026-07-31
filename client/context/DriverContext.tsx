@@ -1573,8 +1573,8 @@ export function DriverProvider({ children }: { children: ReactNode }) {
             driverTableId: driverProfile?.id || undefined,
             applyPenalty:
               isAtPickup ||
-              rideState === "at_pickup" ||
-              rideState === "arrived",
+              (rideState as string) === "at_pickup" ||
+              (rideState as string) === "arrived",
             cancelledFrom: rideState,
             cancelledBy: "driver",
           });
@@ -1584,7 +1584,7 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
         const estimatedFare = activeRideRequest?.estimatedFare || activeRide?.farePrice || 0;
         if (
-          (isAtPickup || rideState === "at_pickup" || rideState === "arrived") &&
+          (isAtPickup || (rideState as string) === "at_pickup" || (rideState as string) === "arrived") &&
           estimatedFare > 0
         ) {
           const penaltyAmount = getDriverCancelPenalty(

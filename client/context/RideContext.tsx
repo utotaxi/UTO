@@ -1051,12 +1051,12 @@ export function RideProvider({ children }: { children: ReactNode }) {
             awaitingRematch: false,
             ...((data as any).driverInfo
               ? {
-                  driverName: (data as any).driverInfo.driverName,
-                  driverPhone: (data as any).driverInfo.driverPhone,
-                  vehicleInfo: (data as any).driverInfo.vehicleInfo,
-                  licensePlate: (data as any).driverInfo.licensePlate,
-                  driverRating: (data as any).driverInfo.driverRating,
-                }
+                driverName: (data as any).driverInfo.driverName,
+                driverPhone: (data as any).driverInfo.driverPhone,
+                vehicleInfo: (data as any).driverInfo.vehicleInfo,
+                licensePlate: (data as any).driverInfo.licensePlate,
+                driverRating: (data as any).driverInfo.driverRating,
+              }
               : {}),
           };
           AsyncStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(updated)).catch(
@@ -1215,7 +1215,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
 
         const finalStatus: RideStatus =
           nextStatus === "cancelled_no_drivers" ||
-          nextStatus === "cancelled_no_show"
+            nextStatus === "cancelled_no_show"
             ? "cancelled"
             : nextStatus === "payment_collected"
               ? "completed"
@@ -1227,9 +1227,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
           completedAt: new Date().toISOString(),
           farePrice: Number(
             serverRide.finalPrice ||
-              serverRide.estimatedPrice ||
-              current.farePrice ||
-              0,
+            serverRide.estimatedPrice ||
+            current.farePrice ||
+            0,
           ),
         };
 
@@ -1267,20 +1267,20 @@ export function RideProvider({ children }: { children: ReactNode }) {
         nextStatus === "pending"
           ? undefined
           : serverRide.acceptedAt ||
-            (serverRide as any).accepted_at ||
-            (nextStatus === "accepted" ||
+          (serverRide as any).accepted_at ||
+          (nextStatus === "accepted" ||
             nextStatus === "arrived" ||
             nextStatus === "at_pickup" ||
             nextStatus === "arriving"
-              ? // New assign (rebook / rematch): start free-cancel clock now if
-                // the server has not yet persisted accepted_at.
-                current.status === "accepted" ||
-                current.status === "arrived" ||
-                current.status === "at_pickup" ||
-                current.status === "arriving"
-                ? current.acceptedAt || new Date().toISOString()
-                : new Date().toISOString()
-              : current.acceptedAt);
+            ? // New assign (rebook / rematch): start free-cancel clock now if
+            // the server has not yet persisted accepted_at.
+            (current.status as string) === "accepted" ||
+              (current.status as string) === "arrived" ||
+              (current.status as string) === "at_pickup" ||
+              (current.status as string) === "arriving"
+              ? current.acceptedAt || new Date().toISOString()
+              : new Date().toISOString()
+            : current.acceptedAt);
       const updated: Ride = {
         ...current,
         status: nextStatus as RideStatus,
@@ -1289,24 +1289,24 @@ export function RideProvider({ children }: { children: ReactNode }) {
           : { acceptedAt: undefined }),
         ...(nextStatus === "pending"
           ? {
-              driverName: undefined,
-              driverPhone: undefined,
-              vehicleInfo: undefined,
-              licensePlate: undefined,
-              driverRating: undefined,
-              driverArrivedAt: undefined,
-            }
+            driverName: undefined,
+            driverPhone: undefined,
+            vehicleInfo: undefined,
+            licensePlate: undefined,
+            driverRating: undefined,
+            driverArrivedAt: undefined,
+          }
           : {
-              driverName: serverRide.driverName || current.driverName,
-              driverPhone: serverRide.driverPhone || current.driverPhone,
-              vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
-              licensePlate: serverRide.licensePlate || current.licensePlate,
-              driverRating: serverRide.driverRating ?? current.driverRating,
-              driverArrivedAt:
-                serverRide.arrivedAt ||
-                serverRide.driverArrivedAt ||
-                current.driverArrivedAt,
-            }),
+            driverName: serverRide.driverName || current.driverName,
+            driverPhone: serverRide.driverPhone || current.driverPhone,
+            vehicleInfo: serverRide.vehicleInfo || current.vehicleInfo,
+            licensePlate: serverRide.licensePlate || current.licensePlate,
+            driverRating: serverRide.driverRating ?? current.driverRating,
+            driverArrivedAt:
+              serverRide.arrivedAt ||
+              serverRide.driverArrivedAt ||
+              current.driverArrivedAt,
+          }),
       };
       console.log(
         `🔄 [RideContext] Synced ride ${rideId} from server: ${current.status} → ${nextStatus}`,
@@ -1390,12 +1390,12 @@ export function RideProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
         ...(data.driverInfo
           ? {
-              driverName: data.driverInfo.driverName,
-              driverPhone: data.driverInfo.driverPhone,
-              vehicleInfo: data.driverInfo.vehicleInfo,
-              licensePlate: data.driverInfo.licensePlate,
-              driverRating: data.driverInfo.driverRating,
-            }
+            driverName: data.driverInfo.driverName,
+            driverPhone: data.driverInfo.driverPhone,
+            vehicleInfo: data.driverInfo.vehicleInfo,
+            licensePlate: data.driverInfo.licensePlate,
+            driverRating: data.driverInfo.driverRating,
+          }
           : {}),
       };
 
@@ -1614,7 +1614,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               discountedFare: finalFarePrice,
               status:
                 terminalStatus === "cancelled_no_drivers" ||
-                terminalStatus === "cancelled_no_show"
+                  terminalStatus === "cancelled_no_show"
                   ? "cancelled"
                   : terminalStatus === "payment_collected"
                     ? "completed"
@@ -1731,7 +1731,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
             Alert.alert(
               "Driver Cancelled",
               (update as any).message ||
-                "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+              "Your driver cancelled this ride. We're still finding a nearby driver for you.",
               [{ text: "OK" }],
             );
           }, 100);
@@ -1755,52 +1755,52 @@ export function RideProvider({ children }: { children: ReactNode }) {
               status: update.status as RideStatus,
               ...(driverCancelledRematch
                 ? {
-                    driverName: undefined,
-                    driverPhone: undefined,
-                    driverRating: undefined,
-                    vehicleInfo: undefined,
-                    licensePlate: undefined,
-                    acceptedAt: undefined,
-                    driverArrivedAt: undefined,
-                    awaitingRematch: true,
-                  }
+                  driverName: undefined,
+                  driverPhone: undefined,
+                  driverRating: undefined,
+                  vehicleInfo: undefined,
+                  licensePlate: undefined,
+                  acceptedAt: undefined,
+                  driverArrivedAt: undefined,
+                  awaitingRematch: true,
+                }
                 : {}),
               // If the driver sent their real info on accept, use it
               ...(update.status === "accepted" && (update as any).driverInfo
                 ? {
-                    driverName: (update as any).driverInfo.driverName,
-                    driverPhone: (update as any).driverInfo.driverPhone,
-                    vehicleInfo: (update as any).driverInfo.vehicleInfo,
-                    licensePlate: (update as any).driverInfo.licensePlate,
-                    driverRating: (update as any).driverInfo.driverRating,
-                    awaitingRematch: false,
-                  }
+                  driverName: (update as any).driverInfo.driverName,
+                  driverPhone: (update as any).driverInfo.driverPhone,
+                  vehicleInfo: (update as any).driverInfo.vehicleInfo,
+                  licensePlate: (update as any).driverInfo.licensePlate,
+                  driverRating: (update as any).driverInfo.driverRating,
+                  awaitingRematch: false,
+                }
                 : {}),
               ...(update.status === "accepted"
                 ? {
-                    // Fresh accept (including rematch / rebook) always gets a
-                    // new free-cancel clock — never reuse a prior ride's stamp.
-                    acceptedAt:
-                      (update as any).acceptedAt ||
-                      (update as any).accepted_at ||
-                      new Date().toISOString(),
-                    awaitingRematch: false,
-                  }
+                  // Fresh accept (including rematch / rebook) always gets a
+                  // new free-cancel clock — never reuse a prior ride's stamp.
+                  acceptedAt:
+                    (update as any).acceptedAt ||
+                    (update as any).accepted_at ||
+                    new Date().toISOString(),
+                  awaitingRematch: false,
+                }
                 : {}),
               // Keep accept timestamp across later status updates — but NEVER
               // after a driver-cancel rematch back to pending searching.
               ...(!driverCancelledRematch &&
-              update.status !== "accepted" &&
-              update.status !== "pending" &&
-              (current.acceptedAt ||
-                (update as any).acceptedAt ||
-                (update as any).accepted_at)
+                update.status !== "accepted" &&
+                update.status !== "pending" &&
+                (current.acceptedAt ||
+                  (update as any).acceptedAt ||
+                  (update as any).accepted_at)
                 ? {
-                    acceptedAt:
-                      current.acceptedAt ||
-                      (update as any).acceptedAt ||
-                      (update as any).accepted_at,
-                  }
+                  acceptedAt:
+                    current.acceptedAt ||
+                    (update as any).acceptedAt ||
+                    (update as any).accepted_at,
+                }
                 : {}),
               // Capture driverArrivedAt timestamp when status transitions to "arrived"
               ...(update.status === "arrived" && (update as any).driverArrivedAt
@@ -1879,7 +1879,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
             Alert.alert(
               "Driver Cancelled",
               data.message ||
-                "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+              "Your driver cancelled this ride. We're still finding a nearby driver for you.",
               [{ text: "OK" }],
             );
           }, 100);
@@ -2058,17 +2058,17 @@ export function RideProvider({ children }: { children: ReactNode }) {
             typeof r.finalPrice === "number" && r.finalPrice > 0
               ? r.finalPrice
               : Math.max(
-                  0,
-                  Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0),
-                ),
+                0,
+                Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0),
+              ),
           discountAmount: Number(r.discountAmount || 0),
           discountedFare:
             typeof r.finalPrice === "number" && r.finalPrice > 0
               ? r.finalPrice
               : Math.max(
-                  0,
-                  Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0),
-                ),
+                0,
+                Number(r.estimatedPrice || 0) - Number(r.discountAmount || 0),
+              ),
           distanceKm: r.distance || 0,
           durationMinutes: r.estimatedDuration || 0,
           driverName: r.driverName || undefined,
@@ -2099,11 +2099,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
             id,
             local
               ? {
-                  ...local,
-                  ...ride,
-                  driverName: ride.driverName || local.driverName,
-                  driverPhone: ride.driverPhone || local.driverPhone,
-                }
+                ...local,
+                ...ride,
+                driverName: ride.driverName || local.driverName,
+                driverPhone: ride.driverPhone || local.driverPhone,
+              }
               : ride,
           );
         }
