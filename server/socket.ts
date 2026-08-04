@@ -4387,6 +4387,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
 
         // Cancel dispatch queue on accept/cancel
         if (update.status === "accepted" || update.status === "cancelled") {
+          // Determine if this cancellation was driver-initiated so we can
+          // rematch the ride to other nearby drivers instead of killing it.
+          const cancelledByVal = String(
+            (update as any).cancelledBy || "",
+          ).toLowerCase();
+          const emitterIsDriver = Array.from(
+            connectedDrivers.values(),
+          ).includes(socket.id);
+          const isDriverCancel =
+            update.status === "cancelled" &&
+            (cancelledByVal === "driver" ||
+              (emitterIsDriver && cancelledByVal !== "rider"));
+
           const dispState = dispatchQueues.get(update.rideId);
           if (dispState) {
             if (dispState.timer) clearTimeout(dispState.timer);
@@ -4395,6 +4408,160 @@ export function setupSocketIO(httpServer: HTTPServer) {
             console.log(
               `🛑 Dispatch queue cancelled for ride ${update.rideId} (status: ${update.status})`,
             );
+          }
+
+          // ─── Driver-cancel rematch through ride:status path ─────────────
+          // If the driver cancelled an assigned ride via the generic
+          // ride:status event (rather than ride:driver_cancel_at_pickup),
+          // reset the ride to pending and dispatch to other nearby drivers
+          // so the rider is not left stranded.
+          if (isDriverCancel && update.status === "cancelled") {
+            console.log(
+              `🔃 Driver cancel detected via ride:status for ride ${update.rideId} — initiating rematch`,
+            );
+
+            const rideInfo = activeRides.get(update.rideId);
+            const declinedBy = rideInfo?.declinedBy || new Set<string>();
+
+            // Exclude the cancelling driver from rematch
+            await markDriversDeclined(
+              declinedBy,
+              resolvedDriverId,
+              getDriverIdForSocket(socket.id),
+            );
+
+            // Mark the cancelling driver as available again
+            if (resolvedDriverId) {
+              await supabase
+                .from("drivers")
+                .update({ is_available: true })
+                .eq("id", resolvedDriverId);
+            }
+
+            // Reset ride to pending so dispatch can pick it up again
+            const rematchRequestedAt = new Date().toISOString();
+            {
+              const resetResult = await supabase
+                .from("rides")
+                .update({
+                  status: "pending",
+                  driver_id: null,
+                  accepted_at: null,
+                  arrived_at: null,
+                  cancelled_by: null,
+                  cancellation_fee: 0,
+                  requested_at: rematchRequestedAt,
+                })
+                .eq("id", update.rideId);
+              if (
+                resetResult.error &&
+                /requested_at|column|42703|PGRST204/i.test(
+                  String(resetResult.error.message || ""),
+                )
+              ) {
+                await supabase
+                  .from("rides")
+                  .update({
+                    status: "pending",
+                    driver_id: null,
+                    accepted_at: null,
+                    arrived_at: null,
+                    cancelled_by: null,
+                    cancellation_fee: 0,
+                  })
+                  .eq("id", update.rideId);
+              }
+            }
+
+            // Notify rider that rematch is underway
+            const riderId = rideInfo?.riderId;
+            const rematchPayload = {
+              rideId: update.rideId,
+              status: "pending",
+              driverCancelled: true,
+              driverId: null,
+              driverInfo: null,
+              cancellationFee: 0,
+              chargedVia: "none",
+              cancelledBy: "driver",
+              message:
+                "Your driver cancelled this ride. We're still finding a nearby driver for you.",
+            };
+            await notifyRiderDriverCancelledRematch(
+              riderId,
+              rematchPayload,
+              rideInfo?.riderSocketId || (riderId ? connectedRiders.get(riderId) : undefined),
+            );
+
+            // Clear stale offer on the cancelled driver's screen
+            for (const excludedId of declinedBy) {
+              io.to(`driver:${excludedId}`).emit("ride:expired", {
+                rideId: update.rideId,
+                reason: "driver_cancelled_excluded",
+              });
+            }
+
+            // Fetch ride data from DB if not in memory
+            let rideRow: any = null;
+            try {
+              const { data: dbRide } = await supabase
+                .from("rides")
+                .select("*")
+                .eq("id", update.rideId)
+                .maybeSingle();
+              rideRow = dbRide;
+            } catch (_) { /* non-critical */ }
+
+            const riderSocketId =
+              rideInfo?.riderSocketId ||
+              (riderId ? connectedRiders.get(riderId) : "") ||
+              "";
+            const rematchRideData =
+              rideInfo?.rideData || (rideRow ? await buildRideDataFromDbRide(rideRow) : null);
+
+            if (rematchRideData) {
+              const cleanedRideData = {
+                ...rematchRideData,
+                id: rematchRideData.id || update.rideId,
+                riderId: rematchRideData.riderId || riderId || rideRow?.rider_id,
+                driverId: undefined,
+                driverName: undefined,
+                driverPhone: undefined,
+                vehicleInfo: undefined,
+                licensePlate: undefined,
+                excludedDriverIds: Array.from(declinedBy),
+              };
+
+              // Re-create activeRides entry for the rematch dispatch
+              activeRides.set(update.rideId, {
+                riderSocketId,
+                riderId: cleanedRideData.riderId,
+                declinedBy,
+                rideData: cleanedRideData,
+                dispatchRetryUntil: Date.now() + REMATCH_NO_DRIVER_RETRY_MS,
+              });
+
+              console.log(
+                `🔃 Rematching ride ${update.rideId} after driver cancel via ride:status — excluding ${declinedBy.size} driver(s), searching up to ${REMATCH_NO_DRIVER_RETRY_MS / 1000}s`,
+              );
+              startDispatchWithRetries(
+                update.rideId,
+                cleanedRideData,
+                riderSocketId,
+                declinedBy,
+                0,
+              ).catch((err) =>
+                console.error(
+                  `❌ Rematch dispatch failed for ride ${update.rideId}:`,
+                  err,
+                ),
+              );
+              // Skip the normal activeRides cleanup below — the ride is still alive.
+            } else {
+              console.warn(
+                `⚠️ Could not rebuild ride data for rematch on ${update.rideId} — ride will remain cancelled`,
+              );
+            }
           }
         }
 
@@ -4648,10 +4815,18 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         if (update.status === "completed" || update.status === "cancelled") {
-          activeRides.delete(update.rideId);
+          // If a driver-cancel rematch was initiated above, activeRides was
+          // re-populated with the new dispatch state — do not delete it.
+          const stillDispatching = activeRides.has(update.rideId) &&
+            activeRides.get(update.rideId)?.dispatchRetryUntil != null &&
+            (activeRides.get(update.rideId)?.dispatchRetryUntil || 0) > Date.now();
+          if (!stillDispatching) {
+            activeRides.delete(update.rideId);
+          }
 
           // Set driver as available again so they can receive new ride requests
-          if (resolvedDriverId) {
+          // (skip if rematch already handled this above to avoid duplicate updates)
+          if (resolvedDriverId && !stillDispatching) {
             try {
               await supabase
                 .from("drivers")
