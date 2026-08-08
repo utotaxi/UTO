@@ -766,6 +766,81 @@ export function setupSocketIO(httpServer: HTTPServer) {
     return false;
   };
 
+  // ─── Durable ride-decline persistence ─────────────────────────────────
+  // The in-memory declinedBy Set is correct within a live process, but it is
+  // lost on every server restart/redeploy (e.g. Railway redeploys on each
+  // push) and is not shared across instances. After a redeploy a cancelled
+  // ASAP ride is left pending with driver_id=null and no exclusion in memory,
+  // so it could be re-offered to the very driver who just cancelled it.
+  // ride_declines rows survive restarts and are unioned into declinedBy by
+  // buildDispatchState so a cancelled/declined driver is never re-offered the
+  // same ride — it cascades to other nearby drivers within the 5-mile radius.
+  const RIDE_DECLINES_TABLE_MISSING_RE =
+    /does not exist|could not find|relation|pgrst|42703|42/i;
+
+  const recordRideDecline = async (
+    rideId: string,
+    reason: string,
+    ...candidates: Array<string | null | undefined>
+  ): Promise<void> => {
+    if (!rideId) return;
+    const ids = await expandDriverIdentityIds(...candidates);
+    if (ids.size === 0) return;
+    const rows = Array.from(ids).map((driverId) => ({
+      ride_id: rideId,
+      driver_id: driverId,
+      reason,
+    }));
+    try {
+      const { error } = await supabase
+        .from("ride_declines")
+        .upsert(rows, {
+          onConflict: "ride_id,driver_id",
+          ignoreDuplicates: true,
+        });
+      if (error) {
+        // Missing table/column → fall back silently; in-memory exclusion
+        // still applies. Surface anything else for diagnostics.
+        if (!RIDE_DECLINES_TABLE_MISSING_RE.test(String(error.message))) {
+          console.warn(
+            `⚠️ ride_declines upsert failed for ${rideId}:`,
+            error.message,
+          );
+        }
+      }
+    } catch (_) {
+      /* non-critical — in-memory exclusion still works */
+    }
+  };
+
+  const loadDeclinedDriverIdsForRide = async (
+    rideId: string,
+  ): Promise<Set<string>> => {
+    const result = new Set<string>();
+    if (!rideId) return result;
+    try {
+      const { data, error } = await supabase
+        .from("ride_declines")
+        .select("driver_id")
+        .eq("ride_id", rideId);
+      if (error) {
+        if (!RIDE_DECLINES_TABLE_MISSING_RE.test(String(error.message))) {
+          console.warn(
+            `⚠️ ride_declines load failed for ${rideId}:`,
+            error.message,
+          );
+        }
+        return result;
+      }
+      for (const row of data || []) {
+        if (row?.driver_id) result.add(String(row.driver_id));
+      }
+    } catch (_) {
+      /* non-critical */
+    }
+    return result;
+  };
+
   const buildRideDataFromDbRide = async (ride: any) => {
     const normalizedRideType = normalizeVehicleType(
       ride.vehicle_type || "saloon",
@@ -1406,6 +1481,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
       console.log(
         `⏱️ Driver ${entry!.driverId} did not respond within ${dispatchTimeoutMs / 1000}s — moving to next`,
       );
+      // Persist the timeout durably so this driver is skipped on any later
+      // rebuild/restart-driven rematch for the same ride (not just in-memory).
+      void recordRideDecline(rideId, "timeout", entry!.driverId);
       // Notify the timed-out driver to clear their screen
       io.to(`driver:${entry!.driverId}`).emit("ride:expired", { rideId });
       dispatchToNextDriver(rideId);
@@ -1639,6 +1717,22 @@ export function setupSocketIO(httpServer: HTTPServer) {
       Number.isFinite(pickupLat) &&
       Number.isFinite(pickupLng) &&
       !(pickupLat === 0 && pickupLng === 0);
+
+    // Union durable, DB-persisted declines into the in-memory set so a driver
+    // who cancelled/declined this ride is excluded even after a restart or
+    // across instances. declinedBy is the live Set object shared by the
+    // dispatch queue + activeRides, so this single enrichment also protects
+    // dispatchToNextDriver's skip-loop and final exclusion gate downstream.
+    try {
+      const persistedDeclines = await loadDeclinedDriverIdsForRide(
+        rideData.id,
+      );
+      if (persistedDeclines.size > 0) {
+        for (const id of persistedDeclines) declinedBy.add(id);
+      }
+    } catch (_) {
+      /* non-critical — in-memory exclusion still applies */
+    }
 
     const requestedType = normalizeVehicleType(
       rideData.rideType ||
@@ -1993,6 +2087,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
         isDriverDeclined(state.declinedBy, actualDriverId) ||
         (await isDriverDeclinedResolved(state.declinedBy, actualDriverId))
       ) {
+        continue;
+      }
+      // Durable guard: never restore a ride to a driver who cancelled or
+      // declined it, even if the in-memory declinedBy set was lost on a
+      // restart/redeploy (ride_declines rows survive across restarts).
+      const persistedDeclines = await loadDeclinedDriverIdsForRide(rideId);
+      if (persistedDeclines.has(actualDriverId)) {
+        console.log(
+          `⏭️ Not restoring pending ride ${rideId} to driver ${actualDriverId} — durably recorded as declined/cancelled`,
+        );
         continue;
       }
       if (!(await assertRideStillOfferable(rideId))) {
@@ -2713,6 +2817,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
         if (rideInfo) {
           await markDriversDeclined(rideInfo.declinedBy, decliningDriverId);
         }
+        // Persist the decline durably so this driver is skipped on any later
+        // rebuild/restart-driven rematch for the same ride (not just in-memory).
+        await recordRideDecline(
+          data.rideId,
+          "declined",
+          decliningDriverId,
+          data.driverTableId,
+          data.driverId,
+          data.driverUserId,
+        );
 
         // Advance the dispatch queue to the next nearest driver
         if (dispState) {
@@ -2843,6 +2957,21 @@ export function setupSocketIO(httpServer: HTTPServer) {
             console.log(
               `🚫 Excluding cancelled driver identities from rematch for ${data.rideId}:`,
               Array.from(excludedIds).join(", ") || "(none resolved)",
+            );
+            // Persist the cancellation durably so the cancelling driver is
+            // never re-offered this ride — even after a restart/redeploy or
+            // on another instance where the in-memory declinedBy set is gone.
+            await recordRideDecline(
+              data.rideId,
+              "driver_cancelled",
+              actualDriverId,
+              data.driverTableId,
+              data.driverId,
+              data.driverUserId,
+              getDriverIdForSocket(socket.id),
+              ride.driver_id,
+              (rideInfo as any)?.acceptedDriverId,
+              (rideInfo as any)?.acceptedDriverRawId,
             );
             if (actualDriverId) {
               await supabase
