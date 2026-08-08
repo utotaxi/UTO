@@ -40,6 +40,7 @@ import {
   verifySupabaseRecoveryAccessToken,
   verifySupabaseRecoveryOtp,
 } from "./supabaseAuthMail";
+import { sendBookingConfirmationEmail } from "./mailer";
 
 /** email → { expiresAt, authUserId? } after Supabase recovery verification */
 const verifiedEmails = new Map<
@@ -4161,7 +4162,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rider_name: rider.fullName || null,
         rider_phone: rider.phone || null,
         rider_email: rider.email || null,
+        name: rider.fullName || null,
         customer_name: rider.fullName || null,
+        email: rider.email || null,
+        customer_email: rider.email || null,
+        phone: rider.phone || null,
+        phone_number: rider.phone || null,
         otp: bookingOtp,
         pickup_address: pickupAddress,
         pickup_latitude: pickupLatitude ?? null,
@@ -4266,6 +4272,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .eq("code", normalizedCouponCode);
           }
         }
+      }
+
+      // Send booking confirmation email to rider immediately
+      const recipientEmail = rider.email?.trim() || data?.email?.trim() || data?.rider_email?.trim();
+      if (recipientEmail) {
+        const bookingRef = `UTO-${String(data.id).slice(0, 8).toUpperCase()}`;
+        const pickupDateDisplay = pickupTime.toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          timeZone: "Europe/London",
+        });
+        const pickupTimeDisplay = pickupTime.toLocaleTimeString("en-GB", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+          timeZone: "Europe/London",
+        });
+
+        (async () => {
+          try {
+            const sent = await sendBookingConfirmationEmail({
+              email: recipientEmail,
+              bookingReference: bookingRef,
+              passengerName: rider.fullName || data.rider_name || "Valued Customer",
+              pickupDate: pickupDateDisplay,
+              pickupTime: pickupTimeDisplay,
+              pickupAddress,
+              dropoffAddress,
+              vehicleType: vehicleType || "saloon",
+              passengers: passengers ?? 1,
+              estimatedFare: finalEstimatedFare,
+              paymentMethod: "Credit Card (Stripe)",
+              ridePin: bookingOtp,
+              notes: flightNumber ? `Flight: ${flightNumber}` : undefined,
+            });
+
+            if (sent && data?.id) {
+              const { error: markErr } = await sb
+                .from("later_bookings")
+                .update({ reminder_emails_sent: ["booking_confirmation"] })
+                .eq("id", data.id);
+              if (markErr) {
+                console.warn(
+                  "⚠️ Failed to update reminder_emails_sent for booking_confirmation:",
+                  markErr.message,
+                );
+              }
+            }
+          } catch (emailErr) {
+            console.error("⚠️ Error in sendBookingConfirmationEmail:", emailErr);
+          }
+        })();
       }
 
       // Notify all drivers that a new marketplace booking is available.
