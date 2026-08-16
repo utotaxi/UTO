@@ -4276,6 +4276,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Send booking confirmation email to rider immediately
       const recipientEmail = rider.email?.trim() || data?.email?.trim() || data?.rider_email?.trim();
+      if (!recipientEmail) {
+        console.warn(
+          `⚠️ Cannot send booking confirmation email — no email address on rider ${riderId} (booking id ${data?.id}). ` +
+            `Ensure the users row has an email so rider emails can be delivered.`,
+        );
+      }
       if (recipientEmail) {
         const bookingRef = `UTO-${String(data.id).slice(0, 8).toUpperCase()}`;
         const pickupDateDisplay = pickupTime.toLocaleDateString("en-GB", {

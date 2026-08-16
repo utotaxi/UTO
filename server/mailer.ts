@@ -10,8 +10,16 @@ export async function sendOTPEmail(email: string, code: string) {
   const from = process.env.SMTP_FROM || `"UTO Support" <noreply@uto-rides.com>`;
 
   if (!host || !user || !pass) {
-    console.log(
-      "⚠️ SMTP environment variables not configured. Skipping real email send. Use code logged above.",
+    const missing = [
+      !host && "SMTP_HOST",
+      !user && "SMTP_USER",
+      !pass && "SMTP_PASS",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    console.error(
+      `❌ [SMTP] Cannot send OTP email to ${email} — SMTP not configured. Missing: ${missing}. ` +
+        `Set fly secrets: fly secrets set SMTP_HOST=… SMTP_USER=… SMTP_PASS=… SMTP_FROM=…`,
     );
     return;
   }
@@ -87,15 +95,30 @@ export async function sendBookingConfirmationEmail(params: BookingConfirmationEm
 
   console.log(`✉️ [SMTP] Sending booking confirmation email for ${bookingReference} to ${email}`);
 
-  const host = process.env.SMTP_HOST || "smtp.gmail.com";
-  const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
-  const user = process.env.SMTP_USER || "bookings@utotransfer.co.uk";
+  const envHost = process.env.SMTP_HOST;
+  const envUser = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
+
+  // Resolve send-time values, falling back to sane defaults ONLY when the env
+  // var is present-but-empty or when we deliberately want the default. If any of
+  // the core credentials are genuinely missing, we abort loudly below rather than
+  // silently authenticating against smtp.gmail.com as a guessed user.
+  const host = envHost || "smtp.gmail.com";
+  const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
+  const user = envUser || "bookings@utotransfer.co.uk";
   const from = process.env.SMTP_FROM || `"UTO Transfer" <${user}>`;
 
-  if (!pass) {
-    console.log(
-      "⚠️ SMTP password not configured (SMTP_PASS / GMAIL_APP_PASSWORD). Skipping real email send.",
+  if (!envHost || !envUser || !pass) {
+    const missing = [
+      !envHost && "SMTP_HOST",
+      !envUser && "SMTP_USER",
+      !pass && "SMTP_PASS",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    console.error(
+      `❌ [SMTP] Cannot send booking confirmation email to ${email} (ref ${bookingReference}) — SMTP not configured. Missing: ${missing}. ` +
+        `Rider emails will NOT be delivered. Set fly secrets: fly secrets set SMTP_HOST=… SMTP_USER=… SMTP_PASS=… SMTP_FROM=…`,
     );
     return false;
   }
@@ -231,7 +254,10 @@ UTO Customer Support`;
     console.log(`✅ Booking confirmation email successfully sent to ${email}`);
     return true;
   } catch (error) {
-    console.error(`❌ Failed to send booking confirmation email to ${email}:`, error);
+    console.error(
+      `❌ Failed to send booking confirmation email to ${email} (ref ${bookingReference}, host=${host}, user=${user}):`,
+      error,
+    );
     return false;
   }
 }

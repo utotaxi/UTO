@@ -270,5 +270,26 @@ function setupErrorHandler(app: express.Application) {
     } else {
       console.log(`📍 Local: http://localhost:${port}`);
     }
+
+    // SMTP configuration check — runs once at boot so an operator can never
+    // miss that rider email delivery is disabled (e.g. fly secrets not set).
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
+    const smtpMissing = [
+      !smtpHost && "SMTP_HOST",
+      !smtpUser && "SMTP_USER",
+      !smtpPass && "SMTP_PASS",
+    ].filter(Boolean);
+    if (smtpMissing.length > 0) {
+      console.error(
+        `⚠️ Email delivery DISABLED — rider booking confirmation emails will NOT be sent. Missing: ${smtpMissing.join(", ")}. ` +
+          `Set fly secrets: fly secrets set SMTP_HOST=… SMTP_USER=… SMTP_PASS=… SMTP_FROM=…`,
+      );
+    } else {
+      console.log(
+        `✅ SMTP configured (host=${smtpHost}, user=${smtpUser}) — rider email delivery enabled`,
+      );
+    }
   });
 })();
