@@ -2304,14 +2304,9 @@ export default function RideRequestScreen({ navigation, route }: any) {
         });
 
         if (address) {
-          const parts: string[] = [];
-          const streetFull = [address.streetNumber, address.street]
-            .filter(Boolean)
-            .join(" ");
-          if (streetFull) parts.push(streetFull);
+          const parts = [];
+          if (address.street) parts.push(address.street);
           if (address.city) parts.push(address.city);
-          if (address.postalCode) parts.push(address.postalCode);
-          if (address.country) parts.push(address.country);
           const addressString = parts.join(", ") || "Current Location";
           setCurrentAddress(addressString);
           setPickup(addressString);

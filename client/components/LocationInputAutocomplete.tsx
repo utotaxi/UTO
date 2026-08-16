@@ -182,11 +182,7 @@ export function LocationInputAutocomplete({
 
   const handleSelectLocation = useCallback(
     async (location: PlaceSuggestion) => {
-      // Store the FULL address (e.g. "78 James Street, London, UK") rather
-      // than just the secondary text ("London, UK"). We prefer Google's
-      // formatted_address from Place Details below when available, as it
-      // is the canonical complete address.
-      onChangeText(location.description || location.mainText || location.secondaryText);
+      onChangeText(location.secondaryText || location.mainText);
 
       // If it's a saved place, it already has coordinates
       const isSavedPlace = location.latitude && location.longitude;
@@ -203,12 +199,6 @@ export function LocationInputAutocomplete({
           if (data.result?.geometry?.location) {
             location.latitude = data.result.geometry.location.lat;
             location.longitude = data.result.geometry.location.lng;
-          }
-          // Override with Google's canonical full address if available, so
-          // the stored address is always complete (street + city + country).
-          if (data.result?.formatted_address) {
-            location.description = data.result.formatted_address;
-            onChangeText(data.result.formatted_address);
           }
         } catch (error) {
           console.error("Error fetching place details:", error);
