@@ -767,7 +767,7 @@ export default function AirportBookingScreen({ navigation }: any) {
               placeholder="Enter pickup location"
               onChangeText={setPickup}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setPickup(place.mainText);
+                setPickup(place.description || place.mainText);
                 if (place.latitude && place.longitude) {
                   setPickupLocation({
                     latitude: place.latitude,
@@ -789,7 +789,7 @@ export default function AirportBookingScreen({ navigation }: any) {
               placeholder="Enter drop-off location"
               onChangeText={setDropoff}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setDropoff(place.mainText);
+                setDropoff(place.description || place.mainText);
                 if (place.latitude && place.longitude) {
                   setDropoffLocation({
                     latitude: place.latitude,
@@ -1269,7 +1269,7 @@ export default function AirportBookingScreen({ navigation }: any) {
                       placeholder="Return pickup location"
                       onChangeText={setReturnPickup}
                       onSelectLocation={(place: PlaceSuggestion) => {
-                        setReturnPickup(place.mainText);
+                        setReturnPickup(place.description || place.mainText);
                         if (place.latitude && place.longitude)
                           setReturnPickupLocation({
                             latitude: place.latitude,
@@ -1290,7 +1290,7 @@ export default function AirportBookingScreen({ navigation }: any) {
                       placeholder="Return drop-off location"
                       onChangeText={setReturnDropoff}
                       onSelectLocation={(place: PlaceSuggestion) => {
-                        setReturnDropoff(place.mainText);
+                        setReturnDropoff(place.description || place.mainText);
                         if (place.latitude && place.longitude)
                           setReturnDropoffLocation({
                             latitude: place.latitude,

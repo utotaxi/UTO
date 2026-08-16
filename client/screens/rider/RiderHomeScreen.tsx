@@ -213,9 +213,14 @@ export default function RiderHomeScreen({ navigation }: any) {
         const [address] = await Location.reverseGeocodeAsync(coords);
 
         if (address) {
-          const parts = [];
-          if (address.street) parts.push(address.street);
+          const parts: string[] = [];
+          const streetFull = [address.streetNumber, address.street]
+            .filter(Boolean)
+            .join(" ");
+          if (streetFull) parts.push(streetFull);
           if (address.city) parts.push(address.city);
+          if (address.postalCode) parts.push(address.postalCode);
+          if (address.country) parts.push(address.country);
           setCurrentAddress(parts.join(", ") || "Current Location");
         } else {
           setCurrentAddress("Current Location");

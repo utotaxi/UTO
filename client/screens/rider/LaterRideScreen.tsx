@@ -524,7 +524,7 @@ export default function LaterRideScreen({ navigation }: any) {
               placeholder="Enter pickup location"
               onChangeText={setPickup}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setPickup(place.mainText);
+                setPickup(place.description || place.mainText);
                 if (place.latitude && place.longitude) {
                   setPickupLocation({
                     latitude: place.latitude,
@@ -560,7 +560,7 @@ export default function LaterRideScreen({ navigation }: any) {
                         v.id === via.id
                           ? {
                               ...v,
-                              address: place.mainText,
+                              address: place.description || place.mainText,
                               latitude: place.latitude,
                               longitude: place.longitude,
                             }
@@ -612,7 +612,7 @@ export default function LaterRideScreen({ navigation }: any) {
               placeholder="Where to?"
               onChangeText={setDropoff}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setDropoff(place.mainText);
+                setDropoff(place.description || place.mainText);
                 if (place.latitude && place.longitude) {
                   setDropoffLocation({
                     latitude: place.latitude,
