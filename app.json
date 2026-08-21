@@ -1,0 +1,142 @@
+{
+  "expo": {
+    "name": "UTO",
+    "slug": "uto",
+    "version": "1.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "uto",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.utocabs.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "UTO needs your location to show nearby drivers and provide ride services.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "UTO needs your location to track your ride and navigate to your destination.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyCHpucmvtde0uRq3G_COT_Q5RMw3ceWMdE"
+      }
+    },
+    "android": {
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "backgroundColor": "#1A1A1A",
+        "foregroundImage": "./assets/images/icon.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.utocabs.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "FOREGROUND_SERVICE",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED",
+        "WAKE_LOCK"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCHpucmvtde0uRq3G_COT_Q5RMw3ceWMdE"
+        }
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "uto"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#1A1A1A",
+          "dark": {
+            "backgroundColor": "#1A1A1A"
+          }
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#F7C948",
+          "defaultChannel": "uto-ride-requests-v3",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "UTO needs your location to show nearby drivers and provide ride services.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "UTO needs your permission to access photos for your profile picture and documents.",
+          "cameraPermission": "UTO needs your permission to access the camera for your profile picture and documents.",
+          "colors": {
+            "cropToolbarColor": "#000000",
+            "cropToolbarActionColor": "#FFD000",
+            "cropToolbarIconColor": "#FFD000",
+            "cropScreenBackgroundColor": "#1A1A1A"
+          },
+          "dark": {
+            "colors": {
+              "cropToolbarColor": "#000000",
+              "cropToolbarActionColor": "#FFD000",
+              "cropToolbarIconColor": "#FFD000",
+              "cropScreenBackgroundColor": "#1A1A1A"
+            }
+          }
+        }
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.utocabs.app",
+          "enableGooglePay": true
+        }
+      ]
+    ],
+    "experiments": {
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "5d2245c6-76b6-428e-aeee-57bd56251190"
+      }
+    },
+    "owner": "utocabs",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/5d2245c6-76b6-428e-aeee-57bd56251190"
+    }
+  }
+}
