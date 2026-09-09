@@ -3346,10 +3346,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const byType = Object.fromEntries(
       parts.map((part) => [part.type, part.value]),
     );
+    const hourRaw = Number(byType.hour);
     return {
       dateKey: `${byType.year}-${byType.month}-${byType.day}`,
-      hour: Number(byType.hour),
+      hour: hourRaw === 24 ? 0 : hourRaw,
       minute: Number(byType.minute),
+      /** HH:MM wall-clock in Europe/London */
+      timeKey: `${String(hourRaw === 24 ? 0 : hourRaw).padStart(2, "0")}:${String(byType.minute).padStart(2, "0")}`,
     };
   };
 
@@ -4271,6 +4274,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // their trip details right away (same PIN is used when the ride goes live)
       const bookingOtp = generateRidePin();
 
+      // Persist UK wall-clock text alongside pickup_at so confirmation emails
+      // (web-booker cron) show the same time the app displays in Europe/London.
+      const londonPickup = getLondonDateTimeParts(pickupTime);
+
       const insertData: any = {
         rider_id: riderId,
         rider_name: rider.fullName || null,
@@ -4285,6 +4292,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dropoff_latitude: dropoffLatitude ?? null,
         dropoff_longitude: dropoffLongitude ?? null,
         pickup_at: pickupTime.toISOString(),
+        pickup_date: londonPickup.dateKey,
+        pickup_time: londonPickup.timeKey,
         dropoff_by: finalDropoffTime.toISOString(),
         status: "scheduled",
         vehicle_type: vehicleType || "saloon",

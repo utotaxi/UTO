@@ -343,23 +343,34 @@ export default function RideTrackingScreen({ navigation }: any) {
     const parsedAcceptedAt = activeRide?.acceptedAt
       ? new Date(activeRide.acceptedAt).getTime()
       : NaN;
-    // Prefer the real accept timestamp from the server; fall back to "now"
-    // for this ride only so the countdown is always visible after assign.
+    // Anchor the 1-minute window on the server's real accept timestamp.
+    // We deliberately do NOT fall back to Date.now() when acceptedAt is
+    // missing. On a fresh accept the RideContext handlers always populate
+    // acceptedAt, so a missing value means the rider reopened the app
+    // mid-flight before the accept timestamp was rehydrated from the
+    // server. Restarting at Date.now() would wrongly show 60s again.
+    // Instead, leave the anchor empty and wait — loadStoredRides and the
+    // polling safety-net both deliver acceptedAt within ~1-2s, and since
+    // acceptedAt is a dependency of this effect we re-anchor on the real
+    // value and the countdown resumes exactly where it left off.
     if (Number.isFinite(parsedAcceptedAt) && parsedAcceptedAt > 0) {
-      // Ignore absurdly old timestamps (e.g. leaked from a previous ride).
+      // Ignore absurdly old timestamps (e.g. leaked from a previous ride)
+      // without replacing them with a fake Date.now() anchor.
       const ageMs = Date.now() - parsedAcceptedAt;
       if (ageMs >= 0 && ageMs < 10 * 60 * 1000) {
         freeCancelAnchorRef.current = parsedAcceptedAt;
-      } else if (!freeCancelAnchorRef.current) {
-        freeCancelAnchorRef.current = Date.now();
       }
-    } else if (!freeCancelAnchorRef.current) {
-      freeCancelAnchorRef.current = Date.now();
     }
 
     const FREE_CANCEL_MS = 60_000;
     const tick = () => {
-      const anchor = freeCancelAnchorRef.current || Date.now();
+      const anchor = freeCancelAnchorRef.current;
+      if (!anchor) {
+        // No real accept timestamp yet — hide the countdown rather than
+        // show a misleading 60s. It appears once acceptedAt lands.
+        setFreeCancelSecondsLeft(null);
+        return;
+      }
       const remainingMs = FREE_CANCEL_MS - (Date.now() - anchor);
       const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
       setFreeCancelSecondsLeft(remainingSec > 0 ? remainingSec : 0);
@@ -1868,6 +1879,8 @@ export default function RideTrackingScreen({ navigation }: any) {
   const showFreeCancelCountdown =
     !!cancelFeeState.driverAssigned &&
     currentStatus !== "pending" &&
+    currentStatus !== "arrived" &&
+    currentStatus !== "at_pickup" &&
     currentStatus !== "in_progress" &&
     currentStatus !== "completed" &&
     currentStatus !== "cancelled" &&

@@ -44,6 +44,7 @@ function setupCors(app: express.Application) {
     allowedOrigins.add("https://www.uto.taxi");
     allowedOrigins.add("https://uto.taxi");
     allowedOrigins.add("https://api.uto.taxi");
+    allowedOrigins.add("https://uto-server.fly.dev");
 
     if (!origin || allowedOrigins.has(origin) || isLocalhost) {
       res.header("Access-Control-Allow-Origin", origin || "*");
