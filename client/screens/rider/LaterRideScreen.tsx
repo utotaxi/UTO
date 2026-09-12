@@ -536,7 +536,8 @@ export default function LaterRideScreen({ navigation }: any) {
               placeholder="Enter pickup location"
               onChangeText={setPickup}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setPickup(place.mainText);
+                // The full formatted address is written to the input by the
+                // autocomplete component via onChangeText; capture coordinates only.
                 if (place.latitude && place.longitude) {
                   setPickupLocation({
                     latitude: place.latitude,
@@ -572,7 +573,9 @@ export default function LaterRideScreen({ navigation }: any) {
                         v.id === via.id
                           ? {
                               ...v,
-                              address: place.mainText,
+                              // The full formatted address is written to the
+                              // input by the autocomplete component via
+                              // onChangeText; capture coordinates here.
                               latitude: place.latitude,
                               longitude: place.longitude,
                             }
@@ -624,7 +627,8 @@ export default function LaterRideScreen({ navigation }: any) {
               placeholder="Where to?"
               onChangeText={setDropoff}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setDropoff(place.mainText);
+                // The full formatted address is written to the input by the
+                // autocomplete component via onChangeText; capture coordinates only.
                 if (place.latitude && place.longitude) {
                   setDropoffLocation({
                     latitude: place.latitude,

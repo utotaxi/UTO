@@ -781,7 +781,9 @@ export default function AirportBookingScreen({ navigation }: any) {
               placeholder="Enter pickup location"
               onChangeText={setPickup}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setPickup(place.mainText);
+                // Note: the full formatted address is written to the input
+                // by the autocomplete component via onChangeText; here we only
+                // capture coordinates.
                 if (place.latitude && place.longitude) {
                   setPickupLocation({
                     latitude: place.latitude,
@@ -803,7 +805,8 @@ export default function AirportBookingScreen({ navigation }: any) {
               placeholder="Enter drop-off location"
               onChangeText={setDropoff}
               onSelectLocation={(place: PlaceSuggestion) => {
-                setDropoff(place.mainText);
+                // The full formatted address is written to the input by the
+                // autocomplete component via onChangeText; capture coordinates only.
                 if (place.latitude && place.longitude) {
                   setDropoffLocation({
                     latitude: place.latitude,
@@ -1283,7 +1286,8 @@ export default function AirportBookingScreen({ navigation }: any) {
                       placeholder="Return pickup location"
                       onChangeText={setReturnPickup}
                       onSelectLocation={(place: PlaceSuggestion) => {
-                        setReturnPickup(place.mainText);
+                        // The full formatted address is written to the input by
+                        // the autocomplete component via onChangeText.
                         if (place.latitude && place.longitude)
                           setReturnPickupLocation({
                             latitude: place.latitude,
@@ -1304,7 +1308,8 @@ export default function AirportBookingScreen({ navigation }: any) {
                       placeholder="Return drop-off location"
                       onChangeText={setReturnDropoff}
                       onSelectLocation={(place: PlaceSuggestion) => {
-                        setReturnDropoff(place.mainText);
+                        // The full formatted address is written to the input by
+                        // the autocomplete component via onChangeText.
                         if (place.latitude && place.longitude)
                           setReturnDropoffLocation({
                             latitude: place.latitude,
