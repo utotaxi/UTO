@@ -2088,6 +2088,7 @@ export default function RideRequestScreen({ navigation, route }: any) {
       const { error: initError } = await initPaymentSheet({
         setupIntentClientSecret: clientSecret,
         merchantDisplayName: "UTO Rides",
+        returnURL: "uto://stripe-redirect",
         style: "alwaysDark",
       });
 

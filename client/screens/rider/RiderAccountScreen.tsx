@@ -150,6 +150,7 @@ export default function RiderAccountScreen({ navigation }: any) {
       const initProps = await initPaymentSheet({
         merchantDisplayName: "UTO Rides",
         setupIntentClientSecret: clientSecret,
+        returnURL: "uto://stripe-redirect",
       });
 
       if (initProps.error) {

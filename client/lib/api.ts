@@ -356,18 +356,35 @@ export const api = {
       return res.json();
     },
 
+    async getConfig(): Promise<{
+      mode: "live" | "test" | "unknown";
+      publishableKey: string | null;
+    }> {
+      const res = await apiRequest("GET", "/api/payments/config");
+      return res.json();
+    },
+
     async createIntent(
       amount: number,
-      customerId?: string,
-      options?: { rideId?: string; captureMethod?: "automatic" | "manual" },
+      options?: {
+        userId?: string;
+        customerId?: string;
+        rideId?: string;
+        captureMethod?: "automatic" | "manual";
+      },
     ): Promise<{ clientSecret: string; paymentIntentId: string }> {
       const res = await apiRequest("POST", "/api/payments/create-intent", {
         amount,
-        customerId,
+        userId: options?.userId,
+        customerId: options?.customerId,
         rideId: options?.rideId,
         captureMethod: options?.captureMethod || "manual",
       });
-      return res.json();
+      const data = await res.json();
+      if (!data.clientSecret) {
+        throw new Error(data.error || "Failed to create payment intent");
+      }
+      return data;
     },
 
     async authorizeRide(
@@ -391,7 +408,11 @@ export const api = {
       const res = await apiRequest("POST", "/api/payments/setup-intent", {
         userId,
       });
-      return res.json();
+      const data = await res.json();
+      if (!data.clientSecret) {
+        throw new Error(data.error || "Failed to create setup intent");
+      }
+      return data;
     },
 
     async confirm(

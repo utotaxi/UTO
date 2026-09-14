@@ -34,6 +34,19 @@ if (secretKey && publishableKey) {
   );
 }
 
+export function getStripePublicConfig(): {
+  mode: "live" | "test" | "unknown";
+  publishableKey: string | null;
+} {
+  const mode = serverIsLive ? "live" : serverIsTest ? "test" : "unknown";
+  const keyMatchesMode =
+    (serverIsLive && clientIsLive) || (serverIsTest && clientIsTest);
+  return {
+    mode,
+    publishableKey: keyMatchesMode ? publishableKey : null,
+  };
+}
+
 export const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: "2026-01-28.clover" as any,
@@ -79,7 +92,13 @@ export async function validateStripeCustomer(
 
   try {
     // Try to retrieve the customer to verify it exists in the current mode
-    await stripe.customers.retrieve(currentCustomerId);
+    const customer = await stripe.customers.retrieve(currentCustomerId);
+    if ((customer as { deleted?: boolean }).deleted) {
+      console.warn(
+        `♻️ Stripe customer ${currentCustomerId} is deleted. Re-creating for ${email}...`,
+      );
+      return createCustomer(email, name);
+    }
     return currentCustomerId; // Valid — same mode
   } catch (error: any) {
     if (isModeMismatchError(error)) {
@@ -122,11 +141,10 @@ export async function createPaymentIntent(
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency,
-      customer: customerId,
+      ...(customerId ? { customer: customerId } : {}),
       capture_method: captureMethod,
-      automatic_payment_methods: {
-        enabled: true,
-      },
+      payment_method_types: ["card"],
+      setup_future_usage: "off_session",
       ...(options?.rideId
         ? {
             description: `Ride authorization for ride ${options.rideId}`,
@@ -282,6 +300,7 @@ export async function createSetupIntent(
     const setupIntent = await stripe.setupIntents.create({
       customer: customerId,
       payment_method_types: ["card"],
+      usage: "off_session",
     });
 
     return {

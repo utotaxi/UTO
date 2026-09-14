@@ -19,6 +19,7 @@ import {
   getPaymentMethods,
   refundPayment,
   releaseAuthorization,
+  getStripePublicConfig,
   validateStripeCustomer,
 } from "./stripe";
 import {
@@ -1899,22 +1900,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/payments/config", (_req: Request, res: Response) => {
+    res.json(getStripePublicConfig());
+  });
+
   app.post(
     "/api/payments/create-intent",
     async (req: Request, res: Response) => {
       try {
-        const { amount, customerId, rideId, captureMethod } = req.body;
+        const { amount, customerId, userId, rideId, captureMethod } = req.body;
 
         if (!amount || amount <= 0) {
           return res.status(400).json({ error: "Invalid amount" });
         }
 
+        let resolvedCustomerId: string | undefined =
+          typeof customerId === "string" && customerId ? customerId : undefined;
+
+        // Prefer the signed-in user so we never attach a stale test/live
+        // customer ID from the mobile client to a PaymentIntent.
+        if (userId) {
+          const user = await storage.getUser(userId as string);
+          if (!user) return res.status(404).json({ error: "User not found" });
+
+          const validCustomerId = await validateStripeCustomer(
+            user.stripeCustomerId,
+            user.email,
+            user.fullName || "User",
+          );
+          if (validCustomerId && validCustomerId !== user.stripeCustomerId) {
+            await storage.updateUser(userId as string, {
+              stripeCustomerId: validCustomerId,
+            });
+          }
+          if (!validCustomerId) {
+            return res
+              .status(500)
+              .json({ error: "Failed to create Stripe customer" });
+          }
+          resolvedCustomerId = validCustomerId;
+        }
+
         // Default to manual capture so booking only places a hold; money is
         // taken later on complete / no-show / late rider cancel.
-        const result = await createPaymentIntent(amount, "gbp", customerId, {
-          captureMethod: captureMethod === "automatic" ? "automatic" : "manual",
-          rideId: typeof rideId === "string" ? rideId : undefined,
-        });
+        const result = await createPaymentIntent(
+          amount,
+          "gbp",
+          resolvedCustomerId,
+          {
+            captureMethod:
+              captureMethod === "automatic" ? "automatic" : "manual",
+            rideId: typeof rideId === "string" ? rideId : undefined,
+          },
+        );
         if (!result) {
           return res
             .status(500)
@@ -1922,9 +1960,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         res.json(result);
-      } catch (error) {
+      } catch (error: any) {
         console.error("Create payment intent error:", error);
-        res.status(500).json({ error: "Failed to create payment intent" });
+        res.status(500).json({
+          error: error?.message || "Failed to create payment intent",
+        });
       }
     },
   );
@@ -2077,9 +2117,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         res.json(result);
-      } catch (error) {
+      } catch (error: any) {
         console.error("Create setup intent error:", error);
-        res.status(500).json({ error: "Failed to create setup intent" });
+        res.status(500).json({
+          error: error?.message || "Failed to create setup intent",
+        });
       }
     },
   );

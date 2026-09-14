@@ -21,7 +21,7 @@ import {
 } from "@/lib/backgroundLocation";
 
 import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient } from "@/lib/query-client";
+import { getApiUrl, queryClient } from "@/lib/query-client";
 import { StripeProvider } from "@stripe/stripe-react-native";
 
 import RootStackNavigator from "@/navigation/RootStackNavigator";
@@ -41,6 +41,10 @@ SplashScreen.preventAutoHideAsync();
 
 export default function App() {
   const [iconsLoaded, setIconsLoaded] = useState(false);
+  const [stripeReady, setStripeReady] = useState(false);
+  const [stripePublishableKey, setStripePublishableKey] = useState(
+    process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
+  );
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -64,10 +68,37 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if ((fontsLoaded || fontError) && iconsLoaded) {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    (async () => {
+      try {
+        const res = await fetch(`${getApiUrl()}/api/payments/config`, {
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (!cancelled && data?.publishableKey) {
+          setStripePublishableKey(data.publishableKey);
+        }
+      } catch (error) {
+        console.warn("Failed to load Stripe config from server:", error);
+      } finally {
+        clearTimeout(timeout);
+        if (!cancelled) setStripeReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, []);
+
+  useEffect(() => {
+    if ((fontsLoaded || fontError) && iconsLoaded && stripeReady) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError, iconsLoaded]);
+  }, [fontsLoaded, fontError, iconsLoaded, stripeReady]);
 
   useEffect(() => {
     // Initialize background location task
@@ -86,14 +117,15 @@ export default function App() {
     return null;
   }
 
-  if (!iconsLoaded) {
+  if (!iconsLoaded || !stripeReady) {
     return <View style={styles.loading} />;
   }
 
   return (
     <QueryClientProvider client={queryClient}>
       <StripeProvider
-        publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""}
+        publishableKey={stripePublishableKey}
+        urlScheme="uto"
       >
         <SafeAreaProvider>
           <GestureHandlerRootView style={styles.root}>

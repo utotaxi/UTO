@@ -591,17 +591,28 @@ export default function AirportBookingScreen({ navigation }: any) {
       ? Math.max(0, estimatedFare - couponDiscount)
       : null;
     try {
+      let hasSavedCard = false;
+      if (user?.id) {
+        try {
+          const cards = await api.payments.getSavedCards(user.id);
+          hasSavedCard = Array.isArray(cards) && cards.length > 0;
+        } catch (_) {
+          hasSavedCard = false;
+        }
+      }
+
       const collectScheduledPayment = async (amount: number, label: string) => {
-        const paymentIntent = await api.payments.createIntent(
-          amount,
-          user?.stripeCustomerId,
-          {
-            captureMethod: "manual",
-          },
-        );
+        if (hasSavedCard) {
+          return null;
+        }
+        const paymentIntent = await api.payments.createIntent(amount, {
+          userId: user?.id,
+          captureMethod: "manual",
+        });
         const { error: initError } = await initPaymentSheet({
           paymentIntentClientSecret: paymentIntent.clientSecret,
           merchantDisplayName: "UTO Rides",
+          returnURL: "uto://stripe-redirect",
           style: "alwaysDark",
         });
 

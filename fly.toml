@@ -6,6 +6,7 @@ primary_region = "lhr"
 
 [env]
   PORT = "8080"
+  EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_live_51TER5DH84iWPEJxiL69ex2yw4e4yESIU0feOh1s5sb6zIKyxQh7UmoPdQTGmoTxLzhvJflPyb5yzQIhtwnjtvM9K00BOHZemUe"
 
 [[services]]
   internal_port = 8080

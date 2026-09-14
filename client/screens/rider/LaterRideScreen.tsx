@@ -339,38 +339,50 @@ export default function LaterRideScreen({ navigation }: any) {
     try {
       let paymentIntentId: string | null = null;
       if (finalFare && finalFare > 0) {
-        const paymentIntent = await api.payments.createIntent(
-          finalFare,
-          user?.stripeCustomerId,
-          {
+        let hasSavedCard = false;
+        if (user?.id) {
+          try {
+            const cards = await api.payments.getSavedCards(user.id);
+            hasSavedCard = Array.isArray(cards) && cards.length > 0;
+          } catch (_) {
+            hasSavedCard = false;
+          }
+        }
+
+        // Saved cards are authorized server-side in /api/later-bookings.
+        // Only open PaymentSheet when the rider has no card on file.
+        if (!hasSavedCard) {
+          const paymentIntent = await api.payments.createIntent(finalFare, {
+            userId: user?.id,
             captureMethod: "manual",
-          },
-        );
-        const { error: initError } = await initPaymentSheet({
-          paymentIntentClientSecret: paymentIntent.clientSecret,
-          merchantDisplayName: "UTO Rides",
-          style: "alwaysDark",
-        });
+          });
+          const { error: initError } = await initPaymentSheet({
+            paymentIntentClientSecret: paymentIntent.clientSecret,
+            merchantDisplayName: "UTO Rides",
+            returnURL: "uto://stripe-redirect",
+            style: "alwaysDark",
+          });
 
-        if (initError) {
-          Alert.alert(
-            "Payment Error",
-            initError.message || "Could not start card payment.",
-          );
-          return;
+          if (initError) {
+            Alert.alert(
+              "Payment Error",
+              initError.message || "Could not start card payment.",
+            );
+            return;
+          }
+
+          const { error: presentError } = await presentPaymentSheet();
+          if (presentError) {
+            Alert.alert(
+              "Payment Required",
+              presentError.message ||
+                "Please complete card payment to schedule this ride.",
+            );
+            return;
+          }
+
+          paymentIntentId = paymentIntent.paymentIntentId;
         }
-
-        const { error: presentError } = await presentPaymentSheet();
-        if (presentError) {
-          Alert.alert(
-            "Payment Required",
-            presentError.message ||
-              "Please complete card payment to schedule this ride.",
-          );
-          return;
-        }
-
-        paymentIntentId = paymentIntent.paymentIntentId;
       }
 
       const res = await fetch(`${getApiUrl()}/api/later-bookings`, {
