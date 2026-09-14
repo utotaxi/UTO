@@ -19,6 +19,7 @@ import {
   getPaymentMethods,
   refundPayment,
   releaseAuthorization,
+  validateStripeCustomer,
 } from "./stripe";
 import {
   insertUserSchema,
@@ -1943,17 +1944,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId as string);
         if (!user) return res.status(404).json({ error: "User not found" });
 
-        let customerId = user.stripeCustomerId;
-        if (!customerId) {
-          customerId = await createCustomer(
-            user.email,
-            user.fullName || "User",
-          );
-          if (customerId) {
-            await storage.updateUser(userId as string, {
-              stripeCustomerId: customerId,
-            });
-          }
+        // Validate customer exists in current Stripe mode (handles test→live migration)
+        let customerId = await validateStripeCustomer(
+          user.stripeCustomerId,
+          user.email,
+          user.fullName || "User",
+        );
+        if (customerId && customerId !== user.stripeCustomerId) {
+          await storage.updateUser(userId as string, {
+            stripeCustomerId: customerId,
+          });
         }
 
         if (!customerId) {
@@ -1993,7 +1993,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.json([]);
         }
 
-        const methods = await getPaymentMethods(user.stripeCustomerId);
+        // Validate customer exists in current Stripe mode (handles test→live migration).
+        // If the customer was re-created, cards won't carry over — that's expected;
+        // the rider will see an empty list and can add a new card.
+        const validCustomerId = await validateStripeCustomer(
+          user.stripeCustomerId,
+          user.email,
+          user.fullName || "User",
+        );
+        if (validCustomerId && validCustomerId !== user.stripeCustomerId) {
+          await storage.updateUser(req.params.userId as string, {
+            stripeCustomerId: validCustomerId,
+          });
+        }
+        if (!validCustomerId) {
+          return res.json([]);
+        }
+
+        const methods = await getPaymentMethods(validCustomerId);
         res.json(methods);
       } catch (error) {
         console.error("Get payment methods error:", error);
@@ -2036,19 +2053,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ error: "User not found" });
         }
 
-        let customerId = user.stripeCustomerId;
+        // Validate customer exists in current Stripe mode (handles test→live migration)
+        let customerId = await validateStripeCustomer(
+          user.stripeCustomerId,
+          user.email,
+          user.fullName || "User",
+        );
+        if (customerId && customerId !== user.stripeCustomerId) {
+          // Customer was re-created in the correct mode — persist the new ID
+          await storage.updateUser(userId, { stripeCustomerId: customerId });
+        }
         if (!customerId) {
-          customerId = await createCustomer(
-            user.email,
-            user.fullName || "User",
-          );
-          if (customerId) {
-            await storage.updateUser(userId, { stripeCustomerId: customerId });
-          } else {
-            return res
-              .status(500)
-              .json({ error: "Failed to create Stripe customer" });
-          }
+          return res
+            .status(500)
+            .json({ error: "Failed to create Stripe customer" });
         }
 
         const result = await createSetupIntent(customerId);
@@ -4186,22 +4204,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Rider not found" });
       }
 
-      let stripeCustomerId = rider.stripeCustomerId || null;
-      if (!stripeCustomerId) {
-        try {
-          stripeCustomerId = await createCustomer(
-            rider.email,
-            rider.fullName || "Rider",
-          );
-          if (stripeCustomerId) {
-            await storage.updateUser(rider.id, { stripeCustomerId });
-          }
-        } catch (customerErr) {
-          console.warn(
-            "⚠️ Failed to create Stripe customer for scheduled booking:",
-            customerErr,
-          );
+      // Validate customer exists in current Stripe mode (handles test→live migration)
+      let stripeCustomerId: string | null = null;
+      try {
+        stripeCustomerId = await validateStripeCustomer(
+          rider.stripeCustomerId,
+          rider.email,
+          rider.fullName || "Rider",
+        );
+        if (stripeCustomerId && stripeCustomerId !== rider.stripeCustomerId) {
+          await storage.updateUser(rider.id, { stripeCustomerId });
         }
+      } catch (customerErr) {
+        console.warn(
+          "⚠️ Failed to validate/create Stripe customer for scheduled booking:",
+          customerErr,
+        );
       }
 
       // Authoritative fare: re-quote server-side via the admin pricing

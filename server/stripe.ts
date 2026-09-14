@@ -6,11 +6,105 @@ if (!process.env.STRIPE_SECRET_KEY) {
   console.warn("STRIPE_SECRET_KEY is not set. Stripe payments will not work.");
 }
 
+// Detect test/live mode mismatch between server secret key and client publishable key.
+// The mobile app (EAS build) uses the EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY baked into
+// the binary. If the server secret key mode doesn't match, all Stripe API calls will
+// fail with "a similar object exists in test mode, but a live mode key was used".
+const secretKey = process.env.STRIPE_SECRET_KEY || "";
+const publishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
+const serverIsLive = secretKey.startsWith("sk_live_");
+const serverIsTest = secretKey.startsWith("sk_test_");
+const clientIsLive = publishableKey.startsWith("pk_live_");
+const clientIsTest = publishableKey.startsWith("pk_test_");
+
+if (secretKey && publishableKey) {
+  if ((serverIsLive && clientIsTest) || (serverIsTest && clientIsLive)) {
+    console.error(
+      "🚨 STRIPE KEY MODE MISMATCH! " +
+        `Server secret key is ${serverIsLive ? "LIVE" : "TEST"} mode but ` +
+        `client publishable key is ${clientIsLive ? "LIVE" : "TEST"} mode. ` +
+        "All payment operations will fail. Update STRIPE_SECRET_KEY to match the client mode.",
+    );
+  }
+} else if (secretKey && !publishableKey) {
+  console.warn(
+    "⚠️ EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY is not set on the server. " +
+      "Cannot verify key-mode consistency. Ensure the mobile app's publishable key " +
+      `matches the server's ${serverIsLive ? "LIVE" : "TEST"} mode.`,
+  );
+}
+
 export const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: "2026-01-28.clover" as any,
     })
   : null;
+
+/**
+ * Check whether a Stripe error is a "resource_missing" error caused by using
+ * a customer/object from the wrong mode (test vs live). This typically happens
+ * when the STRIPE_SECRET_KEY is switched from test to live but the database
+ * still contains customer IDs created in test mode.
+ */
+function isModeMismatchError(error: any): boolean {
+  if (!error) return false;
+  const msg = (error.message || "").toLowerCase();
+  return (
+    error.code === "resource_missing" ||
+    (msg.includes("no such customer") && msg.includes("test mode")) ||
+    (msg.includes("no such customer") && msg.includes("live mode")) ||
+    (msg.includes("similar object exists in test mode")) ||
+    (msg.includes("similar object exists in live mode"))
+  );
+}
+
+/**
+ * Validate a Stripe customer ID still works with the current API key mode.
+ * If the customer was created in a different mode (e.g. test) and the server
+ * now uses a live key, re-create the customer and return the new ID.
+ *
+ * @returns The validated (or newly created) Stripe customer ID, or null on failure.
+ */
+export async function validateStripeCustomer(
+  currentCustomerId: string | null | undefined,
+  email: string,
+  name: string,
+): Promise<string | null> {
+  if (!stripe) return null;
+
+  if (!currentCustomerId) {
+    // No customer yet — create one
+    return createCustomer(email, name);
+  }
+
+  try {
+    // Try to retrieve the customer to verify it exists in the current mode
+    await stripe.customers.retrieve(currentCustomerId);
+    return currentCustomerId; // Valid — same mode
+  } catch (error: any) {
+    if (isModeMismatchError(error)) {
+      console.warn(
+        `♻️ Stripe customer ${currentCustomerId} belongs to a different mode. ` +
+          `Re-creating customer for ${email} in current mode...`,
+      );
+      try {
+        const newId = await createCustomer(email, name);
+        if (newId) {
+          console.log(
+            `✅ Re-created Stripe customer: ${currentCustomerId} → ${newId}`,
+          );
+        }
+        return newId;
+      } catch (createErr) {
+        console.error("Failed to re-create Stripe customer:", createErr);
+        return null;
+      }
+    }
+    // Some other error — log and return null so callers can handle gracefully
+    console.error("Error validating Stripe customer:", error.message || error);
+    return null;
+  }
+}
 
 export async function createPaymentIntent(
   amount: number,
