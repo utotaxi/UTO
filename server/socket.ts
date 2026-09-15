@@ -647,6 +647,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
       driverSocketId?: string;
       /** ISO timestamp when a driver accepted — used for cancel-fee timing. */
       acceptedAt?: string;
+      /** ISO timestamp when the driver marked arrived — anchors the 1-min
+       * post-arrival free-cancel window for the cancel-fee decision. */
+      arrivedAt?: string;
       /** Keep rebuilding the nearby-driver queue until this epoch ms. */
       dispatchRetryUntil?: number;
     }
@@ -3853,8 +3856,10 @@ export function setupSocketIO(httpServer: HTTPServer) {
             updateData.cancelled_at = new Date().toISOString();
 
             // ── Server-side cancellation fee processing ──────────────────────
-            // Rider fee when the rider cancels after 1 free minute from driver accept.
-            // Charge the full payable fare (after discount when applicable).
+            // Rider fee when the rider cancels outside the 1 free minute that
+            // starts when the driver MARKS ARRIVED at the pickup. En-route
+            // cancels (before arrival) and post-window cancels are charged the
+            // full payable fare (after discount when applicable).
             // Driver-initiated cancels must NEVER charge the rider (ASAP or otherwise).
             try {
               // Only select columns that exist on production rides table.
@@ -3899,28 +3904,26 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 }
               }
 
-              // Resolve accept time from DB, in-memory dispatch state, or client hint.
-              // Missing accepted_at used to silently skip the card charge even when
-              // the rider app countdown had already ended.
-              const memAcceptedAt = activeRides.get(update.rideId)?.acceptedAt;
-              const clientAcceptedAtRaw =
-                (update as any).acceptedAt || (update as any).accepted_at;
-              const acceptedAtIso =
-                cancelledRide?.accepted_at ||
-                memAcceptedAt ||
-                (typeof clientAcceptedAtRaw === "string"
-                  ? clientAcceptedAtRaw
+              // Resolve ARRIVAL time from DB, in-memory dispatch state, or
+              // client hint. The 1 free minute starts when the driver marks
+              // arrived — a missing arrived_at means the driver had not arrived
+              // (en-route cancel), so the free window never opened and a fee
+              // applies once a driver was assigned.
+              const memArrivedAt = activeRides.get(update.rideId)?.arrivedAt;
+              const clientArrivedAtRaw =
+                (update as any).driverArrivedAt || (update as any).arrived_at;
+              const arrivedAtIso =
+                cancelledRide?.arrived_at ||
+                memArrivedAt ||
+                (typeof clientArrivedAtRaw === "string"
+                  ? clientArrivedAtRaw
                   : null);
-              let acceptedAt = acceptedAtIso
-                ? new Date(acceptedAtIso).getTime()
+              let arrivedAt = arrivedAtIso
+                ? new Date(arrivedAtIso).getTime()
                 : 0;
-              if (!Number.isFinite(acceptedAt) || acceptedAt <= 0)
-                acceptedAt = 0;
-              const acceptedElapsedMs = acceptedAt
-                ? Date.now() - acceptedAt
-                : 0;
+              if (!Number.isFinite(arrivedAt) || arrivedAt <= 0) arrivedAt = 0;
+              const arrivedElapsedMs = arrivedAt ? Date.now() - arrivedAt : 0;
               const driverHasAccepted =
-                acceptedAt > 0 ||
                 !!cancelledRide?.driver_id ||
                 !!resolvedDriverId ||
                 [
@@ -3931,22 +3934,20 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   "in_progress",
                 ].includes(String(cancelledRide?.status || "").toLowerCase());
               const clientExpectsFee = !!(update as any).expectsCancellationFee;
-              // 1 free minute from accept. If the app countdown already expired
-              // (expectsCancellationFee) and a driver was assigned, charge even
-              // when accepted_at was not persisted.
+              // 1 free minute from driver arrival. En-route cancels (no
+              // arrived_at) are never inside the free window → fee applies.
+              const withinArrivalFreeMinute =
+                arrivedAt > 0 && arrivedElapsedMs < 60_000;
               const isAfterFreeMinute =
-                driverHasAccepted &&
-                ((acceptedAt > 0 && acceptedElapsedMs >= 60_000) ||
-                  (clientExpectsFee &&
-                    (!!cancelledRide?.driver_id || !!resolvedDriverId)));
-              // Persist accepted_at when we recovered it from memory/client so
+                driverHasAccepted && !withinArrivalFreeMinute;
+              // Persist arrived_at when we recovered it from memory/client so
               // later reconciliation and audits stay consistent.
               if (
-                !cancelledRide?.accepted_at &&
-                acceptedAt > 0 &&
-                Number.isFinite(acceptedAt)
+                !cancelledRide?.arrived_at &&
+                arrivedAt > 0 &&
+                Number.isFinite(arrivedAt)
               ) {
-                updateData.accepted_at = new Date(acceptedAt).toISOString();
+                updateData.arrived_at = new Date(arrivedAt).toISOString();
               }
               const cancelledByRaw = String(
                 (update as any).cancelledBy || "",
@@ -3992,8 +3993,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   "cancellation_fee_processing",
                   "prepaid_retained",
                 ].includes(cancellationPaymentStatus);
-              // Product rule: 1 free minute from driver accept, then full payable fare
-              // on rider cancel. Driver cancels never charge the rider.
+              // Product rule: 1 free minute from driver ARRIVAL, then full
+              // payable fare on rider cancel. En-route cancels (before arrival)
+              // are charged. Driver cancels never charge the rider.
               const shouldChargeCancellationFee =
                 !!cancelledRide &&
                 riderInitiatedCancellation &&
@@ -4001,7 +4003,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 isAfterFreeMinute &&
                 !alreadyProcessedRiderCancelFee;
               console.log(
-                `🧾 Cancel-fee decision ride=${update.rideId}: rider=${riderInitiatedCancellation}, afterFreeMin=${isAfterFreeMinute}, expectsFee=${clientExpectsFee}, acceptedAt=${acceptedAtIso || "none"}, elapsedMs=${acceptedElapsedMs}, driverId=${cancelledRide?.driver_id || resolvedDriverId || "none"}`,
+                `🧾 Cancel-fee decision ride=${update.rideId}: rider=${riderInitiatedCancellation}, afterFreeMin=${isAfterFreeMinute}, withinArrivalFreeMin=${withinArrivalFreeMinute}, expectsFee=${clientExpectsFee}, arrivedAt=${arrivedAtIso || "none"}, elapsedMs=${arrivedElapsedMs}, driverId=${cancelledRide?.driver_id || resolvedDriverId || "none"}`,
               );
 
               if (cancelledRide && alreadyProcessedRiderCancelFee) {
@@ -4321,7 +4323,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   (update as any).cancellationPolicy = "free_before_accept";
                 } else if (!isAfterFreeMinute) {
                   (update as any).cancellationPolicy =
-                    "free_minute_after_accept";
+                    "free_minute_after_arrival";
                 }
 
                 // Free / driver cancellation → release any card authorization hold so the
@@ -4532,11 +4534,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
         if (update.status === "arrived") {
           const driverArrivedAt = new Date().toISOString();
           console.log(
-            `⏱️ Driver arrived for ride ${update.rideId}. Notifying rider to start 10-minute free waiting timer.`,
+            `⏱️ Driver arrived for ride ${update.rideId}. Notifying rider to start the 1-minute free-cancel + 10-minute waiting timers.`,
           );
 
           // Enrich the update with driverArrivedAt so the rider app can start the countdown
           (update as any).driverArrivedAt = driverArrivedAt;
+          // Also stash it in memory so the cancel-fee branch can resolve the
+          // arrival time even if the DB arrived_at write hasn't landed yet.
+          if (rideInfo) {
+            rideInfo.arrivedAt = driverArrivedAt;
+          }
         }
 
         if (rideInfo) {

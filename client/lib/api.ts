@@ -84,6 +84,7 @@ export interface Ride {
   estimatedDuration?: number;
   distance?: number;
   paymentStatus?: string;
+  cancelled_by?: string;
 }
 
 export interface PlacePrediction {

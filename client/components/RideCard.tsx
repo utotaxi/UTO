@@ -79,6 +79,8 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
       case "completed":
         return "Completed";
       case "cancelled":
+        if (ride.cancelledBy === "driver") return "Cancelled by driver";
+        if (ride.cancelledBy === "rider") return "Cancelled by rider";
         return "Cancelled";
       case "in_progress":
         return "In Progress";

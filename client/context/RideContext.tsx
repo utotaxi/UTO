@@ -929,6 +929,8 @@ export interface Ride {
   discountedFare?: number;
   driverArrivedAt?: string;
   acceptedAt?: string;
+  /** Who cancelled this ride: "rider" | "driver" | "system" | undefined. */
+  cancelledBy?: string;
   /** True after assigned driver cancels while we rematch nearby drivers. */
   awaitingRematch?: boolean;
   createdAt: string;
@@ -2075,6 +2077,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
           paymentMethod: r.paymentMethod || undefined,
           paymentStatus: r.paymentStatus || undefined,
           paymentIntentId: r.paymentIntentId || undefined,
+          cancelledBy: r.cancelled_by || undefined,
           createdAt: normalizeBackendTimestamp(
             r.requestedAt || new Date().toISOString(),
           ),
@@ -2365,9 +2368,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
           status: "cancelled",
           cancelledBy: "rider",
           expectsCancellationFee: withPenalty,
-          // Help the server decide the free-cancel window even if accepted_at
-          // was not persisted on the rides row.
-          acceptedAt: rideToCancel.acceptedAt || undefined,
+          // Help the server decide the free-cancel window (1 min after the
+          // driver arrives) even if arrived_at was not persisted on the row.
+          driverArrivedAt: rideToCancel.driverArrivedAt || undefined,
         });
         emitted = true;
       } catch (err) {

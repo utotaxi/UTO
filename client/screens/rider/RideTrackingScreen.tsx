@@ -283,8 +283,11 @@ export default function RideTrackingScreen({ navigation }: any) {
     hasInitialized.current = true;
   }, []);
 
-  // ─── 1-minute free-cancel countdown after driver is assigned ───────────
-  // Must run for EVERY new ASAP accept (including Activity rebooks / rematches).
+  // ─── 1-minute free-cancel countdown after driver ARRIVES at pickup ─────
+  // Product rule: there is NO free cancel during the en-route phase —
+  // cancelling before the driver arrives incurs a fee. Once the driver
+  // marks "arrived", the rider gets 1 free minute to cancel; after that a
+  // fee applies. The window is anchored on the server's real driverArrivedAt.
   useEffect(() => {
     if (!activeRide?.id) {
       freeCancelAnchorRef.current = null;
@@ -303,7 +306,7 @@ export default function RideTrackingScreen({ navigation }: any) {
     const socketStatus = String(rideStatus || "").toLowerCase();
     const rideRowStatus = String(activeRide?.status || "").toLowerCase();
     // Prefer the more advanced of socket vs context status so a stale
-    // "pending" socket status cannot hide the countdown after accept —
+    // "pending" socket status cannot hide the countdown after arrival —
     // EXCEPT after driver-cancel rematch (context pending, no driver).
     const rematching =
       rideRowStatus === "pending" &&
@@ -323,42 +326,39 @@ export default function RideTrackingScreen({ navigation }: any) {
         ? socketStatus || rideRowStatus
         : rideRowStatus || socketStatus;
 
-    const driverAssigned =
-      ["accepted", "arrived", "at_pickup", "arriving"].includes(status) ||
-      (!!activeRide?.acceptedAt && status !== "pending") ||
-      ((!!(activeRide as any)?.driverName ||
-        !!(activeRide as any)?.driverId) &&
-        status !== "pending");
+    // The free window only exists once the driver is at the pickup.
+    const atPickup = status === "arrived" || status === "at_pickup";
 
-    if (!driverAssigned || status === "pending" || status === "in_progress") {
+    if (!atPickup) {
       if (status === "pending") {
         freeCancelAnchorRef.current = null;
         setFreeCancelSecondsLeft(null);
       } else if (status === "in_progress") {
         setFreeCancelSecondsLeft(0);
+      } else {
+        // En-route (accepted/arriving) — no free window, hide the countdown.
+        setFreeCancelSecondsLeft(null);
       }
       return;
     }
 
-    const parsedAcceptedAt = activeRide?.acceptedAt
-      ? new Date(activeRide.acceptedAt).getTime()
+    const parsedArrivedAt = activeRide?.driverArrivedAt
+      ? new Date(activeRide.driverArrivedAt).getTime()
       : NaN;
-    // Anchor the 1-minute window on the server's real accept timestamp.
-    // We deliberately do NOT fall back to Date.now() when acceptedAt is
-    // missing. On a fresh accept the RideContext handlers always populate
-    // acceptedAt, so a missing value means the rider reopened the app
-    // mid-flight before the accept timestamp was rehydrated from the
-    // server. Restarting at Date.now() would wrongly show 60s again.
-    // Instead, leave the anchor empty and wait — loadStoredRides and the
-    // polling safety-net both deliver acceptedAt within ~1-2s, and since
-    // acceptedAt is a dependency of this effect we re-anchor on the real
-    // value and the countdown resumes exactly where it left off.
-    if (Number.isFinite(parsedAcceptedAt) && parsedAcceptedAt > 0) {
+    // Anchor the 1-minute window on the server's real arrival timestamp.
+    // We deliberately do NOT fall back to Date.now() when driverArrivedAt
+    // is missing. Restarting at Date.now() would wrongly show 60s again if
+    // the rider reopens the app mid-countdown before the arrival timestamp
+    // rehydrates. Instead, leave the anchor empty and wait — loadStoredRides
+    // and the polling safety-net deliver driverArrivedAt within ~1-2s, and
+    // since driverArrivedAt is a dependency we re-anchor on the real value
+    // and the countdown resumes exactly where it left off.
+    if (Number.isFinite(parsedArrivedAt) && parsedArrivedAt > 0) {
       // Ignore absurdly old timestamps (e.g. leaked from a previous ride)
       // without replacing them with a fake Date.now() anchor.
-      const ageMs = Date.now() - parsedAcceptedAt;
+      const ageMs = Date.now() - parsedArrivedAt;
       if (ageMs >= 0 && ageMs < 10 * 60 * 1000) {
-        freeCancelAnchorRef.current = parsedAcceptedAt;
+        freeCancelAnchorRef.current = parsedArrivedAt;
       }
     }
 
@@ -366,8 +366,8 @@ export default function RideTrackingScreen({ navigation }: any) {
     const tick = () => {
       const anchor = freeCancelAnchorRef.current;
       if (!anchor) {
-        // No real accept timestamp yet — hide the countdown rather than
-        // show a misleading 60s. It appears once acceptedAt lands.
+        // No real arrival timestamp yet — hide the countdown rather than
+        // show a misleading 60s. It appears once driverArrivedAt lands.
         setFreeCancelSecondsLeft(null);
         return;
       }
@@ -382,10 +382,11 @@ export default function RideTrackingScreen({ navigation }: any) {
   }, [
     rideStatus,
     activeRide?.status,
-    activeRide?.acceptedAt,
+    activeRide?.driverArrivedAt,
     activeRide?.id,
     (activeRide as any)?.driverName,
     (activeRide as any)?.driverId,
+    (activeRide as any)?.acceptedAt,
   ]);
   // ─── 10-minute countdown timer when driver arrives ────────────────────
   useEffect(() => {
@@ -610,44 +611,31 @@ export default function RideTrackingScreen({ navigation }: any) {
   };
 
   const getCancelFeeState = () => {
-    // 1 free minute from the moment a driver is assigned; after that, full payable fare.
+    // Product rule: NO free cancel during the en-route phase — cancelling
+    // before the driver arrives incurs a fee. Once the driver marks arrived,
+    // the rider gets 1 free minute to cancel; after that, full payable fare.
     const status = getEffectiveRideStatus();
-    const acceptedAtMs =
-      freeCancelAnchorRef.current ||
-      (activeRide?.acceptedAt ? new Date(activeRide.acceptedAt).getTime() : 0);
     const driverAssigned =
       ["accepted", "arriving", "arrived", "at_pickup", "in_progress"].includes(
         status,
       ) ||
       !!(activeRide as any)?.driverName ||
       !!activeRide?.acceptedAt;
-    const withinFreeMinute =
-      driverAssigned &&
-      freeCancelSecondsLeft != null &&
-      freeCancelSecondsLeft > 0;
-    const freeSecondsRemaining = withinFreeMinute
-      ? freeCancelSecondsLeft
-      : driverAssigned &&
-          Number.isFinite(acceptedAtMs) &&
-          acceptedAtMs > 0 &&
-          Date.now() - acceptedAtMs < 60_000
-        ? Math.max(1, Math.ceil((60_000 - (Date.now() - acceptedAtMs)) / 1000))
-        : 0;
+    const atPickup = status === "arrived" || status === "at_pickup";
+    // The free window is live only at the pickup and while the countdown
+    // has real seconds remaining.
+    const freeWindowActive =
+      atPickup && freeCancelSecondsLeft != null && freeCancelSecondsLeft > 0;
+    const freeSecondsRemaining = freeWindowActive ? freeCancelSecondsLeft : 0;
     const fullFare = Number(
       (activeRide as any)?.estimatedPrice || activeRide?.farePrice || 0,
     );
     const discount = Math.max(0, Number(activeRide?.discountAmount || 0));
     const fareAmount = Math.max(0, Number((fullFare - discount).toFixed(2)));
-    // Only charge once we know the free window has ended. If the countdown
-    // has not started yet (just assigned), treat cancel as free in the UI.
-    const freeWindowSettled =
-      freeCancelSecondsLeft != null ||
-      (Number.isFinite(acceptedAtMs) && acceptedAtMs > 0);
+    // Fee applies whenever a driver is assigned and we are NOT inside the
+    // 1-minute post-arrival window (en-route, post-window, in-progress).
     const cancellationFeeApplies =
-      fareAmount > 0 &&
-      driverAssigned &&
-      freeWindowSettled &&
-      freeSecondsRemaining <= 0;
+      fareAmount > 0 && driverAssigned && !freeWindowActive;
 
     return {
       driverAssigned,
@@ -1877,13 +1865,7 @@ export default function RideTrackingScreen({ navigation }: any) {
   const currentStatus = getEffectiveRideStatus();
   const cancelFeeState = getCancelFeeState();
   const showFreeCancelCountdown =
-    !!cancelFeeState.driverAssigned &&
-    currentStatus !== "pending" &&
-    currentStatus !== "arrived" &&
-    currentStatus !== "at_pickup" &&
-    currentStatus !== "in_progress" &&
-    currentStatus !== "completed" &&
-    currentStatus !== "cancelled" &&
+    (currentStatus === "arrived" || currentStatus === "at_pickup") &&
     freeCancelSecondsLeft !== null &&
     freeCancelSecondsLeft > 0;
 
@@ -2028,7 +2010,7 @@ export default function RideTrackingScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* ─── 1-minute free cancellation countdown after assign ─── */}
+            {/* ─── 1-minute free cancellation countdown after driver arrival ─── */}
             {showFreeCancelCountdown && (
               <AnimatedView
                 style={[
