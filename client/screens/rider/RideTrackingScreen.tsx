@@ -112,6 +112,10 @@ export default function RideTrackingScreen({ navigation }: any) {
   const freeCancelAnchorRef = useRef<number | null>(null);
   /** Ride id the free-cancel anchor belongs to — reset on every new/rebooked ride. */
   const freeCancelRideIdRef = useRef<string | null>(null);
+  /** Stable anchor for the 10-minute waiting countdown (avoids resetting on re-renders). */
+  const waitingTimerAnchorRef = useRef<number | null>(null);
+  /** Ride id the waiting-timer anchor belongs to — reset on every new/rebooked ride. */
+  const waitingTimerRideIdRef = useRef<string | null>(null);
 
   const pulseScale = useSharedValue(1);
   const cancelScale = useSharedValue(1);
@@ -390,40 +394,71 @@ export default function RideTrackingScreen({ navigation }: any) {
   ]);
   // ─── 10-minute countdown timer when driver arrives ────────────────────
   useEffect(() => {
-    const status = rideStatus || activeRide?.status;
-    if (status !== "arrived") {
+    const socketStatus = String(rideStatus || "").toLowerCase();
+    const rideRowStatus = String(activeRide?.status || "").toLowerCase();
+    const atPickup =
+      socketStatus === "arrived" ||
+      socketStatus === "at_pickup" ||
+      rideRowStatus === "arrived" ||
+      rideRowStatus === "at_pickup";
+
+    // New ride id (rebook / rematch / fresh ASAP) → restart the countdown.
+    if (waitingTimerRideIdRef.current !== activeRide?.id) {
+      waitingTimerRideIdRef.current = activeRide?.id ?? null;
+      waitingTimerAnchorRef.current = null;
+    }
+
+    if (!activeRide?.id || !atPickup) {
+      waitingTimerAnchorRef.current = null;
       setWaitingSecondsLeft(null);
       return;
     }
 
-    // Calculate remaining seconds from driverArrivedAt
     const WAIT_DURATION_SECONDS = 10 * 60; // 10 minutes
-    let startTime: number;
 
-    if (activeRide?.driverArrivedAt) {
-      startTime = new Date(activeRide.driverArrivedAt).getTime();
-    } else {
-      // Fallback: start from now (if driverArrivedAt wasn't received)
-      startTime = Date.now();
+    // Anchor the 10-minute window on the server's real arrival timestamp.
+    // We only fall back to the local clock when driverArrivedAt is missing,
+    // invalid, or in the future (clock skew). A legitimately-old timestamp is
+    // kept so an already-expired wait correctly reads 00:00.
+    if (waitingTimerAnchorRef.current == null) {
+      const parsedArrivedAt = activeRide?.driverArrivedAt
+        ? new Date(activeRide.driverArrivedAt).getTime()
+        : NaN;
+      if (
+        Number.isFinite(parsedArrivedAt) &&
+        parsedArrivedAt > 0 &&
+        Date.now() - parsedArrivedAt >= 0
+      ) {
+        waitingTimerAnchorRef.current = parsedArrivedAt;
+      } else {
+        waitingTimerAnchorRef.current = Date.now();
+      }
     }
 
     const updateTimer = () => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const anchor = waitingTimerAnchorRef.current;
+      if (!anchor) {
+        setWaitingSecondsLeft(null);
+        return;
+      }
+      const elapsed = Math.floor((Date.now() - anchor) / 1000);
       const remaining = Math.max(0, WAIT_DURATION_SECONDS - elapsed);
       setWaitingSecondsLeft(remaining);
-      return remaining;
     };
 
     // Initial update
     updateTimer();
 
     // Update every second
-    const interval = setInterval(() => {
-      updateTimer();
-    }, 1000);
+    const interval = setInterval(updateTimer, 1000);
 
     return () => clearInterval(interval);
-  }, [rideStatus, activeRide?.status, activeRide?.driverArrivedAt]);
+  }, [
+    rideStatus,
+    activeRide?.status,
+    activeRide?.driverArrivedAt,
+    activeRide?.id,
+  ]);
 
   // Pulse animation for urgent timer (under 60 seconds)
   useEffect(() => {
@@ -2201,7 +2236,8 @@ export default function RideTrackingScreen({ navigation }: any) {
           )}
 
           {/* ─── Waiting Timer when driver has arrived ───────────────── */}
-          {currentStatus === "arrived" && waitingSecondsLeft !== null && (
+          {(currentStatus === "arrived" || currentStatus === "at_pickup") &&
+            waitingSecondsLeft !== null && (
             <AnimatedView
               entering={FadeIn.duration(400)}
               style={[
