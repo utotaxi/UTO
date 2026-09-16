@@ -3475,8 +3475,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return { payable: driverFareCol, discount: 0, full: driverFareCol };
     }
 
-    // App pattern: estimated_fare is payable, discount stored separately
-    // (activation engine reconstructs full as estimated_fare + discount_amount).
+    // App + web_booker rows store estimated_fare as the pre-discount (full)
+    // fare alongside discount_amount — there is no separate full-fare column.
+    // So subtract the coupon discount here to expose the payable fare, and
+    // keep `full` as the original pre-discount amount.
     if (estimated != null && estimated > 0) {
       if (altFull != null && altFull > estimated + 0.009 && discount > 0) {
         // estimated is payable, alt is full
@@ -3491,13 +3493,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const payable = getDiscountedFare(estimated, discount);
         return { payable, discount, full: estimated };
       }
-      // Default: estimated_fare is the payable amount (with or without coupon)
-      return {
-        payable: estimated,
-        discount,
-        full:
-          discount > 0 ? Number((estimated + discount).toFixed(2)) : estimated,
-      };
+      // Default: estimated_fare is the full fare → subtract the coupon discount.
+      const payable = getDiscountedFare(estimated, discount);
+      return { payable, discount, full: estimated };
     }
 
     if (altFull != null && altFull > 0) {

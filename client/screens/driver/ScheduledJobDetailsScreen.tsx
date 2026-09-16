@@ -1003,24 +1003,30 @@ export default function ScheduledJobDetailsScreen() {
         {booking.status === "driver_accepted" &&
           driverOwnsThis &&
           !tripInProgress &&
-          canStartTrip && (
+          !isExpiredRide && (
             <>
-              <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
-                <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
-              </Pressable>
-              <Pressable
-                style={s.acceptBtn}
-                onPress={openStartTripPinModal}
-                disabled={isStartingTrip}
-              >
-                {isStartingTrip ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={s.acceptBtnText}>
-                    Start Trip (Enter Rider PIN)
-                  </Text>
-                )}
-              </Pressable>
+              {canStartTrip && (
+                <>
+                  <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
+                    <Text style={s.driveBtnText}>
+                      Drive To Pickup Location
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={s.acceptBtn}
+                    onPress={openStartTripPinModal}
+                    disabled={isStartingTrip}
+                  >
+                    {isStartingTrip ? (
+                      <ActivityIndicator color="#000" />
+                    ) : (
+                      <Text style={s.acceptBtnText}>
+                        Start Trip (Enter Rider PIN)
+                      </Text>
+                    )}
+                  </Pressable>
+                </>
+              )}
               <Pressable
                 style={s.cancelBtn}
                 onPress={() => setShowCancelModal(true)}
