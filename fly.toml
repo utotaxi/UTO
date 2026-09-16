@@ -23,7 +23,6 @@ primary_region = "lhr"
   [[services.ports]]
     port = 443
     handlers = ["tls", "http"]
-    force_https = true
 
   [services.concurrency]
     type = "connections"
