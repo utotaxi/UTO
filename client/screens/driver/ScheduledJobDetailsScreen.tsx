@@ -22,6 +22,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useDriver } from "@/context/DriverContext";
 import { UTOColors } from "@/constants/theme";
 import { getSocket } from "@/lib/socket";
+import { resolveBookingDisplayFare } from "@shared/fare";
 
 const UTO_YELLOW = "#FFD000";
 const ACTIVATION_WINDOW_MS = 60 * 60 * 1000;
@@ -787,22 +788,7 @@ export default function ScheduledJobDetailsScreen() {
             </View>
             <Text style={s.fareText}>
               {(() => {
-                const discount = Math.max(
-                  0,
-                  Number(booking.discount_amount || 0),
-                );
-                const driverFare = Number(booking.driver_fare);
-                const estimated = Number(booking.estimated_fare);
-                const fareValue =
-                  Number.isFinite(driverFare) && driverFare > 0
-                    ? driverFare
-                    : Number.isFinite(estimated) && estimated > 0
-                      ? estimated
-                      : Math.max(
-                          0,
-                          Number(booking.full_fare || booking.fare || 0) -
-                            discount,
-                        );
+                const fareValue = resolveBookingDisplayFare(booking);
                 return fareValue > 0 ? `£${fareValue.toFixed(2)}` : "N/A";
               })()}
             </Text>
@@ -1008,9 +994,7 @@ export default function ScheduledJobDetailsScreen() {
               {canStartTrip && (
                 <>
                   <Pressable style={s.driveBtn} onPress={handleDriveToPickup}>
-                    <Text style={s.driveBtnText}>
-                      Drive To Pickup Location
-                    </Text>
+                    <Text style={s.driveBtnText}>Drive To Pickup Location</Text>
                   </Pressable>
                   <Pressable
                     style={s.acceptBtn}

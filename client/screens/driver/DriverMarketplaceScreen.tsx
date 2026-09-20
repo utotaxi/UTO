@@ -17,6 +17,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useDriver } from "@/context/DriverContext";
 import { getApiUrl } from "@/lib/query-client";
 import { getSocket } from "@/lib/socket";
+import { resolveBookingDisplayFare } from "@shared/fare";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 
 const UTO_YELLOW = "#FFD000";
@@ -109,16 +110,10 @@ function BookingCard({
     return v.charAt(0).toUpperCase() + v.slice(1);
   };
 
-  const fareValue = (() => {
-    const discount = Math.max(0, Number(item.discount_amount || 0));
-    const driverFare = Number(item.driver_fare);
-    const estimated = Number(item.estimated_fare);
-    if (Number.isFinite(driverFare) && driverFare > 0) return driverFare;
-    if (Number.isFinite(estimated) && estimated > 0) return estimated;
-    const full = Number((item as any).full_fare || (item as any).fare || 0);
-    if (Number.isFinite(full) && full > 0) return Math.max(0, full - discount);
-    return 0;
-  })();
+  // Coupon-adjusted payable fare (e.g. £100 with a £10 coupon → £90), from the
+  // shared helper so the marketplace, upcoming list and job details always
+  // agree.
+  const fareValue = resolveBookingDisplayFare(item);
   const fareStr = fareValue > 0 ? `£${fareValue.toFixed(2)}` : "N/A";
 
   return (
@@ -667,4 +662,3 @@ const s = StyleSheet.create({
   },
   lateText: { fontSize: 12, color: "#DC2626", fontWeight: "600" },
 });
-

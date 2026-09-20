@@ -338,6 +338,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS vias JSONB DEFAULT NULL;`,
     });
+    // later_bookings has carried coupon_code / discount_amount for a while, but
+    // web_booker never did — yet normalizeLaterBooking (which serves both to the
+    // driver marketplace and Upcoming screens) reads discount_amount off every
+    // row. A web booking with a coupon therefore had no discount to apply and
+    // the driver was shown the full pre-discount fare.
+    await supabase.rpc("exec_sql", {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS coupon_code TEXT DEFAULT NULL;`,
+    });
+    await supabase.rpc("exec_sql", {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS discount_amount NUMERIC DEFAULT 0;`,
+    });
+    await supabase.rpc("exec_sql", {
+      sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS full_fare NUMERIC DEFAULT NULL;`,
+    });
     console.log(
       "✅ Ensured later_bookings columns exist (including penalty & tracking fields)",
     );
@@ -3550,6 +3564,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? storedFare
           : 0;
     const driverFare = riderFare;
+
+    // A driver-visible fare that does not match the coupon is the exact symptom
+    // of a booking whose discount never reached the row. Log both sides so a
+    // mismatch is visible in the server logs instead of only on a phone.
+    if (discountAmount > 0 || resolvedDiscount > 0) {
+      console.log(
+        `💷 Booking ${booking?.id} (${sourceTable}) fare: full=${fullFare} discount=${resolvedDiscount || discountAmount} payable=${riderFare} → drivers see £${riderFare.toFixed(2)}`,
+      );
+    }
 
     // Prefer passenger/customer fields stored on the booking row (later_bookings /
     // web_booker) — these are the source of truth for marketplace & upcoming.

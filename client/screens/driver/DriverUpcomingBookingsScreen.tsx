@@ -17,6 +17,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useDriver } from "@/context/DriverContext";
 import { getApiUrl } from "@/lib/query-client";
 import { getSocket } from "@/lib/socket";
+import { resolveBookingDisplayFare } from "@shared/fare";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 
 const UTO_YELLOW = "#FFD000";
@@ -105,16 +106,10 @@ function UpcomingBookingCard({
   onDecline: (item: LaterBooking) => void;
   busyId: string | null;
 }) {
-  const fareValue = (() => {
-    const discount = Math.max(0, Number(item.discount_amount || 0));
-    const driverFare = Number(item.driver_fare);
-    const estimated = Number(item.estimated_fare);
-    if (Number.isFinite(driverFare) && driverFare > 0) return driverFare;
-    if (Number.isFinite(estimated) && estimated > 0) return estimated;
-    const full = Number((item as any).full_fare || (item as any).fare || 0);
-    if (Number.isFinite(full) && full > 0) return Math.max(0, full - discount);
-    return 0;
-  })();
+  // Coupon-adjusted payable fare (e.g. £100 with a £10 coupon → £90), from the
+  // shared helper so the marketplace, upcoming list and job details always
+  // agree.
+  const fareValue = resolveBookingDisplayFare(item);
   const fareStr = fareValue > 0 ? `£${fareValue.toFixed(2)}` : "N/A";
 
   let jobType = "Scheduled";
@@ -127,8 +122,7 @@ function UpcomingBookingCard({
   const isTerminal =
     status === "cancelled" || status === "completed" || status === "expired";
   const isUpcoming = msUntilPickup > 0 && !isTerminal;
-  const isExpired =
-    isTerminal || msUntilPickup <= 0 || status === "expired";
+  const isExpired = isTerminal || msUntilPickup <= 0 || status === "expired";
   const hoursLeft = Math.floor(msUntilPickup / (1000 * 60 * 60));
   const minutesLeft = Math.floor(
     (msUntilPickup % (1000 * 60 * 60)) / (1000 * 60),
