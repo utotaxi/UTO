@@ -117,6 +117,7 @@ async function assertRideStillOfferable(rideId: string): Promise<boolean> {
         .update({
           status: "cancelled",
           cancelled_at: new Date().toISOString(),
+          cancelled_by: "system",
           cancellation_reason: "stale_pending_auto_cancelled",
         })
         .eq("id", rideId)
@@ -545,6 +546,18 @@ const dispatchQueues = new Map<string, DispatchState>();
 const riderCancellationCreditLocks = new Map<string, Promise<boolean>>();
 
 /**
+ * Ride ids that are back out for dispatch because the driver assigned to them
+ * cancelled. The ride row is reset to "pending" for the rematch, which erases
+ * the cancellation, so this remembers *why* the ride is searching. If no
+ * replacement driver is found we would otherwise close the ride as
+ * "cancelled_by: system" and the rider's Activity tab would show a bare
+ * "Cancelled", losing the fact that their driver bailed on them.
+ *
+ * Cleared as soon as the ride gets a driver again or reaches a terminal state.
+ */
+const driverCancelledRideIds = new Set<string>();
+
+/**
  * Record and apply a rider-cancellation earnings credit exactly once.
  * The per-ride lock prevents duplicate socket events from incrementing earnings
  * twice. If the earnings update fails, remove the new ledger row so a later
@@ -958,21 +971,38 @@ export function setupSocketIO(httpServer: HTTPServer) {
       return;
     }
 
+    // If this ride is only searching because its driver cancelled, the rider's
+    // Activity tab should say "Cancelled by driver" — that driver is why the
+    // ride failed — not a faceless "system".
+    const closedByDriverCancel = driverCancelledRideIds.has(rideId);
+    const closedBy = closedByDriverCancel ? "driver" : "system";
+    const closedReason = closedByDriverCancel
+      ? "driver_cancelled_no_replacement"
+      : "no_drivers_available";
     console.log(
-      `🚫 No drivers available within ${RADIUS_MILES} miles for ride ${rideId} after retries — notifying rider`,
+      `🚫 No drivers available within ${RADIUS_MILES} miles for ride ${rideId} after retries — notifying rider (cancelled_by=${closedBy})`,
     );
+
+    const noDriversPayload = {
+      rideId,
+      status: "cancelled_no_drivers",
+      cancellationFee: 0,
+      chargedVia: "none",
+      cancelledBy: closedBy,
+      ...(closedByDriverCancel
+        ? {
+            driverCancelled: true,
+            message:
+              "Your driver cancelled this ride. No other drivers were available nearby.",
+          }
+        : {}),
+    };
     if (socketId) {
-      io.to(socketId).emit("ride:update", {
-        rideId,
-        status: "cancelled_no_drivers",
-      });
+      io.to(socketId).emit("ride:update", noDriversPayload);
     }
     if (rideData.riderId || liveInfo?.riderId) {
       const rid = rideData.riderId || liveInfo?.riderId;
-      io.to(`rider:${rid}`).emit("ride:update", {
-        rideId,
-        status: "cancelled_no_drivers",
-      });
+      io.to(`rider:${rid}`).emit("ride:update", noDriversPayload);
     }
 
     try {
@@ -982,12 +1012,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
           status: "cancelled",
           cancelled_at: new Date().toISOString(),
           cancellation_fee: 0,
-          cancelled_by: "system",
+          cancelled_by: closedBy,
+          cancellation_reason: closedReason,
         })
         .eq("id", rideId);
     } catch (dbErr) {
       console.error(`❌ Failed to cancel ride ${rideId} in DB:`, dbErr);
     }
+    driverCancelledRideIds.delete(rideId);
     await releaseScheduledBookingForRetry(rideId);
     dispatchQueues.delete(rideId);
   };
@@ -1152,22 +1184,36 @@ export function setupSocketIO(httpServer: HTTPServer) {
         return;
       }
 
+      // A ride that is only searching because its driver cancelled stays
+      // attributed to that driver when the rematch runs dry — otherwise the
+      // rider's Activity tab shows a bare "Cancelled" and hides the fact that
+      // their driver bailed.
+      const closedByDriverCancel = driverCancelledRideIds.has(rideId);
+      const closedBy = closedByDriverCancel ? "driver" : "system";
       console.log(
-        `🚫 No more drivers available within ${RADIUS_MILES} miles for ride ${rideId}`,
+        `🚫 No more drivers available within ${RADIUS_MILES} miles for ride ${rideId} (cancelled_by=${closedBy})`,
       );
-      io.to(state.riderSocketId).emit("ride:update", {
+
+      const noDriversPayload = {
         rideId,
         status: "cancelled_no_drivers",
         cancellationFee: 0,
         chargedVia: "none",
-      });
+        cancelledBy: closedBy,
+        ...(closedByDriverCancel
+          ? {
+              driverCancelled: true,
+              message:
+                "Your driver cancelled this ride. No other drivers were available nearby.",
+            }
+          : {}),
+      };
+      io.to(state.riderSocketId).emit("ride:update", noDriversPayload);
       if (rideInfo?.riderId) {
-        io.to(`rider:${rideInfo.riderId}`).emit("ride:update", {
-          rideId,
-          status: "cancelled_no_drivers",
-          cancellationFee: 0,
-          chargedVia: "none",
-        });
+        io.to(`rider:${rideInfo.riderId}`).emit(
+          "ride:update",
+          noDriversPayload,
+        );
       }
 
       try {
@@ -1177,15 +1223,19 @@ export function setupSocketIO(httpServer: HTTPServer) {
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
             cancellation_fee: 0,
-            cancelled_by: "system",
+            cancelled_by: closedBy,
+            cancellation_reason: closedByDriverCancel
+              ? "driver_cancelled_no_replacement"
+              : "no_drivers_available",
           })
           .eq("id", rideId);
         console.log(
-          `✅ Ride ${rideId} marked cancelled in DB (no drivers available)`,
+          `✅ Ride ${rideId} marked cancelled in DB (no drivers available, cancelled_by=${closedBy})`,
         );
       } catch (dbErr) {
         console.error(`❌ Failed to cancel ride ${rideId} in DB:`, dbErr);
       }
+      driverCancelledRideIds.delete(rideId);
       dispatchQueues.delete(rideId);
 
       await releaseScheduledBookingForRetry(rideId);
@@ -2346,11 +2396,16 @@ export function setupSocketIO(httpServer: HTTPServer) {
         .maybeSingle();
 
       if (ride && !["completed", "cancelled"].includes(ride.status)) {
+        // Record *who* cancelled, not just the free-text reason, so the rider's
+        // Activity tab can label the ride "Cancelled by rider/driver".
+        const scheduledCancelledBy =
+          cancelledBy === "driver" ? "driver" : "rider";
         await supabase
           .from("rides")
           .update({
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
+            cancelled_by: scheduledCancelledBy,
             cancellation_reason: `Scheduled booking cancelled by ${cancelledBy || "rider"}`,
           })
           .eq("id", rideId);
@@ -2360,6 +2415,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
           status: "cancelled",
           cancellationFee: 0,
           chargedVia: "none",
+          cancelledBy: scheduledCancelledBy,
         };
         if (ride.driver_id) {
           io.to(`driver:${ride.driver_id}`).emit("ride:update", cancelUpdate);
@@ -2975,6 +3031,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
             (rideInfo as any)?.acceptedDriverRawId,
           );
 
+          // Remember that this ride is searching because its driver cancelled,
+          // so if the rematch finds nobody the closure below is attributed to
+          // the driver rather than recorded as a faceless "system" cancel and
+          // shown bare in the rider's Activity tab.
+          driverCancelledRideIds.add(data.rideId);
+
           // Reset to pending AND refresh requested_at so offerability / stale
           // checks allow continued rematch after a long accepted period.
           // Strip optional/missing columns one-by-one (same pattern as
@@ -3065,6 +3127,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
               resetErr?.message ||
                 `status=${resetRide?.status || "unknown"} driver_id=${resetRide?.driver_id || "null"}`,
             );
+            // Never rematched, so the ride is not "searching after a driver
+            // cancelled" — drop the marker rather than leaving it stranded.
+            driverCancelledRideIds.delete(data.rideId);
             return;
           }
 
@@ -3535,6 +3600,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
           const updateData: any = { status: update.status };
 
           if (update.status === "accepted") {
+            // A driver is on the ride again — it is no longer "searching after
+            // a driver cancelled", so drop the attribution marker.
+            driverCancelledRideIds.delete(update.rideId);
             // Save driver_id and driver details when a driver accepts
             if (resolvedDriverId) {
               updateData.driver_id = resolvedDriverId;
@@ -3868,6 +3936,8 @@ export function setupSocketIO(httpServer: HTTPServer) {
             }
           } else if (update.status === "cancelled") {
             updateData.cancelled_at = new Date().toISOString();
+            // Terminal — the attribution marker has served its purpose.
+            driverCancelledRideIds.delete(update.rideId);
 
             // ── Server-side cancellation fee processing ──────────────────────
             // Rider fee when the rider cancels outside the 1 free minute that

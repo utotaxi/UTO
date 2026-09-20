@@ -1607,12 +1607,25 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 ? serverTotalFare
                 : Number((discountedBase + waitingCharge).toFixed(2));
 
+            // Who ended the ride, straight from the server. Only "rider" and
+            // "driver" are meaningful to the Activity tab; anything else
+            // (system / unknown / absent) keeps whatever we already had so a
+            // cancelled ride is never relabelled as a bare "Cancelled".
+            const serverCancelledBy = String(
+              (update as any).cancelledBy || "",
+            ).toLowerCase();
+            const resolvedCancelledBy =
+              serverCancelledBy === "driver" || serverCancelledBy === "rider"
+                ? serverCancelledBy
+                : ride.cancelledBy;
+
             // Persist final ride to history
             const finalRide: Ride = {
               ...ride,
               farePrice: finalFarePrice,
               discountAmount: discountAmt,
               discountedFare: finalFarePrice,
+              cancelledBy: resolvedCancelledBy,
               status:
                 terminalStatus === "cancelled_no_drivers" ||
                 terminalStatus === "cancelled_no_show"
@@ -1709,9 +1722,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
             ) {
               sendLocalNotification(
                 "❌ Ride Cancelled",
-                terminalStatus === "cancelled_no_drivers"
-                  ? "No drivers available right now. Please try again later."
-                  : "Your ride has been cancelled.",
+                // The server knows why this closed: a bare "no drivers
+                // available" would hide that the assigned driver cancelled and
+                // the rematch found nobody.
+                (update as any).message ||
+                  (terminalStatus === "cancelled_no_drivers"
+                    ? "No drivers available right now. Please try again later."
+                    : "Your ride has been cancelled."),
                 { type: "ride_cancelled", rideId: ride.id, audience: "rider" },
               );
             }
@@ -2104,6 +2121,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
                   ...ride,
                   driverName: ride.driverName || local.driverName,
                   driverPhone: ride.driverPhone || local.driverPhone,
+                  // Server rides return cancelledBy: undefined when
+                  // rides.cancelled_by is null, which would spread over and
+                  // erase a locally known attribution. Keep the local value in
+                  // that case (same pattern as driverName above).
+                  cancelledBy: ride.cancelledBy || local.cancelledBy,
                 }
               : ride,
           );
