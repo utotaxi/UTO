@@ -349,35 +349,41 @@ export default function RideTrackingScreen({ navigation }: any) {
     const parsedArrivedAt = activeRide?.driverArrivedAt
       ? new Date(activeRide.driverArrivedAt).getTime()
       : NaN;
-    // Anchor the 1-minute window on the server's real arrival timestamp.
-    // We deliberately do NOT fall back to Date.now() when driverArrivedAt
-    // is missing. Restarting at Date.now() would wrongly show 60s again if
-    // the rider reopens the app mid-countdown before the arrival timestamp
-    // rehydrates. Instead, leave the anchor empty and wait — loadStoredRides
-    // and the polling safety-net deliver driverArrivedAt within ~1-2s, and
-    // since driverArrivedAt is a dependency we re-anchor on the real value
-    // and the countdown resumes exactly where it left off.
-    if (Number.isFinite(parsedArrivedAt) && parsedArrivedAt > 0) {
-      // Ignore absurdly old timestamps (e.g. leaked from a previous ride)
-      // without replacing them with a fake Date.now() anchor.
-      const ageMs = Date.now() - parsedArrivedAt;
-      if (ageMs >= 0 && ageMs < 10 * 60 * 1000) {
-        freeCancelAnchorRef.current = parsedArrivedAt;
-      }
+    const hasServerArrival =
+      Number.isFinite(parsedArrivedAt) && parsedArrivedAt > 0;
+
+    if (hasServerArrival) {
+      // The server's arrival stamp is authoritative, so always adopt it — even
+      // once a local countdown is running. A value that lands late (poll after
+      // reopening the app) then re-anchors the window to the real arrival
+      // instead of silently extending the free minute.
+      //
+      // An old stamp is kept as-is: it means the free minute has genuinely
+      // expired. Discarding it and starting a fresh 60s would hand a rider who
+      // has waited ten minutes a free cancel. A stamp in the future (clock
+      // skew) is clamped to now so the window is never longer than a minute.
+      freeCancelAnchorRef.current = Math.min(parsedArrivedAt, Date.now());
+    } else if (freeCancelAnchorRef.current == null) {
+      // The driver is at the pickup but we have no arrival timestamp yet —
+      // rides.arrived_at missing, server restarted, or the `arrived` socket
+      // event was missed. Start the rider's free minute from now rather than
+      // hiding the countdown: the 1-minute window is a promise to the rider,
+      // and hiding it meant riders cancelled without knowing the window had
+      // already expired and were charged the full fare. Should the real stamp
+      // arrive later the branch above re-anchors to it.
+      freeCancelAnchorRef.current = Date.now();
     }
 
     const FREE_CANCEL_MS = 60_000;
     const tick = () => {
       const anchor = freeCancelAnchorRef.current;
-      if (!anchor) {
-        // No real arrival timestamp yet — hide the countdown rather than
-        // show a misleading 60s. It appears once driverArrivedAt lands.
+      if (anchor == null) {
         setFreeCancelSecondsLeft(null);
         return;
       }
       const remainingMs = FREE_CANCEL_MS - (Date.now() - anchor);
       const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-      setFreeCancelSecondsLeft(remainingSec > 0 ? remainingSec : 0);
+      setFreeCancelSecondsLeft(remainingSec);
     };
 
     tick();

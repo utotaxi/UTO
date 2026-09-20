@@ -3525,6 +3525,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
           return;
         }
 
+        // ISO timestamp captured when the driver reached the pickup. Hoisted
+        // out of the DB-update try block so the rider notification further
+        // down can send the exact value the row was written with — client and
+        // server must agree on when the 1-minute free-cancel window started.
+        let arrivalTimestampIso: string | null = null;
+
         try {
           const updateData: any = { status: update.status };
 
@@ -3614,10 +3620,18 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   5.0,
               };
             }
-          } else if (update.status === "arrived") {
-            // Also persist driver_id on arrived status to ensure it is saved
+          } else if (
+            update.status === "arrived" ||
+            update.status === "at_pickup"
+          ) {
+            // Both statuses mean "the driver is at the pickup", and both open
+            // the rider's 1-minute free-cancel window — so both must persist
+            // arrived_at. Only handling "arrived" meant an at_pickup transition
+            // left the free window unstamped and the rider got charged.
+            // Also persist driver_id on arrival to ensure it is saved.
             if (resolvedDriverId) updateData.driver_id = resolvedDriverId;
-            updateData.arrived_at = new Date().toISOString();
+            arrivalTimestampIso = new Date().toISOString();
+            updateData.arrived_at = arrivalTimestampIso;
           } else if (update.status === "in_progress") {
             updateData.started_at = new Date().toISOString();
             // Keep driver_id set if not already saved
@@ -3912,7 +3926,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               const memArrivedAt = activeRides.get(update.rideId)?.arrivedAt;
               const clientArrivedAtRaw =
                 (update as any).driverArrivedAt || (update as any).arrived_at;
-              const arrivedAtIso =
+              let arrivedAtIso: string | null =
                 cancelledRide?.arrived_at ||
                 memArrivedAt ||
                 (typeof clientArrivedAtRaw === "string"
@@ -3921,7 +3935,32 @@ export function setupSocketIO(httpServer: HTTPServer) {
               let arrivedAt = arrivedAtIso
                 ? new Date(arrivedAtIso).getTime()
                 : 0;
-              if (!Number.isFinite(arrivedAt) || arrivedAt <= 0) arrivedAt = 0;
+              if (!Number.isFinite(arrivedAt) || arrivedAt <= 0) {
+                arrivedAt = 0;
+                arrivedAtIso = null;
+              }
+
+              // Safety net: the ride row says the driver is AT the pickup, but
+              // we have no arrival timestamp anywhere — rides.arrived_at is not
+              // in the schema (the write is stripped by the retry loop below),
+              // the server restarted since arrival and cleared activeRides, and
+              // the rider client sent no hint. Without this, arrivedAt stayed 0,
+              // the free window read as "never opened", and a rider cancelling
+              // inside their 1 free minute was charged the full fare. Open the
+              // window now instead: the driver is demonstrably at the pickup.
+              if (arrivedAt === 0) {
+                const rowStatus = String(
+                  cancelledRide?.status || "",
+                ).toLowerCase();
+                if (rowStatus === "arrived" || rowStatus === "at_pickup") {
+                  arrivedAt = Date.now();
+                  arrivedAtIso = new Date(arrivedAt).toISOString();
+                  console.warn(
+                    `🛟 Ride ${update.rideId} is "${rowStatus}" but had no arrival timestamp — opening the 1-minute free-cancel window from now so the rider is not charged for a free cancel`,
+                  );
+                }
+              }
+
               const arrivedElapsedMs = arrivedAt ? Date.now() - arrivedAt : 0;
               const driverHasAccepted =
                 !!cancelledRide?.driver_id ||
@@ -4531,10 +4570,14 @@ export function setupSocketIO(httpServer: HTTPServer) {
         }
 
         // ─── Mark driver arrival time for customer countdown ────────────────
-        if (update.status === "arrived") {
-          const driverArrivedAt = new Date().toISOString();
+        if (update.status === "arrived" || update.status === "at_pickup") {
+          // Reuse the value written to rides.arrived_at above (same millisecond
+          // as far as the rider is concerned) so the client countdown and the
+          // server's cancel-fee window start from the same instant.
+          const driverArrivedAt =
+            arrivalTimestampIso || new Date().toISOString();
           console.log(
-            `⏱️ Driver arrived for ride ${update.rideId}. Notifying rider to start the 1-minute free-cancel + 10-minute waiting timers.`,
+            `⏱️ Driver arrived for ride ${update.rideId}. Notifying rider to start the 1-minute free-cancel + 10-minute waiting timers (arrivedAt=${driverArrivedAt}).`,
           );
 
           // Enrich the update with driverArrivedAt so the rider app can start the countdown
