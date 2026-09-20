@@ -656,12 +656,27 @@ export default function RideTrackingScreen({ navigation }: any) {
     // before the driver arrives incurs a fee. Once the driver marks arrived,
     // the rider gets 1 free minute to cancel; after that, full payable fare.
     const status = getEffectiveRideStatus();
+    // Still looking for a driver — a fresh request, every offered driver
+    // declined, or the assigned driver dropped out and we are rematching.
+    // Nobody is on the ride, so walking away is always free. This has to win
+    // over driverName/acceptedAt, which can linger from the driver who dropped
+    // out and used to make the cancel dialog threaten a full-fare charge.
+    // `awaitingRematch` is only trusted while no driver details are present,
+    // so a stale flag restored from storage cannot mask a ride that has since
+    // been picked up by a new driver.
+    const searchingForDriver =
+      status === "pending" ||
+      status === "" ||
+      (!!activeRide?.awaitingRematch &&
+        !(activeRide as any)?.driverName &&
+        !activeRide?.acceptedAt);
     const driverAssigned =
-      ["accepted", "arriving", "arrived", "at_pickup", "in_progress"].includes(
+      !searchingForDriver &&
+      (["accepted", "arriving", "arrived", "at_pickup", "in_progress"].includes(
         status,
       ) ||
-      !!(activeRide as any)?.driverName ||
-      !!activeRide?.acceptedAt;
+        !!(activeRide as any)?.driverName ||
+        !!activeRide?.acceptedAt);
     const atPickup = status === "arrived" || status === "at_pickup";
     // The free window is live only at the pickup and while the countdown
     // has real seconds remaining.

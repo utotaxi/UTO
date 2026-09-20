@@ -3962,16 +3962,50 @@ export function setupSocketIO(httpServer: HTTPServer) {
               }
 
               const arrivedElapsedMs = arrivedAt ? Date.now() - arrivedAt : 0;
+
+              // ── Is a driver actually on this ride right now? ────────────────
+              // Only an assigned ride can ever incur a rider cancel fee. A ride
+              // back at "pending" — the rider is still waiting for the first
+              // driver, every offered driver declined, or the assigned driver
+              // cancelled and we are rematching — has nobody on it, so the rider
+              // changing their mind must always be free.
+              //
+              // `driver_id` / `resolvedDriverId` / activeRides state left behind
+              // by a driver who dropped out must not turn that into a charge, so
+              // "no driver assigned" wins over all of them rather than the other
+              // way round (which is what billed riders for walking away from a
+              // ride that was still searching).
+              const rideRowStatus = String(
+                cancelledRide?.status || "",
+              ).toLowerCase();
+              const assignedStatuses = [
+                "accepted",
+                "arriving",
+                "arrived",
+                "at_pickup",
+                "in_progress",
+              ];
+              // Already over (e.g. "cancelled_no_drivers" fired when the heap
+              // emptied). A late rider cancel must not resurrect a fee on it,
+              // even if a driver_id is still sitting on the row.
+              const rideAlreadyTerminal =
+                rideRowStatus.startsWith("cancelled") ||
+                rideRowStatus === "completed" ||
+                rideRowStatus === "payment_collected";
+              const noDriverAssigned =
+                rideRowStatus === "pending" ||
+                rideRowStatus === "" ||
+                rideAlreadyTerminal ||
+                // Offers are still going out, and the row is not already on a
+                // driver — belt and braces for a rematch whose status reset has
+                // not landed in the DB yet.
+                (dispatchQueues.has(update.rideId) &&
+                  !assignedStatuses.includes(rideRowStatus));
               const driverHasAccepted =
-                !!cancelledRide?.driver_id ||
-                !!resolvedDriverId ||
-                [
-                  "accepted",
-                  "arriving",
-                  "arrived",
-                  "at_pickup",
-                  "in_progress",
-                ].includes(String(cancelledRide?.status || "").toLowerCase());
+                !noDriverAssigned &&
+                (!!cancelledRide?.driver_id ||
+                  !!resolvedDriverId ||
+                  assignedStatuses.includes(rideRowStatus));
               const clientExpectsFee = !!(update as any).expectsCancellationFee;
               // 1 free minute from driver arrival. En-route cancels (no
               // arrived_at) are never inside the free window → fee applies.
@@ -4042,7 +4076,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 isAfterFreeMinute &&
                 !alreadyProcessedRiderCancelFee;
               console.log(
-                `🧾 Cancel-fee decision ride=${update.rideId}: rider=${riderInitiatedCancellation}, afterFreeMin=${isAfterFreeMinute}, withinArrivalFreeMin=${withinArrivalFreeMinute}, expectsFee=${clientExpectsFee}, arrivedAt=${arrivedAtIso || "none"}, elapsedMs=${arrivedElapsedMs}, driverId=${cancelledRide?.driver_id || resolvedDriverId || "none"}`,
+                `🧾 Cancel-fee decision ride=${update.rideId}: rider=${riderInitiatedCancellation}, afterFreeMin=${isAfterFreeMinute}, withinArrivalFreeMin=${withinArrivalFreeMinute}, noDriverAssigned=${noDriverAssigned}, rowStatus=${rideRowStatus || "unknown"}, expectsFee=${clientExpectsFee}, arrivedAt=${arrivedAtIso || "none"}, elapsedMs=${arrivedElapsedMs}, driverId=${cancelledRide?.driver_id || resolvedDriverId || "none"}`,
               );
 
               if (cancelledRide && alreadyProcessedRiderCancelFee) {
@@ -4358,6 +4392,12 @@ export function setupSocketIO(httpServer: HTTPServer) {
                 } else if (!riderInitiatedCancellation) {
                   (update as any).cancellationPolicy =
                     "unspecified_actor_no_fee";
+                } else if (noDriverAssigned) {
+                  // Rider walked away while the ride was still searching (fresh
+                  // request, all drivers declined, or rematch in progress) —
+                  // never a charge, no matter what driver state is left over.
+                  (update as any).cancellationPolicy =
+                    "free_no_driver_assigned";
                 } else if (!driverHasAccepted) {
                   (update as any).cancellationPolicy = "free_before_accept";
                 } else if (!isAfterFreeMinute) {
