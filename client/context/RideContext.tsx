@@ -2390,8 +2390,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
           status: "cancelled",
           cancelledBy: "rider",
           expectsCancellationFee: withPenalty,
-          // Help the server decide the free-cancel window (1 min after the
-          // driver arrives) even if arrived_at was not persisted on the row.
+          // Help the server decide the free-cancel window (1 min while the
+          // driver is en-route, anchored on accept) even if accepted_at was
+          // not persisted on the row. driverArrivedAt tells the server the
+          // driver had already arrived — which closes the free window.
+          acceptedAt: rideToCancel.acceptedAt || undefined,
           driverArrivedAt: rideToCancel.driverArrivedAt || undefined,
         });
         emitted = true;
