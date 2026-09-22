@@ -27,6 +27,20 @@ interface RideCardProps {
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
+/** Server reasons that are internal codes get a rider-friendly wording;
+ * anything else (rider/driver free text) is already readable and shown as-is. */
+const CANCELLATION_REASON_LABELS: Record<string, string> = {
+  no_drivers_available: "No drivers were available nearby",
+  driver_cancelled_no_replacement: "Driver cancelled — no replacement found",
+  stale_pending_auto_cancelled: "Request expired before a driver accepted",
+};
+
+const describeCancellationReason = (reason?: string): string | null => {
+  const raw = (reason || "").trim();
+  if (!raw) return null;
+  return CANCELLATION_REASON_LABELS[raw] ?? raw;
+};
+
 export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
   const { theme, isDark } = useTheme();
   const scale = useSharedValue(1);
@@ -81,6 +95,7 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
       case "cancelled":
         if (ride.cancelledBy === "driver") return "Cancelled by driver";
         if (ride.cancelledBy === "rider") return "Cancelled by rider";
+        if (ride.cancelledBy === "system") return "Cancelled automatically";
         return "Cancelled";
       case "in_progress":
         return "In Progress";
@@ -92,6 +107,11 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
         return "Pending";
     }
   };
+
+  const cancellationLabel = describeCancellationReason(
+    ride.cancellationReason,
+  );
+  const cancellationFee = Number(ride.cancellationFee || 0);
 
   return (
     <AnimatedPressable
@@ -124,6 +144,34 @@ export function RideCard({ ride, onPress, onRebook }: RideCardProps) {
           </ThemedText>
         </View>
       </View>
+
+      {/* Why the ride ended — who cancelled comes from the status badge. */}
+      {ride.status === "cancelled" && (cancellationLabel || cancellationFee > 0) && (
+        <View style={styles.cancelDetail}>
+          {cancellationLabel ? (
+            <ThemedText
+              style={[
+                styles.cancelReason,
+                { color: isDark ? "#9CA3AF" : theme.textSecondary },
+              ]}
+            >
+              {cancellationLabel}
+            </ThemedText>
+          ) : null}
+          {cancellationFee > 0 ? (
+            <View style={styles.cancelFeeRow}>
+              <Feather
+                name="alert-circle"
+                size={13}
+                color={UTOColors.error}
+              />
+              <ThemedText style={[styles.cancelFee, { color: UTOColors.error }]}>
+                {`Fee charged: £${cancellationFee.toFixed(2)}`}
+              </ThemedText>
+            </View>
+          ) : null}
+        </View>
+      )}
 
       <View style={styles.routeContainer}>
         <View style={styles.routeIndicator}>
@@ -249,6 +297,22 @@ const styles = StyleSheet.create({
   routeContainer: {
     flexDirection: "row",
     marginBottom: Spacing.md,
+  },
+  cancelDetail: {
+    marginBottom: Spacing.md,
+    gap: 4,
+  },
+  cancelReason: {
+    fontSize: 13,
+  },
+  cancelFeeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  cancelFee: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   routeIndicator: {
     width: 20,

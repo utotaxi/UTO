@@ -50,6 +50,16 @@ import { DummyCars } from "@/components/DummyCars";
 const AnimatedView = Animated.createAnimatedComponent(View);
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
+/** Quick-pick reasons offered in the cancel dialog; stored on the ride row
+ * (rides.cancellation_reason) and shown in the rider's Activity tab. */
+const RIDER_CANCEL_REASONS = [
+  "Booked by mistake",
+  "Plans changed",
+  "Driver is taking too long",
+  "Found another ride",
+  "Other",
+];
+
 const darkMapStyle = [
   { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
@@ -106,6 +116,8 @@ export default function RideTrackingScreen({ navigation }: any) {
   >(null);
   /** Cancel confirmation sheet — shows live free-cancel countdown. */
   const [showCancelModal, setShowCancelModal] = useState(false);
+  /** Quick-pick reason for the rider's own cancellation (Activity tab). */
+  const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [noDriversAvailable, setNoDriversAvailable] = useState(false);
   const hasInitialized = useRef(false);
   /** Stable anchor for the free-cancel window (avoids resetting on re-renders). */
@@ -617,6 +629,7 @@ export default function RideTrackingScreen({ navigation }: any) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     } catch (_) {}
     // Open confirmation modal so the free-cancel countdown is visible live.
+    setCancelReason(null);
     setShowCancelModal(true);
   };
 
@@ -710,7 +723,11 @@ export default function RideTrackingScreen({ navigation }: any) {
     const { cancellationFeeApplies } = getCancelFeeState();
     setShowCancelModal(false);
     try {
-      cancelRide(activeRide.id, cancellationFeeApplies);
+      // The picked reason is stored on rides.cancellation_reason and shown in
+      // the Activity tab; "Other" lets the rider leave it unstated.
+      const reason =
+        cancelReason && cancelReason !== "Other" ? cancelReason : undefined;
+      cancelRide(activeRide.id, cancellationFeeApplies, reason);
     } catch (e) {
       console.error("Cancel ride error:", e);
       navigateHome();
@@ -2825,6 +2842,44 @@ export default function RideTrackingScreen({ navigation }: any) {
                     : "No cancellation fee will be charged before a driver is assigned."}
             </ThemedText>
 
+            {/* Quick-pick reason — persisted and shown in the Activity tab */}
+            <ThemedText
+              style={[styles.cancelReasonLabel, { color: theme.textSecondary }]}
+            >
+              Why are you cancelling? (optional)
+            </ThemedText>
+            <View style={styles.cancelReasonRow}>
+              {RIDER_CANCEL_REASONS.map((reason) => {
+                const selected = cancelReason === reason;
+                return (
+                  <Pressable
+                    key={reason}
+                    onPress={() => setCancelReason(selected ? null : reason)}
+                    style={[
+                      styles.cancelReasonChip,
+                      {
+                        borderColor: selected
+                          ? UTOColors.rider.primary
+                          : theme.border,
+                        backgroundColor: selected
+                          ? UTOColors.rider.primary + "20"
+                          : "transparent",
+                      },
+                    ]}
+                  >
+                    <ThemedText
+                      style={[
+                        styles.cancelReasonChipText,
+                        { color: selected ? theme.text : theme.textSecondary },
+                      ]}
+                    >
+                      {reason}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+
             <Pressable
               onPress={confirmCancelRide}
               style={[
@@ -3214,6 +3269,29 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
     marginBottom: 4,
+  },
+  cancelReasonLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  cancelReasonRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    width: "100%",
+    marginBottom: 16,
+  },
+  cancelReasonChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  cancelReasonChipText: {
+    fontSize: 12,
   },
   cancelModalConfirmBtn: {
     width: "100%",

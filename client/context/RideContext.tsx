@@ -931,6 +931,10 @@ export interface Ride {
   acceptedAt?: string;
   /** Who cancelled this ride: "rider" | "driver" | "system" | undefined. */
   cancelledBy?: string;
+  /** Why the ride was cancelled — shown in the Activity tab. */
+  cancellationReason?: string;
+  /** Fee charged to the rider on cancellation / no-show, in £. */
+  cancellationFee?: number;
   /** True after assigned driver cancels while we rematch nearby drivers. */
   awaitingRematch?: boolean;
   createdAt: string;
@@ -953,7 +957,11 @@ interface RideContextType {
     vias?: RideVia[],
   ) => Promise<Ride>;
   startRide: (rideId: string, otp: string) => Promise<boolean>;
-  cancelRide: (rideId: string, withPenalty?: boolean) => Promise<void>;
+  cancelRide: (
+    rideId: string,
+    withPenalty?: boolean,
+    reason?: string,
+  ) => Promise<void>;
   completeRide: (rideId: string) => Promise<void>;
   updateRidePaymentMethod: (rideId: string, method: string) => Promise<void>;
   /**
@@ -1618,6 +1626,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
               serverCancelledBy === "driver" || serverCancelledBy === "rider"
                 ? serverCancelledBy
                 : ride.cancelledBy;
+            // Why the ride ended + any fee, straight from the server event so
+            // the Activity tab attributes the cancellation immediately (the
+            // rider's own reason is already on the stashed ride object).
+            const serverCancelReasonRaw = (update as any).cancellationReason;
+            const serverCancelReason =
+              typeof serverCancelReasonRaw === "string" &&
+              serverCancelReasonRaw.trim()
+                ? serverCancelReasonRaw.trim()
+                : undefined;
+            const serverCancelFee = Number(
+              (update as any).cancellationFee || 0,
+            );
 
             // Persist final ride to history
             const finalRide: Ride = {
@@ -1626,6 +1646,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
               discountAmount: discountAmt,
               discountedFare: finalFarePrice,
               cancelledBy: resolvedCancelledBy,
+              cancellationReason: serverCancelReason || ride.cancellationReason,
+              cancellationFee:
+                serverCancelFee > 0 ? serverCancelFee : ride.cancellationFee,
               status:
                 terminalStatus === "cancelled_no_drivers" ||
                 terminalStatus === "cancelled_no_show"
@@ -2095,6 +2118,14 @@ export function RideProvider({ children }: { children: ReactNode }) {
           paymentStatus: r.paymentStatus || undefined,
           paymentIntentId: r.paymentIntentId || undefined,
           cancelledBy: r.cancelled_by || undefined,
+          // Server row is camelCase via toCamelRide (cancellationReason) but
+          // fee/attribution still come back snake_case — accept both spellings.
+          cancellationReason:
+            r.cancellationReason || r.cancellation_reason || undefined,
+          cancellationFee:
+            typeof r.cancellation_fee === "number" && r.cancellation_fee > 0
+              ? r.cancellation_fee
+              : undefined,
           createdAt: normalizeBackendTimestamp(
             r.requestedAt || new Date().toISOString(),
           ),
@@ -2126,6 +2157,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
                   // erase a locally known attribution. Keep the local value in
                   // that case (same pattern as driverName above).
                   cancelledBy: ride.cancelledBy || local.cancelledBy,
+                  // Same for the reason/fee: a locally known value must not
+                  // be wiped by a server row fetched before the columns
+                  // existed or a row where they were null.
+                  cancellationReason:
+                    ride.cancellationReason || local.cancellationReason,
+                  cancellationFee:
+                    ride.cancellationFee ?? local.cancellationFee,
                 }
               : ride,
           );
@@ -2379,7 +2417,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
     return false;
   };
 
-  const cancelRide = async (rideId: string, withPenalty: boolean = false) => {
+  const cancelRide = async (
+    rideId: string,
+    withPenalty: boolean = false,
+    reason?: string,
+  ) => {
     const rideToCancel = activeRide?.id === rideId ? activeRide : null;
     if (rideToCancel) {
       let emitted = false;
@@ -2390,6 +2432,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
           status: "cancelled",
           cancelledBy: "rider",
           expectsCancellationFee: withPenalty,
+          // Persisted on rides.cancellation_reason so the Activity tab can
+          // show why the ride ended.
+          reason: reason || undefined,
           // Help the server decide the free-cancel window (1 min while the
           // driver is en-route, anchored on accept) even if accepted_at was
           // not persisted on the row. driverArrivedAt tells the server the
@@ -2403,6 +2448,9 @@ export function RideProvider({ children }: { children: ReactNode }) {
       }
 
       if (emitted) {
+        // Carry the chosen reason on the stashed ride so the history entry
+        // written when the cancel event echoes back already has it.
+        if (reason) rideToCancel.cancellationReason = reason;
         pendingCancelledRideRef.current = rideToCancel;
         activeRideRef.current = null;
         setActiveRide(null);

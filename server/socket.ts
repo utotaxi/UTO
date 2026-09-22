@@ -2981,6 +2981,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   status: "cancelled",
                   cancelled_at: new Date().toISOString(),
                   cancelled_by: "driver",
+                  cancellation_reason: "Cancelled by driver",
                   cancellation_fee: 0,
                   driver_id: null,
                 })
@@ -4156,6 +4157,23 @@ export function setupSocketIO(httpServer: HTTPServer) {
                   : cancelledByRaw || "unknown";
               (update as any).cancelledBy = resolvedCancelledBy;
               updateData.cancelled_by = resolvedCancelledBy;
+              // Persist WHY the ride ended so the rider's Activity tab can
+              // show it. The cancelling client sends a reason string (the
+              // rider's cancel dialog offers quick-pick reasons); fall back to
+              // a clear actor-based label for old clients that send none.
+              const cancelReasonRaw =
+                typeof (update as any).reason === "string"
+                  ? (update as any).reason.trim()
+                  : "";
+              const fallbackCancelReason = driverInitiatedCancellation
+                ? "Cancelled by driver"
+                : riderInitiatedCancellation
+                  ? noDriverAssigned
+                    ? "Cancelled by rider — no driver was assigned yet"
+                    : "Cancelled by rider"
+                  : "Ride cancelled";
+              updateData.cancellation_reason =
+                cancelReasonRaw || fallbackCancelReason;
               const cancellationPaymentStatus = String(
                 cancelledRide?.payment_status || "",
               ).toLowerCase();
@@ -5081,9 +5099,15 @@ export function setupSocketIO(httpServer: HTTPServer) {
           }
 
           // ─── 3. Cancel the ride in DB ────────────────────────────────────────
+          // cancelled_by + cancellation_reason power the rider's Activity tab,
+          // and cancellation_fee lets the card show the no-show charge.
           const cancelPayload: Record<string, any> = {
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
+            cancelled_by: "system",
+            cancellation_reason:
+              "No-show — you did not arrive within the waiting time",
+            cancellation_fee: riderChargeAmount > 0 ? riderChargeAmount : 0,
             payment_status: stripeChargeSuccess
               ? "no_show_card_charged"
               : "no_show_wallet_charged",
@@ -5224,6 +5248,9 @@ export function setupSocketIO(httpServer: HTTPServer) {
             rideId: data.rideId,
             status: "cancelled_no_show",
             noShowFare: riderChargeAmount,
+            cancelledBy: "system",
+            cancellationReason:
+              "No-show — you did not arrive within the waiting time",
             chargedVia: stripeChargeSuccess ? "card" : "wallet",
           });
 
