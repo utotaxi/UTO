@@ -98,12 +98,14 @@ function UpcomingBookingCard({
   onPress,
   onAccept,
   onDecline,
+  onStart,
   busyId,
 }: {
   item: LaterBooking;
   onPress: (item: LaterBooking) => void;
   onAccept: (item: LaterBooking) => void;
   onDecline: (item: LaterBooking) => void;
+  onStart: (item: LaterBooking) => void;
   busyId: string | null;
 }) {
   // Coupon-adjusted payable fare (e.g. £100 with a £10 coupon → £90), from the
@@ -129,6 +131,17 @@ function UpcomingBookingCard({
   );
   const pending = !isTerminal && isPendingAssignment(item);
   const isBusy = busyId === item.id;
+
+  // Same window the job details screen uses: the booking activates 60 minutes
+  // before pickup and can still be started up to 30 minutes after it. Inside
+  // that window the driver can start straight from this card.
+  const START_WINDOW_BEFORE_MS = 60 * 60 * 1000;
+  const START_GRACE_AFTER_MS = 30 * 60 * 1000;
+  const startable =
+    status === "driver_accepted" &&
+    !isTerminal &&
+    msUntilPickup <= START_WINDOW_BEFORE_MS &&
+    msUntilPickup >= -START_GRACE_AFTER_MS;
 
   const statusLabel = isTerminal
     ? status === "completed"
@@ -265,6 +278,18 @@ function UpcomingBookingCard({
             <Text style={s.acceptBtnText}>{isBusy ? "..." : "Accept"}</Text>
           </Pressable>
         </View>
+      ) : startable ? (
+        // Accepted and inside the start window — let the driver go straight
+        // into the ride instead of hunting for the button on the details page.
+        <Pressable
+          style={s.startRideBtn}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onStart(item);
+          }}
+        >
+          <Text style={s.startRideBtnText}>Start Ride</Text>
+        </Pressable>
       ) : null}
     </Pressable>
   );
@@ -503,6 +528,14 @@ export default function DriverUpcomingBookingsScreen() {
               busyId={busyId}
               onAccept={handleAccept}
               onDecline={handleDecline}
+              onStart={(selectedItem) => {
+                // autoStartPin opens the rider-PIN modal on arrival so the
+                // driver can start without a second tap.
+                (navigation as any).navigate("ScheduledJobDetails", {
+                  booking: selectedItem,
+                  autoStartPin: true,
+                });
+              }}
               onPress={(selectedItem) => {
                 (navigation as any).navigate("ScheduledJobDetails", {
                   booking: selectedItem,
@@ -609,4 +642,11 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   acceptBtnText: { color: "#000000", fontWeight: "800", fontSize: 15 },
+  startRideBtn: {
+    backgroundColor: UTO_YELLOW,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  startRideBtnText: { color: "#000000", fontWeight: "800", fontSize: 15 },
 });

@@ -197,8 +197,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ─── Safe migration: ensure estimated_fare & vehicle_type columns on later_bookings ───
   try {
-    await supabase.rpc("exec_sql", {
+    // rpc() RESOLVES with an error instead of throwing, and every call below
+    // ignored the result — which is how this whole block silently no-op'd on
+    // Supabase projects without the exec_sql helper. The coupon/cancellation
+    // columns were never created, so the scheduled-booking insert dropped the
+    // coupon and drivers were shown the full pre-discount fare. Probe once and
+    // surface the failure loudly instead.
+    const probe = await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS estimated_fare NUMERIC DEFAULT NULL;`,
+    });
+    if (probe.error) {
+      throw new Error(
+        `exec_sql RPC unavailable (${probe.error.message}) — create it with scripts/scheduled-booking-coupon-columns.sql so scheduled-booking migrations can run`,
+      );
+    }
+    await supabase.rpc("exec_sql", {
+      sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS vehicle_type TEXT DEFAULT 'saloon';`,
     });
     await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE later_bookings ADD COLUMN IF NOT EXISTS vehicle_type TEXT DEFAULT 'saloon';`,
@@ -338,11 +352,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS vias JSONB DEFAULT NULL;`,
     });
-    // later_bookings has carried coupon_code / discount_amount for a while, but
-    // web_booker never did — yet normalizeLaterBooking (which serves both to the
-    // driver marketplace and Upcoming screens) reads discount_amount off every
-    // row. A web booking with a coupon therefore had no discount to apply and
-    // the driver was shown the full pre-discount fare.
+    // web_booker needs its own coupon columns — later_bookings' are added at
+    // the top of this block. normalizeLaterBooking reads discount_amount off
+    // every row, so a booking without them shows the full pre-discount fare.
     await supabase.rpc("exec_sql", {
       sql: `ALTER TABLE web_booker ADD COLUMN IF NOT EXISTS coupon_code TEXT DEFAULT NULL;`,
     });
@@ -356,7 +368,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       "✅ Ensured later_bookings columns exist (including penalty & tracking fields)",
     );
   } catch (e) {
-    console.log("ℹ️ later_bookings migration skipped:", (e as Error).message);
+    // exec_sql does not exist on a fresh Supabase project until the operator
+    // creates it (see scripts/scheduled-booking-coupon-columns.sql) — surface
+    // that loudly instead of silently skipping every migration in this block.
+    console.error(
+      "❌ later_bookings migration FAILED — coupon/cancellation columns may be missing:",
+      (e as Error).message,
+    );
   }
 
   // ─── Safe migration: ensure badge_no column exists on drivers table ───
@@ -3332,7 +3350,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Reminder cadence for accepted scheduled jobs (with sound via Expo push):
-  // 3h → 2.5h → 2h → 1.5h → 1h → 30m → 15m → 5m before pickup.
+  // hourly from 4h out → 4h → 3h → 2h → 1h, then every 15 minutes through the
+  // final hour → 45m → 30m → 15m, with a last 5m "head to pickup" nudge.
   const SCHEDULED_REMINDER_THRESHOLDS: {
     key: string;
     ms: number;
@@ -3342,21 +3361,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const minute = 60 * 1000;
     const hour = 60 * minute;
     return [
+      { key: "4h", ms: 4 * hour, label: "4 hours", contactPassenger: false },
       { key: "3h", ms: 3 * hour, label: "3 hours", contactPassenger: false },
-      {
-        key: "2.5h",
-        ms: 2.5 * hour,
-        label: "2 and a half hours",
-        contactPassenger: false,
-      },
       { key: "2h", ms: 2 * hour, label: "2 hours", contactPassenger: false },
-      {
-        key: "1.5h",
-        ms: 1.5 * hour,
-        label: "1 and a half hours",
-        contactPassenger: false,
-      },
       { key: "1h", ms: 1 * hour, label: "1 hour", contactPassenger: false },
+      {
+        key: "45m",
+        ms: 45 * minute,
+        label: "45 minutes",
+        contactPassenger: true,
+      },
       {
         key: "30m",
         ms: 30 * minute,
@@ -3367,12 +3381,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         key: "15m",
         ms: 15 * minute,
         label: "15 minutes",
-        contactPassenger: true,
-      },
-      {
-        key: "10m",
-        ms: 10 * minute,
-        label: "10 minutes",
         contactPassenger: true,
       },
       { key: "5m", ms: 5 * minute, label: "5 minutes", contactPassenger: true },
@@ -5969,8 +5977,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Look ahead 3 hours so the 3h reminder can fire.
-  const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 3 * 60 * 60 * 1000;
+  // Look ahead 4 hours so the 4h reminder (the first of the hourly cadence)
+  // can fire.
+  const SCHEDULED_DRIVER_REMINDER_WINDOW_MS = 4 * 60 * 60 * 1000;
   // Tick every 30s so 10m / 5m reminders are not missed.
   const SCHEDULED_DRIVER_REMINDER_TICK_MS = 30 * 1000;
 
@@ -6045,25 +6054,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const title =
         reminderBucket.key === "5m"
           ? "Pickup in 5 minutes!"
-          : reminderBucket.key === "10m"
-            ? "Pickup in 10 minutes!"
-            : reminderBucket.key === "15m"
-              ? "Pickup in 15 minutes"
-              : reminderBucket.key === "30m"
-                ? "Pickup in 30 minutes"
+          : reminderBucket.key === "15m"
+            ? "Pickup in 15 minutes"
+            : reminderBucket.key === "30m"
+              ? "Pickup in 30 minutes"
+              : reminderBucket.key === "45m"
+                ? "Pickup in 45 minutes"
                 : reminderBucket.key === "1h"
                   ? "Pickup in 1 hour"
-                  : reminderBucket.key === "1.5h"
-                    ? "Pickup in 1.5 hours"
-                    : reminderBucket.key === "2h"
-                      ? "Pickup in 2 hours"
-                      : reminderBucket.key === "2.5h"
-                        ? "Pickup in 2.5 hours"
-                        : reminderBucket.key === "3h"
-                          ? "Pickup in 3 hours"
-                          : reminderBucket.contactPassenger
-                            ? "Upcoming booking soon"
-                            : "Upcoming booking reminder";
+                  : reminderBucket.key === "2h"
+                    ? "Pickup in 2 hours"
+                    : reminderBucket.key === "3h"
+                      ? "Pickup in 3 hours"
+                      : reminderBucket.key === "4h"
+                        ? "Pickup in 4 hours"
+                        : reminderBucket.contactPassenger
+                          ? "Upcoming booking soon"
+                          : "Upcoming booking reminder";
       const body = reminderBucket.contactPassenger
         ? `Your scheduled ride ${rideDetails} starts in ${reminderBucket.label}. Contact the passenger if needed and head to pickup.`
         : `Your scheduled ride ${rideDetails} starts in ${reminderBucket.label}. Please plan to reach the pickup location on time.`;
@@ -6105,8 +6112,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             screen: "ScheduledJobDetails",
             reminderBucket: reminderBucket.key,
           },
-          // High-importance scheduled channel with sound.
-          { channelId: "uto-scheduled-v3", ttlSeconds: 900 },
+          // ride-requests channel — present on ALL shipped APKs. uto-scheduled-v3
+          // is missing on older builds and Android silently drops pushes for
+          // unknown channels, which is why drivers never saw these reminders.
+          { channelId: "uto-ride-requests-v3", ttlSeconds: 900 },
         );
       }
 

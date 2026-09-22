@@ -219,6 +219,18 @@ export default function ScheduledJobDetailsScreen() {
     }
   };
 
+  // Arriving via the Upcoming card's "Start Ride" button should drop the
+  // driver straight into the rider-PIN modal instead of a second tap.
+  const autoStartRequested = !!(route.params as any)?.autoStartPin;
+  const autoStartFiredRef = useRef(false);
+  useEffect(() => {
+    if (!autoStartRequested || autoStartFiredRef.current) return;
+    if (isLoadingBooking || !booking?.id) return;
+    autoStartFiredRef.current = true;
+    openStartTripPinModal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartRequested, isLoadingBooking, booking?.id]);
+
   if (isLoadingBooking) {
     return (
       <View
