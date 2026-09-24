@@ -1182,8 +1182,17 @@ export function RideProvider({ children }: { children: ReactNode }) {
             (serverRide as any).accepted_at ||
             current.acceptedAt ||
             (nextStatus === "accepted" ? new Date().toISOString() : undefined);
+          // Recover the arrival stamp too. Without this a missed "arrived"
+          // socket event left driverArrivedAt unset forever (the status string
+          // never changes, so the full sync below never runs) and the 10-minute
+          // waiting timer restarted from zero on every reopen.
+          const nextArrivedAt =
+            serverRide.arrivedAt ||
+            (serverRide as any).driverArrivedAt ||
+            current.driverArrivedAt;
           const needsPatch =
             (!!nextAcceptedAt && !current.acceptedAt) ||
+            (!!nextArrivedAt && !current.driverArrivedAt) ||
             (!!serverRide.driverName && !current.driverName);
           if (needsPatch) {
             const patched: Ride = {
@@ -1194,6 +1203,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
               licensePlate: serverRide.licensePlate || current.licensePlate,
               driverRating: serverRide.driverRating ?? current.driverRating,
               ...(nextAcceptedAt ? { acceptedAt: nextAcceptedAt } : {}),
+              ...(nextArrivedAt ? { driverArrivedAt: nextArrivedAt } : {}),
             };
             setActiveRide(patched);
             AsyncStorage.setItem(
@@ -1830,22 +1840,36 @@ export function RideProvider({ children }: { children: ReactNode }) {
                 : {}),
               // Keep accept timestamp across later status updates — but NEVER
               // after a driver-cancel rematch back to pending searching.
+              // The server sends the authoritative stamp on every update, so
+              // prefer it: a value the app invented locally (it falls back to
+              // "now" when the accept event was missed) would otherwise stick
+              // and keep the free-cancel countdown disagreeing with the window
+              // the server actually charges against.
               ...(!driverCancelledRematch &&
               update.status !== "accepted" &&
               update.status !== "pending" &&
-              (current.acceptedAt ||
-                (update as any).acceptedAt ||
-                (update as any).accepted_at)
+              ((update as any).acceptedAt ||
+                (update as any).accepted_at ||
+                current.acceptedAt)
                 ? {
                     acceptedAt:
-                      current.acceptedAt ||
                       (update as any).acceptedAt ||
-                      (update as any).accepted_at,
+                      (update as any).accepted_at ||
+                      current.acceptedAt,
                   }
                 : {}),
-              // Capture driverArrivedAt timestamp when status transitions to "arrived"
-              ...(update.status === "arrived" && (update as any).driverArrivedAt
-                ? { driverArrivedAt: (update as any).driverArrivedAt }
+              // Capture driverArrivedAt when the driver marks arrival. The
+              // server treats "at_pickup" as arrival too, so both statuses must
+              // carry the stamp — capturing only "arrived" left the waiting
+              // timer with no anchor whenever the driver used the other one.
+              ...((update.status === "arrived" ||
+                update.status === "at_pickup") &&
+              ((update as any).driverArrivedAt || (update as any).arrivedAt)
+                ? {
+                    driverArrivedAt:
+                      (update as any).driverArrivedAt ||
+                      (update as any).arrivedAt,
+                  }
                 : {}),
             };
             AsyncStorage.setItem(
@@ -2042,6 +2066,14 @@ export function RideProvider({ children }: { children: ReactNode }) {
                   serverRideAny.acceptedAt ||
                   serverRideAny.accepted_at ||
                   localActive.acceptedAt,
+                // The server's arrival stamp is authoritative and the local
+                // copy survives only because of the spread above. Reopening the
+                // app mid-wait (after a missed "arrived" event) used to leave
+                // this undefined, restarting the 10-minute timer from zero.
+                driverArrivedAt:
+                  serverRideAny.arrivedAt ||
+                  serverRideAny.driverArrivedAt ||
+                  localActive.driverArrivedAt,
                 driverName: serverRideAny.driverName || localActive.driverName,
                 driverPhone:
                   serverRideAny.driverPhone || localActive.driverPhone,

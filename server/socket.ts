@@ -3598,6 +3598,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
         // free-cancel window closed (10-minute waiting countdown starts).
         let arrivalTimestampIso: string | null = null;
 
+        // ISO timestamp of the current assignment's accept, resolved from the
+        // row we just wrote (or the existing row). Sent on EVERY rider update
+        // below — see the injection point near the rider emit.
+        let acceptedStampIso: string | null = null;
+
         try {
           const updateData: any = { status: update.status };
 
@@ -3635,6 +3640,7 @@ export function setupSocketIO(httpServer: HTTPServer) {
               updateData.accepted_at = new Date().toISOString();
               (update as any).acceptedAt = updateData.accepted_at;
             }
+            acceptedStampIso = updateData.accepted_at;
 
             if (resolvedDriverId) {
               const driverLocation = await getLatestDriverLocation(
@@ -4678,6 +4684,11 @@ export function setupSocketIO(httpServer: HTTPServer) {
             console.log(
               `✅ Ride ${update.rideId} status updated to: ${update.status}, driver_id: ${updatedRide?.driver_id || "null"}`,
             );
+            // The update returns the full row, so this also recovers the accept
+            // stamp after a server restart cleared the in-memory copy.
+            if (updatedRide?.accepted_at) {
+              acceptedStampIso = String(updatedRide.accepted_at);
+            }
           }
         } catch (dbErr) {
           console.error("⚠️ DB update error for ride:", dbErr);
@@ -4760,6 +4771,29 @@ export function setupSocketIO(httpServer: HTTPServer) {
           if (rideInfo) {
             rideInfo.arrivedAt = driverArrivedAt;
           }
+        }
+
+        // ─── Re-send the accept stamp on every update ───────────────────────
+        // The rider's 1-minute free-cancel countdown is anchored on this value.
+        // It used to reach the app only on the ride:accepted event, so any ride
+        // where that event was missed (app backgrounded, socket drop, app
+        // reopened mid-trip) left the rider with no anchor and the app invented
+        // one — which is why the countdown appeared for some rides and not
+        // others. Sending it on every update keeps client and server anchored
+        // on the same instant, which is also what the cancel-fee decision uses.
+        const resolvedAcceptedAt =
+          acceptedStampIso ||
+          (typeof (update as any).acceptedAt === "string"
+            ? (update as any).acceptedAt
+            : null) ||
+          activeRides.get(update.rideId)?.acceptedAt ||
+          null;
+        if (
+          resolvedAcceptedAt &&
+          update.status !== "pending" &&
+          update.status !== "cancelled"
+        ) {
+          (update as any).acceptedAt = resolvedAcceptedAt;
         }
 
         if (rideInfo) {

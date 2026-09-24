@@ -4318,12 +4318,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ error: "Pricing unavailable — contact dispatch" });
       }
       const appliedDiscount = Math.max(0, Number(discountAmount ?? 0));
+      // The rider pays the coupon-adjusted fare, so the card hold has to be the
+      // discounted amount too. Holding the full fare put the pre-discount
+      // amount on the rider's card even though the app showed the coupon as
+      // applied — and it disagreed with the client's own PaymentIntent (created
+      // for the discounted total when the rider had no saved card) and with
+      // every later capture, which all use the discounted payable.
+      const authorizedFare = getDiscountedFare(
+        finalEstimatedFare,
+        appliedDiscount,
+      );
       // Hold only — do not take money at schedule time. Capture later on
       // complete / no-show / late rider cancel (same as on-demand rides).
-      let bookingPaymentStatus = finalEstimatedFare > 0 ? "authorized" : "free";
+      let bookingPaymentStatus = authorizedFare > 0 ? "authorized" : "free";
       let prepaidPaymentIntentId: string | null = null;
 
-      if (finalEstimatedFare > 0) {
+      if (finalEstimatedFare > 0 && authorizedFare > 0) {
         if (paymentIntentId) {
           const confirmed = await confirmPayment(paymentIntentId);
           if (!confirmed) {
@@ -4342,7 +4352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const chargeReference = `later_${riderId}_${Date.now()}`;
           const authResult = await authorizeSavedCard(
             stripeCustomerId,
-            finalEstimatedFare,
+            authorizedFare,
             chargeReference,
             "gbp",
           );
